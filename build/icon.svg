@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#FFB443"/>
+      <stop offset="0.5" stop-color="#FF7A1A"/>
+      <stop offset="1" stop-color="#EE4B1C"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.28" cy="0.18" r="0.7">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FFF1E4"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF8A2A"/>
+      <stop offset="1" stop-color="#E8431A"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="22" stdDeviation="26" flood-color="#8A2A00" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <path d="M512 56c214 0 300 0 378 78s78 164 78 378 0 300-78 378-164 78-378 78-300 0-378-78S56 726 56 512s0-300 78-378S298 56 512 56z" fill="url(#bg)"/>
+  <path d="M512 56c214 0 300 0 378 78s78 164 78 378 0 300-78 378-164 78-378 78-300 0-378-78S56 726 56 512s0-300 78-378S298 56 512 56z" fill="url(#glow)"/>
+  <g transform="rotate(-7 512 540)" filter="url(#shadow)">
+    <path d="M330 232h262l150 150v378a48 48 0 0 1-48 48H330a48 48 0 0 1-48-48V280a48 48 0 0 1 48-48z" fill="url(#paper)"/>
+    <path d="M592 232v102a48 48 0 0 0 48 48h102z" fill="#FFD6B3"/>
+    <rect x="350" y="330" width="170" height="30" rx="15" fill="#FFD0A8"/>
+    <rect x="350" y="404" width="128" height="30" rx="15" fill="#FFE1C7"/>
+    <path d="M384 604l84 84 176-206" fill="none" stroke="url(#ink)" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

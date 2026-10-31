@@ -1,0 +1,129 @@
+# 자동 빌드 + 배포 (윈도우 설치 파일 + 자동 업데이트)
+#
+# main 에 앱 코드가 바뀌어 올라오면(푸시·PR 병합) 자동으로:
+#   1) 버전 정하기 — package.json 버전이 이미 배포됐으면 patch 를 1 올려 커밋 (0.1.0 → 0.1.1)
+#   2) 태그(v0.1.1) 만들기
+#   3) 설치 파일 빌드 → GitHub Release 업로드
+#   4) 설치된 프로그램들이 새 버전을 받아 자동 업데이트
+# 업데이트 내용은 지난 버전 이후의 커밋 제목으로 자동 작성됩니다.
+# (첫 배포는 RELEASE_NOTES.md, 수동 실행 때는 입력한 내용)
+#
+# 그 밖에
+#   - GitHub → Actions → "Release (Windows)" → Run workflow: minor/major 처럼 큰 버전 올리기
+#   - 태그(v1.2.3)를 직접 푸시해도 배포
+name: Release (Windows)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'build/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'RELEASE_NOTES.md'
+      - '.github/workflows/release.yml'
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: '올릴 버전 (auto: 이미 배포된 버전이면 patch +1 / patch / minor / major / none: 지금 버전 그대로)'
+        type: choice
+        options: [auto, patch, minor, major, none]
+        default: auto
+      notes:
+        description: '이번 업데이트 내용 (비우면 커밋 제목으로 자동 작성)'
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
+      - name: 버전 정하기 + 태그
+        if: github.ref_type != 'tag'
+        shell: bash
+        env:
+          BUMP: ${{ inputs.bump || 'auto' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --tags --force
+          cur="$(node -p "require('./package.json').version")"
+          echo "PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)" >> "$GITHUB_ENV"
+          if [ "$BUMP" = "auto" ]; then
+            if git rev-parse -q --verify "refs/tags/v$cur" > /dev/null; then BUMP=patch; else BUMP=none; fi
+          fi
+          if [ "$BUMP" != "none" ]; then
+            npm version "$BUMP" --no-git-tag-version
+            v="$(node -p "require('./package.json').version")"
+            git commit -am "v$v 자동 배포"
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+          v="$(node -p "require('./package.json').version")"
+          if git rev-parse -q --verify "refs/tags/v$v" > /dev/null; then
+            echo "::error::v$v 은(는) 이미 배포된 버전입니다."
+            exit 1
+          fi
+          git tag "v$v"
+          git push origin "refs/tags/v$v"
+
+      - name: 태그와 package.json 버전 확인 (태그를 직접 푸시한 경우)
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          v="v$(node -p "require('./package.json').version")"
+          if [ "$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::태그($GITHUB_REF_NAME)와 package.json 버전($v)이 다릅니다. package.json 의 version 을 먼저 올려 주세요."
+            exit 1
+          fi
+          git fetch --tags --force
+          echo "PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)" >> "$GITHUB_ENV"
+
+      - name: 업데이트 내용 준비
+        shell: bash
+        env:
+          NOTES: ${{ inputs.notes }}
+        run: |
+          # 1) 수동 실행 때 입력한 내용  2) 태그 메시지  3) 지난 버전 이후 커밋 제목  4) RELEASE_NOTES.md  5) 기본 문구
+          if [ -z "$NOTES" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" || true
+            NOTES="$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)')"
+          fi
+          if [ -z "$NOTES" ] && [ -n "$PREV_TAG" ]; then
+            NOTES="$(git log --no-merges --pretty='- %s' "${PREV_TAG}..HEAD" | grep -v '자동 배포' | head -30 || true)"
+          fi
+          if [ -z "$NOTES" ] && [ -f RELEASE_NOTES.md ]; then
+            NOTES="$(cat RELEASE_NOTES.md)"
+          fi
+          export NOTES
+          node -e "const v=require('./package.json').version; const n=(process.env.NOTES||'').replace(/-----BEGIN PGP SIGNATURE-----[\\s\\S]*$/, '').trim(); require('fs').writeFileSync('release-notes.md', n || ('오답노트 ' + v + ' 업데이트'))"
+          cat release-notes.md
+
+      - name: 설치 파일 빌드 + GitHub Release 업로드
+        shell: bash
+        run: npx electron-builder --win --x64 --publish always -c.releaseInfo.releaseNotesFile=release-notes.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
