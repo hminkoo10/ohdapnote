@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>harness</title></head>
+<body>
+<script type="module">
+  import { openDocSource } from '../../src/renderer/js/docsource.js';
+  import { analyzeDocument, parsePageRange } from '../../src/renderer/js/analyze.js';
+  import { matchItems } from '../../src/renderer/js/match.js';
+  window.harness = {
+    async analyze(fileUrl, opts = {}) {
+      const files = Array.isArray(fileUrl) ? fileUrl.map((u) => ({ name: u, kind: /\.pdf$/i.test(u) ? 'pdf' : 'image' })) : [{ name: fileUrl, kind: opts.kind || 'pdf' }];
+      const src = await openDocSource(files, (n) => n);
+      const t0 = performance.now();
+      const res = await analyzeDocument(src, { pages: parsePageRange(opts.range || '', src.numPages), role: opts.role || 'problem', flow: opts.flow || 'column', ocrLang: opts.ocrLang || 'kor+eng' });
+      const ms = performance.now() - t0;
+      await src.destroy();
+      return { ms, numPages: src.numPages, items: res.items.map((it) => ({ id: it.id, page: it.page, number: it.number, num: it.num, rects: it.rects, source: it.source, conf: it.conf })), pageInfo: res.pageInfo, signature: res.signature, pageOffset: res.pageOffset };
+    },
+    match(problems, answers) { return Object.fromEntries(matchItems(problems, answers)); },
+  };
+  window.harnessReady = true;
+</script>
+</body></html>
