@@ -2,7 +2,7 @@
 
 // 오답노트 - Electron 메인 프로세스
 // - app:// 프로토콜로 화면(renderer)과 프로젝트 파일을 제공
-// - 프로젝트(문제집/답지 파일 + 분석 결과) 저장소
+// - 책(문제집/답지 파일 + 분석 결과)과 오답노트(학생별 선택) 저장소
 // - Gemini API 호출(선택 기능)
 // - GitHub Releases 기반 자동 업데이트
 
@@ -62,16 +62,24 @@ const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
 // ---------------------------------------------------------------------------
 
 const dataDir = () => path.join(app.getPath('userData'), 'data');
-const projectsDir = () => path.join(dataDir(), 'projects');
+const projectsDir = () => path.join(dataDir(), 'projects'); // 예전 버전(책+선택이 한 파일) — 처음 실행 때 옮김
+const booksDir = () => path.join(dataDir(), 'books');
+const notesDir = () => path.join(dataDir(), 'notes');
 const settingsFile = () => path.join(dataDir(), 'settings.json');
 
 function isValidId(id) {
   return typeof id === 'string' && /^[a-zA-Z0-9-]{8,64}$/.test(id);
 }
 
-function projectDir(id) {
-  if (!isValidId(id)) throw new Error('잘못된 프로젝트 ID');
-  return path.join(projectsDir(), id);
+function bookDir(id) {
+  if (!isValidId(id)) throw new Error('잘못된 책 ID');
+  return path.join(booksDir(), id);
+}
+const bookFile = (id) => path.join(bookDir(id), 'book.json');
+
+function noteFile(id) {
+  if (!isValidId(id)) throw new Error('잘못된 오답노트 ID');
+  return path.join(notesDir(), `${id}.json`);
 }
 
 /** base 아래에 있는 경로인지 확인(디렉터리 탈출 방지) */
@@ -106,10 +114,13 @@ function writeJsonAtomicSync(file, value) {
 
 const DEFAULT_SETTINGS = {
   geminiApiKey: '',
-  geminiModel: 'gemini-flash-latest',
+  geminiModel: 'gemini-flash-latest', // 1순위
+  geminiModel2: '', // 1순위 한도가 다 찼거나 안 될 때 쓰는 2순위
   geminiRpm: 8,
-  geminiMode: 'auto',
   ocrLang: 'kor+eng',
+  academy: '', // 학원 이름 (내보내기 기본값)
+  teacher: '', // 선생님 이름 (내보내기 기본값)
+  motion: 'full', // full: 애니메이션 켜기, reduce: 줄이기
 };
 
 async function loadSettings() {
@@ -119,7 +130,7 @@ async function loadSettings() {
 // ---------------------------------------------------------------------------
 // app:// 프로토콜
 //   app://bundle/<path>            → src/renderer/<path>
-//   app://project/<id>/<file>      → <userData>/data/projects/<id>/<file>
+//   app://book/<id>/<file>         → <userData>/data/books/<id>/<file>
 // ---------------------------------------------------------------------------
 
 async function serveFile(file) {
@@ -143,9 +154,9 @@ function registerAppProtocol() {
       if (url.host === 'bundle') {
         return await serveFile(safeJoin(RENDERER_DIR, rel || 'index.html'));
       }
-      if (url.host === 'project') {
+      if (url.host === 'book') {
         const [id, ...rest] = rel.split('/');
-        return await serveFile(safeJoin(projectDir(id), rest.join('/')));
+        return await serveFile(safeJoin(bookDir(id), rest.join('/')));
       }
       return new Response('not found', { status: 404 });
     } catch (err) {
@@ -207,24 +218,114 @@ function send(channel, payload) {
 }
 
 // ---------------------------------------------------------------------------
-// 프로젝트 저장소 IPC
+// 책 / 오답노트 저장소
 // ---------------------------------------------------------------------------
 
-function summarize(project) {
-  const docs = project.docs || {};
-  const count = (d) => (d && Array.isArray(d.items) ? d.items.length : 0);
+const count = (d) => (d && Array.isArray(d.items) ? d.items.length : 0);
+const flaggedPages = (d) => Object.values(d?.pageInfo || {}).filter((pi) => pi?.flags?.length).length;
+
+function summarizeBook(book) {
+  const docs = book.docs || {};
   return {
-    id: project.id,
-    name: project.name,
-    createdAt: project.createdAt,
-    updatedAt: project.updatedAt,
+    id: book.id,
+    name: book.name,
+    createdAt: book.createdAt,
+    updatedAt: book.updatedAt,
     problemFile: docs.problem?.originalName || '',
     answerFile: docs.answer?.originalName || '',
     problemCount: count(docs.problem),
     answerCount: count(docs.answer),
-    selectedCount: Array.isArray(project.selected) ? project.selected.length : 0,
+    problemAnalyzed: !!docs.problem?.analyzedAt,
+    answerAnalyzed: !!docs.answer?.analyzedAt,
+    flagged: flaggedPages(docs.problem) + flaggedPages(docs.answer),
   };
 }
+
+function summarizeNote(note) {
+  const selected = note.selected || {};
+  return {
+    id: note.id,
+    title: note.title,
+    student: note.student || '',
+    bookIds: note.bookIds || [],
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
+    selectedCount: Object.values(selected).reduce((s, list) => s + (Array.isArray(list) ? list.length : 0), 0),
+  };
+}
+
+async function listJson(dir, fileOf) {
+  await fsp.mkdir(dir, { recursive: true });
+  const out = [];
+  for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
+    const file = fileOf(entry);
+    if (!file) continue;
+    const value = await readJson(file, null);
+    if (value) out.push(value);
+  }
+  return out;
+}
+
+const listBooks = () =>
+  listJson(booksDir(), (e) => (e.isDirectory() && isValidId(e.name) ? path.join(booksDir(), e.name, 'book.json') : null));
+const listNotes = () =>
+  listJson(notesDir(), (e) => (e.isFile() && /^[a-zA-Z0-9-]{8,64}\.json$/.test(e.name) ? path.join(notesDir(), e.name) : null));
+
+/** 예전 버전 데이터(projects/<id>/project.json: 책 + 선택)를 책 + 오답노트로 나눔 */
+async function migrateProjects() {
+  let entries;
+  try {
+    entries = await fsp.readdir(projectsDir(), { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !isValidId(entry.name)) continue;
+    const from = path.join(projectsDir(), entry.name);
+    const project = await readJson(path.join(from, 'project.json'), null);
+    if (!project) continue;
+    try {
+      const id = project.id && isValidId(project.id) ? project.id : entry.name;
+      const book = {
+        id,
+        kind: 'book',
+        version: 2,
+        name: project.name || '책',
+        createdAt: project.createdAt || Date.now(),
+        updatedAt: project.updatedAt || Date.now(),
+        docs: project.docs || { problem: null, answer: null },
+        answerOverrides: project.answerOverrides || {},
+      };
+      await fsp.mkdir(booksDir(), { recursive: true });
+      await fsp.rename(from, bookDir(id));
+      await writeJsonAtomic(bookFile(id), book);
+      await fsp.rm(path.join(bookDir(id), 'project.json'), { force: true });
+      const noteId = crypto.randomUUID();
+      await writeJsonAtomic(noteFile(noteId), {
+        id: noteId,
+        kind: 'note',
+        version: 2,
+        title: project.name || '오답노트',
+        student: '',
+        bookIds: [id],
+        selected: { [id]: project.selected || [] },
+        exportOptions: project.exportOptions || null,
+        createdAt: project.createdAt || Date.now(),
+        updatedAt: project.updatedAt || Date.now(),
+      });
+      log.info('[migrate] project → book + note', id);
+    } catch (err) {
+      log.error('[migrate]', entry.name, err);
+    }
+  }
+  try {
+    if (!(await fsp.readdir(projectsDir())).length) await fsp.rmdir(projectsDir());
+  } catch {
+    /* 무시 */
+  }
+}
+
+const geminiRequests = new Map(); // requestId → AbortController
 
 function registerIpc() {
   ipcMain.handle('app:info', () => ({
@@ -232,6 +333,7 @@ function registerIpc() {
     isPackaged: app.isPackaged,
     dataDir: dataDir(),
     platform: process.platform,
+    developer: '구현민',
   }));
 
   ipcMain.handle('settings:get', () => loadSettings());
@@ -241,64 +343,134 @@ function registerIpc() {
     return next;
   });
 
-  ipcMain.handle('projects:list', async () => {
-    await fsp.mkdir(projectsDir(), { recursive: true });
-    const entries = await fsp.readdir(projectsDir(), { withFileTypes: true });
-    const list = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !isValidId(entry.name)) continue;
-      const project = await readJson(path.join(projectsDir(), entry.name, 'project.json'), null);
-      if (project) list.push(summarize(project));
-    }
+  // ---- 책 ----
+  ipcMain.handle('books:list', async () => {
+    const list = (await listBooks()).map(summarizeBook);
     list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     return list;
   });
 
-  ipcMain.handle('projects:create', async (_e, { name } = {}) => {
+  ipcMain.handle('books:create', async (_e, { name } = {}) => {
     const id = crypto.randomUUID();
     const now = Date.now();
-    const project = {
+    const book = {
       id,
-      version: 1,
-      name: (name || '').trim() || '새 오답노트',
+      kind: 'book',
+      version: 2,
+      name: (name || '').trim() || '새 책',
       createdAt: now,
       updatedAt: now,
       docs: { problem: null, answer: null },
-      selected: [],
       answerOverrides: {},
-      exportOptions: null,
     };
-    await writeJsonAtomic(path.join(projectDir(id), 'project.json'), project);
-    return project;
+    await writeJsonAtomic(bookFile(id), book);
+    return book;
   });
 
-  ipcMain.handle('projects:get', async (_e, id) => {
-    const project = await readJson(path.join(projectDir(id), 'project.json'), null);
-    if (!project) throw new Error('프로젝트를 찾을 수 없습니다.');
-    return project;
+  ipcMain.handle('books:get', async (_e, id) => {
+    const book = await readJson(bookFile(id), null);
+    if (!book) throw new Error('책을 찾을 수 없습니다.');
+    return book;
   });
 
-  ipcMain.handle('projects:save', async (_e, project) => {
-    if (!project || !isValidId(project.id)) throw new Error('잘못된 프로젝트');
-    await writeJsonAtomic(path.join(projectDir(project.id), 'project.json'), project);
+  ipcMain.handle('books:save', async (_e, book) => {
+    if (!book || !isValidId(book.id)) throw new Error('잘못된 책');
+    await writeJsonAtomic(bookFile(book.id), book);
     return true;
   });
 
   // 창을 닫을 때 마지막 변경 사항을 동기적으로 저장
-  ipcMain.on('projects:saveSync', (event, project) => {
+  ipcMain.on('books:saveSync', (event, book) => {
     try {
-      if (project && isValidId(project.id)) {
-        writeJsonAtomicSync(path.join(projectDir(project.id), 'project.json'), project);
-      }
+      if (book && isValidId(book.id)) writeJsonAtomicSync(bookFile(book.id), book);
       event.returnValue = true;
     } catch (err) {
-      log.error('[saveSync]', err);
+      log.error('[books:saveSync]', err);
       event.returnValue = false;
     }
   });
 
-  ipcMain.handle('projects:delete', async (_e, id) => {
-    await fsp.rm(projectDir(id), { recursive: true, force: true });
+  ipcMain.handle('books:delete', async (_e, id) => {
+    await fsp.rm(bookDir(id), { recursive: true, force: true });
+    // 이 책을 쓰던 오답노트에서 빼기
+    for (const note of await listNotes()) {
+      if (!(note.bookIds || []).includes(id)) continue;
+      note.bookIds = note.bookIds.filter((b) => b !== id);
+      if (note.selected) delete note.selected[id];
+      await writeJsonAtomic(noteFile(note.id), note);
+    }
+    return true;
+  });
+
+  /** 책에서 문항 ID 가 바뀌었을 때(번호 고침 등) 오답노트의 선택도 따라 바꿈 */
+  ipcMain.handle('books:renameItems', async (_e, { bookId, renames, removed }) => {
+    if (!isValidId(bookId)) return 0;
+    const map = new Map(Object.entries(renames || {}));
+    const gone = new Set(removed || []);
+    let changed = 0;
+    for (const note of await listNotes()) {
+      const list = note.selected?.[bookId];
+      if (!Array.isArray(list) || !list.length) continue;
+      const next = [...new Set(list.filter((id) => !gone.has(id)).map((id) => map.get(id) || id))];
+      if (next.length === list.length && next.every((v, i) => v === list[i])) continue;
+      note.selected[bookId] = next;
+      await writeJsonAtomic(noteFile(note.id), note);
+      changed++;
+    }
+    return changed;
+  });
+
+  // ---- 오답노트 ----
+  ipcMain.handle('notes:list', async () => {
+    const list = (await listNotes()).map(summarizeNote);
+    list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    return list;
+  });
+
+  ipcMain.handle('notes:create', async (_e, { title, student, bookIds } = {}) => {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    const ids = (Array.isArray(bookIds) ? bookIds : []).filter(isValidId);
+    const note = {
+      id,
+      kind: 'note',
+      version: 2,
+      title: (title || '').trim() || '오답노트',
+      student: (student || '').trim(),
+      bookIds: ids,
+      selected: Object.fromEntries(ids.map((b) => [b, []])),
+      exportOptions: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await writeJsonAtomic(noteFile(id), note);
+    return note;
+  });
+
+  ipcMain.handle('notes:get', async (_e, id) => {
+    const note = await readJson(noteFile(id), null);
+    if (!note) throw new Error('오답노트를 찾을 수 없습니다.');
+    return note;
+  });
+
+  ipcMain.handle('notes:save', async (_e, note) => {
+    if (!note || !isValidId(note.id)) throw new Error('잘못된 오답노트');
+    await writeJsonAtomic(noteFile(note.id), note);
+    return true;
+  });
+
+  ipcMain.on('notes:saveSync', (event, note) => {
+    try {
+      if (note && isValidId(note.id)) writeJsonAtomicSync(noteFile(note.id), note);
+      event.returnValue = true;
+    } catch (err) {
+      log.error('[notes:saveSync]', err);
+      event.returnValue = false;
+    }
+  });
+
+  ipcMain.handle('notes:delete', async (_e, id) => {
+    await fsp.rm(noteFile(id), { force: true });
     return true;
   });
 
@@ -314,11 +486,11 @@ function registerIpc() {
     return result.canceled ? [] : result.filePaths;
   });
 
-  // 선택한 파일(들)을 프로젝트 폴더로 복사
-  ipcMain.handle('files:import', async (_e, { projectId, role, paths }) => {
+  // 선택한 파일(들)을 책 폴더로 복사
+  ipcMain.handle('files:import', async (_e, { bookId, role, paths }) => {
     if (!['problem', 'answer'].includes(role)) throw new Error('잘못된 문서 종류');
     if (!Array.isArray(paths) || paths.length === 0) throw new Error('파일이 없습니다.');
-    const dir = projectDir(projectId);
+    const dir = bookDir(bookId);
     await fsp.mkdir(dir, { recursive: true });
 
     // 이미지 여러 장은 파일 이름 순(숫자 자연 정렬)으로 정렬
@@ -371,18 +543,27 @@ function registerIpc() {
   });
 
   // ---- Gemini (선택 기능) ----
-  ipcMain.handle('gemini:generate', async (_e, { model, body, apiKey }) => {
+  ipcMain.handle('gemini:abort', (_e, requestId) => {
+    const ctrl = geminiRequests.get(requestId);
+    if (ctrl) ctrl.abort();
+    return !!ctrl;
+  });
+  ipcMain.handle('gemini:generate', async (_e, { model, body, apiKey, requestId }) => {
     const settings = await loadSettings();
     const key = apiKey || settings.geminiApiKey;
     if (!key) return { ok: false, status: 0, error: 'Gemini API 키가 설정되지 않았습니다.' };
     const modelName = String(model || settings.geminiModel || DEFAULT_SETTINGS.geminiModel).replace(/^models\//, '');
     if (!/^[\w.-]+$/.test(modelName)) return { ok: false, status: 0, error: '모델 이름이 올바르지 않습니다.' };
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 120000);
+    if (requestId) geminiRequests.set(requestId, ctrl);
     try {
       const res = await net.fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify(body),
+        signal: ctrl.signal,
       });
       const text = await res.text();
       let json = null;
@@ -391,9 +572,13 @@ function registerIpc() {
       } catch {
         /* 무시 */
       }
-      return { ok: res.ok, status: res.status, json, error: res.ok ? null : json?.error?.message || text.slice(0, 500) };
+      return { ok: res.ok, status: res.status, json, error: res.ok ? null : json?.error?.message || text.slice(0, 500), reason: json?.error?.status || '' };
     } catch (err) {
+      if (ctrl.signal.aborted) return { ok: false, status: 0, aborted: true, error: '취소됨' };
       return { ok: false, status: 0, error: `네트워크 오류: ${err.message}` };
+    } finally {
+      clearTimeout(timer);
+      if (requestId) geminiRequests.delete(requestId);
     }
   });
 
@@ -409,7 +594,8 @@ function registerIpc() {
       if (!res.ok) return { ok: false, error: json?.error?.message || `HTTP ${res.status}` };
       const models = (json?.models || [])
         .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
-        .map((m) => ({ name: m.name.replace(/^models\//, ''), displayName: m.displayName || m.name }));
+        .filter((m) => /gemini|gemma/i.test(m.name) && !/embedding|tts|image-generation|live|audio/i.test(m.name))
+        .map((m) => ({ name: m.name.replace(/^models\//, ''), displayName: m.displayName || m.name, description: m.description || '' }));
       return { ok: true, models };
     } catch (err) {
       return { ok: false, error: `네트워크 오류: ${err.message}` };
@@ -550,8 +736,9 @@ if (!isSmokeTest && !app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
+    await migrateProjects().catch((err) => log.error('[migrate]', err));
     registerAppProtocol();
     registerIpc();
     createWindow();

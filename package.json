@@ -1,11 +1,14 @@
 {
   "name": "ohdapnote",
   "productName": "OhdapNote",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "문제집과 답지 PDF를 스캔해 틀린 문제만 모아 PDF로 만들어 주는 수학 오답노트 프로그램",
   "main": "src/main/main.js",
-  "author": "hminkoo10",
-  "license": "MIT",
+  "author": {
+    "name": "구현민",
+    "url": "https://github.com/hminkoo10"
+  },
+  "license": "SEE LICENSE IN LICENSE",
   "private": true,
   "repository": {
     "type": "git",
@@ -18,7 +21,7 @@
     "test:fixtures": "node test/fixtures/make-fixtures.mjs && node test/fixtures/make-books.mjs",
     "test:detect": "node test/e2e/detect-fixtures.mjs",
     "test:books": "node test/e2e/books-test.mjs",
-    "test:e2e": "node test/e2e/app-e2e.mjs",
+    "test:e2e": "node test/e2e/app-e2e.mjs && node test/e2e/app-check.mjs",
     "dist": "electron-builder --win --x64 --publish never",
     "release:patch": "npm version patch -m \"v%s 배포\" && git push --follow-tags",
     "release:minor": "npm version minor -m \"v%s 배포\" && git push --follow-tags",
@@ -42,7 +45,7 @@
   "build": {
     "appId": "io.github.hminkoo10.ohdapnote",
     "productName": "OhdapNote",
-    "copyright": "Copyright © 2026 hminkoo10",
+    "copyright": "Copyright © 2026 구현민",
     "directories": {
       "output": "dist",
       "buildResources": "build"

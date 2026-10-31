@@ -88,7 +88,7 @@ export function toast(message, { type = 'info', timeout = 3500, actions = [] } =
 // ---------------------------------------------------------------------------
 // 모달
 // ---------------------------------------------------------------------------
-export function modal({ title, body, buttons = [], width = 460, onClose }) {
+export function modal({ title, body, buttons = [], width = 460, onClose, className = '' }) {
   return new Promise((resolve) => {
     let closed = false;
     const close = (value) => {
@@ -126,12 +126,13 @@ export function modal({ title, body, buttons = [], width = 460, onClose }) {
         ),
       ),
     );
-    const dialog = h('div.modal', { style: { width: `${width}px` } }, h('div.modal-header', h('h3', title), h('button.modal-x', { onclick: () => close(null), title: '닫기' }, icon('x'))), h('div.modal-body', body), buttons.length ? footer : null);
+    const dialog = h(`div.modal${className ? `.${className}` : ''}`, { style: { width: `${width}px` } }, h('div.modal-header', h('h3', title), h('button.modal-x', { onclick: () => close(null), title: '닫기' }, icon('x'))), h('div.modal-body', body), buttons.length ? footer : null);
     const overlay = h('div.modal-overlay', { onmousedown: (e) => e.target === overlay && close(null) }, dialog);
     document.body.append(overlay);
     document.addEventListener('keydown', onKey, true);
     const first = dialog.querySelector('input, select, textarea');
     (first || footer.querySelector('.btn-primary'))?.focus();
+    dialog.close = close;
   });
 }
 
@@ -200,7 +201,42 @@ export function logo(cls = 'brand-logo') {
   return wrap.firstChild;
 }
 
-const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+/** 설정에서 "애니메이션 줄이기"를 고른 경우만 (윈도우의 애니메이션 끄기 설정과는 상관없이 기본은 켬) */
+export const reduceMotion = () => document.documentElement.dataset.motion === 'reduce';
+
+/** 숫자가 0 에서 목표까지 부드럽게 올라가는 효과 */
+export function countUp(el, to, { ms = 650, suffix = '' } = {}) {
+  const target = Number(to) || 0;
+  if (reduceMotion() || target <= 0) {
+    el.textContent = `${target}${suffix}`;
+    return el;
+  }
+  const t0 = performance.now();
+  const tick = (now) => {
+    const k = Math.min(1, (now - t0) / ms);
+    const eased = 1 - Math.pow(1 - k, 3);
+    el.textContent = `${Math.round(target * eased)}${suffix}`;
+    if (k < 1 && el.isConnected) requestAnimationFrame(tick);
+  };
+  el.textContent = `0${suffix}`;
+  requestAnimationFrame(tick);
+  return el;
+}
+
+/** 버튼 같은 곳을 누른 자리에서 퍼지는 물결 */
+export function ripple(e) {
+  const el = e.currentTarget;
+  if (!el || reduceMotion() || el.disabled) return;
+  const r = el.getBoundingClientRect();
+  const size = Math.max(r.width, r.height) * 1.6;
+  const dot = document.createElement('span');
+  dot.className = 'ripple';
+  dot.style.width = dot.style.height = `${size}px`;
+  dot.style.left = `${e.clientX - r.left - size / 2}px`;
+  dot.style.top = `${e.clientY - r.top - size / 2}px`;
+  el.append(dot);
+  setTimeout(() => dot.remove(), 600);
+}
 
 /**
  * 화면이 바뀌기 전에 나가는 애니메이션을 재생하고 끝나면 resolve.

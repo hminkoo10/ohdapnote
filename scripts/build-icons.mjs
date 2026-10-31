@@ -38,6 +38,21 @@ const MAP = {
   collapse: 'panel-top-close',
   expand: 'panel-top-open',
   pointer: 'mouse-pointer-click',
+  library: 'library-big',
+  user: 'user',
+  school: 'graduation-cap',
+  checkAll: 'check-check',
+  more: 'ellipsis',
+  list: 'list-checks',
+  help: 'circle-help',
+  notebook: 'notebook-text',
+  calendar: 'calendar',
+  layers: 'layers',
+  stop: 'circle-stop',
+  bookPlus: 'book-plus',
+  arrowRight: 'arrow-right',
+  sliders: 'sliders-horizontal',
+  dashed: 'circle-dashed',
 };
 const out = {};
 for (const [name, file] of Object.entries(MAP)) {
