@@ -160,7 +160,7 @@ npm start
 | `npm run test:fixtures` | 테스트용 문제집/답지 생성 — 단순형 + 시중 교재형(쎈·수능특강 편집 구조 재현), 스캔본·사진 (Playwright Chromium, Python Pillow·numpy, poppler 필요) |
 | `npm run test:detect` | 단순형 문서로 인식 정확도 확인 (브라우저에서 실제 엔진 실행) |
 | `npm run test:books` | 시중 교재형으로 번호 인식·해설 짝·**쪽을 넘어가는 해설**을 자동 채점 (해설 끝에 숨긴 표식으로 확인) |
-| `node test/e2e/scan-check.mjs <PDF> [problem\|answer] [쪽 범위]` | 가지고 있는 실제 문제집·답지 PDF(스캔본 포함)로 번호 인식 확인 — 빠진 번호·순서 어긋남·확인 필요 쪽을 보여 줌 |
+| `npm run test:scan` | 가지고 있는 실제 문제집·답지 PDF(스캔본 포함)로 번호 인식 확인 — 빠진 번호·순서 어긋남·확인 필요 쪽을 보여 줌. 책 목록은 `test/e2e/local-books.json`(git 에 안 올라감, `local-books.example.json` 참고), 한 권만: `node test/e2e/scan-check.mjs <PDF> [problem\|answer] [쪽 범위]` |
 | `npm run test:e2e` | Electron 앱을 띄워 예전 데이터 옮기기→책 등록·분석→검토 편집→오답노트→시험지 PDF, 확인할 쪽·Gemini(가짜 응답) 흐름 확인 (리눅스는 `xvfb-run -a npm run test:e2e`) |
 | `npm run dist` | 윈도우 설치 파일 빌드 (`dist/`) – 윈도우에서 실행하거나 CI 사용 |
 

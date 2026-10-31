@@ -21,6 +21,7 @@
     "test:fixtures": "node test/fixtures/make-fixtures.mjs && node test/fixtures/make-books.mjs",
     "test:detect": "node test/e2e/detect-fixtures.mjs",
     "test:books": "node test/e2e/books-test.mjs",
+    "test:scan": "node test/e2e/scan-check.mjs",
     "test:e2e": "node test/e2e/app-e2e.mjs && node test/e2e/app-check.mjs",
     "dist": "electron-builder --win --x64 --publish never",
     "release:patch": "npm version patch -m \"v%s 배포\" && git push --follow-tags",

@@ -16,7 +16,9 @@ import {
   looksLikeAnswerTable,
   fillGapsFromCandidates,
   chooseExpectedChain,
+  dropStrayRuns,
   byReadingOrder,
+  schemeKey,
 } from './detect.js';
 import { recognizeWords, recognizeLine, OCR_WORKERS } from './ocr.js';
 import { geminiDetect, canvasToBase64Jpeg } from './gemini.js';
@@ -220,7 +222,7 @@ async function ocrPage(src, page, { ocrLang = 'kor+eng', passes = OCR_PASSES, sp
   page.ocrPasses.push(...(await Promise.all(passes.map((p) => ocrTokens(src, page, p, ocrLang)))));
   page.needsOcr = false;
   applyOcr(page, splitHint);
-  if (role === 'answer' && looksLikeAnswerTable(page.candidates)) page.isTable = true;
+  if (looksLikeAnswerTable(page.candidates, { strict: role !== 'answer' })) page.isTable = true;
 }
 
 /** 여러 쪽을 OCR 워커 수만큼 동시에 */
@@ -251,15 +253,13 @@ export async function analyzePage(src, index, { ocrLang = 'kor+eng', forceOcr = 
   return page;
 }
 
-const schemeOf = (c) => `${c.prefix || ''}|${c.padded ? c.digits.length : 0}`;
-
 /** 번호가 건너뛴(2~40) 곳에 걸친 쪽들 — 번호 체계(말머리·자릿수)마다 따로 봄 */
 function pagesWithGaps(results, anchors) {
   const hit = new Set();
   const last = new Map();
   results.forEach((r, k) => {
     for (const c of anchors.get(r.index) || []) {
-      const key = schemeOf(c);
+      const key = schemeKey(c);
       const prev = last.get(key);
       if (prev && c.num !== 1 && c.num - prev.num >= 2 && c.num - prev.num <= 40) for (let j = prev.k; j <= k; j++) hit.add(results[j]);
       if (!prev && c.num >= 2 && c.num <= 6) hit.add(r); // 첫 번호(1번)부터 놓친 경우
@@ -311,7 +311,7 @@ function gapRegions(page, chain, prevLast, nextFirst, maxGap = 6) {
 async function fillOcrGaps(src, results, anchors, signature, { ocrLang, signal, onProgress }) {
   if (!signature) return 0;
   const sigKey = `${signature.prefix || ''}|${signature.padded ? signature.digitsLen : 0}`;
-  const main = (r) => (anchors.get(r.index) || []).filter((c) => schemeOf(c) === sigKey);
+  const main = (r) => (anchors.get(r.index) || []).filter((c) => schemeKey(c) === sigKey);
   const ref = results.flatMap(main).slice(0, 400);
   let added = 0;
   for (let k = 0; k < results.length; k++) {
@@ -344,8 +344,12 @@ async function fillOcrGaps(src, results, anchors, signature, { ocrLang, signal, 
   return added;
 }
 
-/** 잘라낸 번호 조각을 흑백으로 (글자는 검게). 진한 색 상자 속 흰 글자는 뒤집어서 */
-function binarizeDigits(canvas) {
+/**
+ * 잘라낸 번호 조각을 흑백으로 (글자는 검게).
+ * @param {boolean} inverted  진한 색 상자 속 흰 글자(대표 문제 등)로 보고 뒤집을지
+ * @returns {boolean} 색 상자처럼 보이는지 (잉크가 많은 가로줄들이 감싸는 사각형 안이 대부분 잉크)
+ */
+function binarizeDigits(canvas, inverted = false) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const { width: w, height: h } = canvas;
   const img = ctx.getImageData(0, 0, w, h);
@@ -364,7 +368,6 @@ function binarizeDigits(canvas) {
       }
     }
   }
-  // 색 상자인지: 잉크가 많은 가로줄들이 감싸는 사각형 안이 대부분 잉크
   let ry0 = -1;
   let ry1 = -1;
   for (let y = 0; y < h; y++) {
@@ -373,7 +376,7 @@ function binarizeDigits(canvas) {
       ry1 = y;
     }
   }
-  let inverted = false;
+  let boxLike = false;
   if (ry0 >= 0 && ry1 - ry0 + 1 >= 0.3 * h) {
     let rx0 = w;
     let rx1 = -1;
@@ -387,7 +390,7 @@ function binarizeDigits(canvas) {
       }
     }
     for (let y = ry0; y <= ry1; y++) for (let x = rx0; x <= rx1; x++) inRect += ink[y * w + x];
-    inverted = rx1 > rx0 && inRect > 0.6 * (ry1 - ry0 + 1) * (rx1 - rx0 + 1);
+    boxLike = rx1 > rx0 && inRect > 0.6 * (ry1 - ry0 + 1) * (rx1 - rx0 + 1);
   }
   // 상자 속 흰 글자 = 상자에 둘러싸인(조각 테두리에서 잉크를 건너지 않고는 닿을 수 없는) 흰 픽셀
   const outside = new Uint8Array(w * h);
@@ -419,7 +422,32 @@ function binarizeDigits(canvas) {
     }
   }
   ctx.putImageData(img, 0, 0);
+  return boxLike;
 }
+
+/** 페이지 이미지의 한 조각을 키워 흑백으로 만든 뒤 숫자만 읽음 */
+async function readDigitsAt(hi, box, scale, inverted, ocrLang) {
+  const W = hi.width;
+  const H = hi.height;
+  const cw = (box.x1 - box.x0) * W;
+  const ch = (box.y1 - box.y0) * H;
+  const piece = createCanvas(cw * scale, ch * scale);
+  const pctx = piece.getContext('2d', { willReadFrequently: true });
+  pctx.imageSmoothingQuality = 'high';
+  pctx.drawImage(hi, box.x0 * W, box.y0 * H, cw, ch, 0, 0, piece.width, piece.height);
+  const boxLike = binarizeDigits(piece, inverted);
+  const crop = createCanvas(piece.width + 40, piece.height + 40);
+  const ctx = crop.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, crop.width, crop.height);
+  ctx.drawImage(piece, 20, 20);
+  const { text, conf } = await recognizeLine(crop, { lang: ocrLang, whitelist: '0123456789.)' });
+  // 앞에 붙은 점·잡티는 버리고 첫 숫자 덩어리만 (예: ".0006" → 0006)
+  const m = /(\d{1,4})/.exec(text.replace(/\s+/g, ' '));
+  return { digits: m ? m[1] : '', conf, boxLike };
+}
+
+const hamming = (a, b) => (a.length === b.length ? [...a].filter((ch, i) => ch !== b[i]).length : Infinity);
 
 async function findNumbersInRegions(src, page, regions, ref, sig, ocrLang) {
   const { grid, layout } = page;
@@ -464,42 +492,40 @@ async function findNumbersInRegions(src, page, regions, ref, sig, ocrLang) {
     const numW = perDigit * digits;
     if (b.pri === 2 && (b.x1 - b.x0 < 0.6 * numW || b.x1 - b.x0 > 1.8 * numW)) continue; // 엉뚱한 자리는 번호 폭인 것만
     if (!hi) hi = await src.renderPage(page.index, CROP_WIDTH);
-    const W = hi.width;
-    const H = hi.height;
-    const cx0 = Math.max(0, b.x0 - 0.006);
-    const cx1 = Math.min(1, Math.min(b.x1, b.x0 + numW * 1.2) + 0.006);
-    const cy0 = Math.max(0, b.y0 - 0.004);
-    const cy1 = Math.min(1, b.y1 + 0.004);
+    const box = { x0: Math.max(0, b.x0 - 0.006), x1: Math.min(1, Math.min(b.x1, b.x0 + numW * 1.2) + 0.006), y0: Math.max(0, b.y0 - 0.004), y1: Math.min(1, b.y1 + 0.004) };
     const bh = b.y1 - b.y0;
     // 숫자 높이가 40px 안팎이 되게 키움(작은 글씨 대응)
-    const S = Math.min(2.5, Math.max(1, 40 / Math.max(1, Math.min(bh, hNum * 1.2) * H)));
-    const cw = (cx1 - cx0) * W;
-    const ch = (cy1 - cy0) * H;
-    const piece = createCanvas(cw * S, ch * S);
-    const pctx = piece.getContext('2d', { willReadFrequently: true });
-    pctx.imageSmoothingQuality = 'high';
-    pctx.drawImage(hi, cx0 * W, cy0 * H, cw, ch, 0, 0, piece.width, piece.height);
-    binarizeDigits(piece);
-    const crop = createCanvas(piece.width + 40, piece.height + 40);
-    const ctx = crop.getContext('2d');
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, crop.width, crop.height);
-    ctx.drawImage(piece, 20, 20);
-    const { text, conf } = await recognizeLine(crop, { lang: ocrLang, whitelist: '0123456789.)' });
-    // 앞에 붙은 점·잡티는 버리고 첫 숫자 덩어리만 (예: ".0006" → 0006)
-    let m = /(\d{1,4})/.exec(text.replace(/\s+/g, ' '));
-    if (!m) continue;
-    let num = parseInt(m[1], 10);
-    if (!reg.missing.has(num) && reg.missing.size === 1 && b.pri === 0) {
-      // 빠진 번호가 하나뿐이고, 번호 자리·크기가 맞는 덩어리에서 그 번호의 앞부분이 읽혔다면 그 번호로 봄
-      const want = [...reg.missing][0];
-      const wantStr = sig.padded && sig.digitsLen ? String(want).padStart(sig.digitsLen, '0') : String(want);
-      const heightOk = bh > hNum * 0.75 && bh < hNum * 1.5;
-      if (heightOk && m[1].length >= 2 && wantStr.startsWith(m[1])) {
-        num = want;
-        m = [wantStr, wantStr];
+    const S = Math.min(2.5, Math.max(1, 40 / Math.max(1, Math.min(bh, hNum * 1.2) * hi.height)));
+    const want = reg.missing.size === 1 ? [...reg.missing][0] : null;
+    const wantStr = want == null ? '' : sig.padded && sig.digitsLen ? String(want).padStart(sig.digitsLen, '0') : String(want);
+    const heightOk = bh > hNum * 0.75 && bh < hNum * 1.5;
+    let m = null;
+    let conf = 0;
+    let near = null; // 한 자리만 다르게 읽힌 것
+    // 그대로 → (색 상자 같으면) 뒤집어서 → 크게 키워서, 빠진 번호가 읽힐 때까지
+    const tries = [{ scale: S, inverted: false }];
+    for (let t = 0; t < tries.length && !m; t++) {
+      const r = await readDigitsAt(hi, box, tries[t].scale, tries[t].inverted, ocrLang);
+      if (t === 0) {
+        if (r.boxLike) tries.push({ scale: S, inverted: true });
+        tries.push({ scale: Math.min(4, S * 1.6), inverted: false });
+        if (r.boxLike) tries.push({ scale: Math.min(4, S * 1.6), inverted: true });
       }
+      // 번호와 거리가 먼 덩어리(색 상자도 아니고 숫자도 거의 안 읽힘)는 더 읽지 않음
+      if (t === 0 && !r.boxLike && r.digits.length < 2) break;
+      if (!r.digits) continue;
+      if (reg.missing.has(parseInt(r.digits, 10))) {
+        m = [r.digits, r.digits];
+        conf = r.conf;
+      } else if (want != null && b.pri === 0 && heightOk && r.digits.length >= 2 && (wantStr.startsWith(r.digits) || hamming(r.digits, wantStr) === 1)) near = r;
     }
+    // 빠진 번호가 하나뿐이고, 번호 자리·크기가 맞는 덩어리에서 그 번호의 앞부분이나 한 자리만 다르게 읽혔다면 그 번호로 봄
+    if (!m && near) {
+      m = [wantStr, wantStr];
+      conf = near.conf;
+    }
+    if (!m) continue;
+    const num = parseInt(m[1], 10);
     if (!reg.missing.has(num)) continue;
     if (sig.padded && sig.digitsLen && m[1].length !== sig.digitsLen) continue; // 0001 같은 번호면 자릿수도 맞아야 함
     reg.missing.delete(num);
@@ -519,6 +545,7 @@ async function findNumbersInRegions(src, page, regions, ref, sig, ocrLang) {
       hRatio: page.bodyH ? bh / page.bodyH : sig.hRatio,
       conf: Math.max(60, conf),
       padded: m[1].length >= 2 && m[1][0] === '0',
+      fixedWidth: !!sig.padded && m[1][0] !== '0',
       ocr: true,
     });
   }
@@ -621,12 +648,11 @@ export async function analyzeDocument(src, opts) {
   shareSplitHints(results);
   onProgress?.({ phase: 'scan', done: pages.length, total: pages.length, message: '번호 정리 중' });
 
-  // 빠른 정답표 쪽은 번호 인식에서 뺌 (답지에서만)
+  // 빠른 정답표 쪽은 번호 인식에서 뺌 (문제집 끝에 붙은 "한눈에 보는 정답"도: 문제집은 칸이 촘촘한 표만)
   const tablePages = new Set();
   const markTables = () => {
-    if (role !== 'answer') return;
     for (const r of results) {
-      if (r.isTable || looksLikeAnswerTable(r.candidates)) {
+      if (r.isTable || looksLikeAnswerTable(r.candidates, { strict: role !== 'answer' })) {
         tablePages.add(r.index);
         r.candidates = [];
         r.ranges = [];
@@ -647,6 +673,8 @@ export async function analyzeDocument(src, opts) {
   if (ocrList.length) await fillOcrGaps(src, results, anchors, signature, { ocrLang, signal, onProgress });
   // 번호가 건너뛴 곳은 버려진 후보에서 다시 찾아 채움
   fillGapsFromCandidates(results, anchors, signatures);
+  // 앞뒤 번호 흐름과 동떨어진 짧은 덩어리(목차·만화 쪽, 부록 표에서 잘못 읽은 숫자)는 뺌
+  if (signature) dropStrayRuns(pages, anchors, `${signature.prefix || ''}|${signature.padded ? signature.digitsLen : 0}`);
 
   const layouts = new Map(results.map((r) => [r.index, r.layout]));
   const grids = new Map(results.map((r) => [r.index, r.grid]));
@@ -795,7 +823,7 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
   const next = sorted.filter((it) => it.page > idx);
   const prevLast = prev.length ? prev[prev.length - 1].num : null;
   const nextFirst = next.length ? next[0].num : null;
-  if (role === 'answer' && looksLikeAnswerTable(page.candidates)) page.candidates = [];
+  if (looksLikeAnswerTable(page.candidates, { strict: role !== 'answer' })) page.candidates = [];
   const signatures = doc.signatures || (doc.signature ? [doc.signature] : null);
   const { anchors: sel } = selectAnchors([page], { numberStyle: doc.options?.numberStyle, signatures, prevLast });
   let chain = sel.get(idx) || [];
@@ -806,7 +834,7 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
     // 그래도 빠진 번호는 번호 자리를 하나씩 잘라 숫자만 읽음
     const sig = signatures?.[0];
     const sigKey = sig ? `${sig.prefix || ''}|${sig.padded ? sig.digitsLen : 0}` : null;
-    const mainChain = chain.filter((c) => schemeOf(c) === sigKey);
+    const mainChain = chain.filter((c) => schemeKey(c) === sigKey);
     const regions = mainChain.length ? gapRegions(page, mainChain, prevLast, nextFirst) : [];
     if (regions.length) {
       const found = await findNumbersInRegions(src, page, regions, mainChain, sig, ocrLang);

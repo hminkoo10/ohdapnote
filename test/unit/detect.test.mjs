@@ -146,6 +146,30 @@ test('looksLikeAnswerTable: 해설 쪽 분수·지수 속 작은 숫자(1, 1, 1 
   assert.equal(looksLikeAnswerTable([...nums, ...fracs]), false);
 });
 
+test('looksLikeAnswerTable: 단원 첫머리 작은 정답 상자 한 줄 + 해설 속 표 숫자는 정답표가 아님, 문제집 끝 정답표는 정답표', async () => {
+  const { looksLikeAnswerTable } = await import('../../src/renderer/js/detect.js');
+  const c = (num, x, y, h = 0.0118, col = 0) => ({ num, col, x0: x, y0: y, h, prefix: '' });
+  // 수능특강 해설 첫 쪽: "1 48 2 ① 3 32 …" 상자 한 줄, 해설 번호 1~4, 증감표 속 숫자들
+  const unitStart = [
+    ...[1, 2, 3, 4, 5, 6].map((n, i) => c(n, 0.13 + i * 0.061, 0.178, 0.0152)),
+    c(7, 0.13, 0.201, 0.0152),
+    c(1, 0.107, 0.247, 0.0221), c(1, 0.34, 0.429), c(2, 0.459, 0.429), c(48, 0.218, 0.475), c(12, 0.337, 0.475), c(16, 0.456, 0.475),
+    c(2, 0.107, 0.58, 0.0221), c(1, 0.374, 0.82), c(2, 0.463, 0.82), c(2, 0.289, 0.866), c(2, 0.463, 0.866),
+    c(3, 0.541, 0.168, 0.0221, 1), c(32, 0.712, 0.339, 0.0118, 1), c(32, 0.875, 0.405, 0.0111, 1), c(4, 0.541, 0.602, 0.0221, 1), c(1, 0.88, 0.776, 0.0111, 1),
+  ];
+  assert.equal(looksLikeAnswerTable(unitStart), false);
+  // 문제집 끝 "한눈에 보는 정답": 한 줄에 1 ② 2 ② 3 ① 4 24 … (답 숫자가 끼어 있음), 칸이 촘촘함
+  const quick = [];
+  for (let r = 0; r < 6; r++) {
+    [1, 2, 3, 4, 24, 5, 6, 7].forEach((n, i) => quick.push(c(n, 0.08 + i * 0.045, 0.15 + r * 0.06)));
+  }
+  assert.equal(looksLikeAnswerTable(quick, { strict: true }), true);
+  // 한 줄에 문항이 둘씩 나란한 문제집 쪽(0001 …  0002 …)은 정답표가 아님
+  const pairs = [];
+  for (let r = 0; r < 8; r++) pairs.push(c(2 * r + 1, 0.08, 0.1 + r * 0.1), c(2 * r + 2, 0.27, 0.1 + r * 0.1));
+  assert.equal(looksLikeAnswerTable(pairs, { strict: true }), false);
+});
+
 test('한 줄에 나란히 놓인 문항(0001 …  0002 …): 둘 다 고르고 영역을 가로로 나눔', async () => {
   const { sameRow, byReadingOrder } = await import('../../src/renderer/js/detect.js');
   const mk = (num, x, y) => ({ num, digits: String(num).padStart(4, '0'), style: 'plain', prefix: '', col: 0, x0: x, x1: x + 0.04, y0: y, y1: y + 0.011, h: 0.011, relX: x - 0.08, hRatio: 1, conf: 95, padded: true, font: '', ocr: true });
@@ -169,6 +193,62 @@ test('한 줄에 나란히 놓인 문항(0001 …  0002 …): 둘 다 고르고 
   assert.ok(r1.x + r1.w <= 0.27 && r2.x >= 0.26);
   assert.ok(r1.y + r1.h <= 0.2 && r2.y + r2.h <= 0.2);
   assert.ok(r3.y >= 0.19);
+});
+
+test('selectAnchors: 0001 체계에서 0999 다음 1000 이상도 같은 번호 체계로 이어서 고름', async () => {
+  const { schemeKey, flagPages } = await import('../../src/renderer/js/detect.js');
+  const mk = (num, y) => {
+    const digits = String(num).padStart(4, '0');
+    return { num, digits, style: 'plain', prefix: '', col: 0, x0: 0.08, x1: 0.12, y0: y, y1: y + 0.011, h: 0.011, relX: 0.001, hRatio: 1, conf: 95, padded: digits[0] === '0', font: '', ocr: true };
+  };
+  const pages = [
+    { index: 0, candidates: [mk(995, 0.1), mk(996, 0.3), mk(997, 0.5)] },
+    { index: 1, candidates: [mk(998, 0.1), mk(999, 0.3), mk(1000, 0.5), mk(1001, 0.7)] },
+    { index: 2, candidates: [mk(1002, 0.1), mk(1003, 0.3), mk(1004, 0.5)] },
+  ];
+  const { anchors } = selectAnchors(pages);
+  const got = [0, 1, 2].flatMap((i) => anchors.get(i).map((a) => a.num));
+  assert.deepEqual(got, [995, 996, 997, 998, 999, 1000, 1001, 1002, 1003, 1004]);
+  assert.equal(new Set(got.map((n) => schemeKey(anchors.get(n < 998 ? 0 : n < 1002 ? 1 : 2).find((a) => a.num === n)))).size, 1);
+  const layouts = new Map([0, 1, 2].map((i) => [i, { blank: false, inkRatio: 0.1 }]));
+  assert.equal(flagPages([0, 1, 2], anchors, layouts).size, 0);
+});
+
+test('dropStrayRuns: 소개 쪽 견본 번호·만화 쪽·부록 표의 동떨어진 숫자만 빼고, 단원마다 1부터 다시 시작은 둠', async () => {
+  const { dropStrayRuns } = await import('../../src/renderer/js/detect.js');
+  const mk = (num) => ({ num, digits: String(num).padStart(4, '0'), padded: String(num).padStart(4, '0')[0] === '0', prefix: '' });
+  const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => mk(a + i));
+  const anchors = new Map([
+    [1, [mk(2), mk(4), mk(5), mk(6), mk(8)]], // 구성과 특징 쪽 견본
+    [2, [mk(108)]],
+    [6, [mk(3939)]], // 목차
+    [8, range(1, 37)],
+    [9, range(38, 60)],
+    [10, [mk(3939)]], // 만화 쪽
+    [11, range(61, 64), ],
+    [12, [mk(66), mk(67)]], // 65 를 놓쳤어도 앞뒤와 이어지는 짧은 덩어리는 둠
+    [13, range(68, 90)],
+    [14, [mk(3959), mk(3960), mk(3962)]], // 부록 로그표
+    [15, [mk(7435)]],
+  ]);
+  const order = [...anchors.keys()];
+  // 1000 이상 번호는 fixedWidth 로 같은 체계
+  for (const chain of anchors.values()) for (const c of chain) if (!c.padded) c.fixedWidth = true;
+  assert.equal(dropStrayRuns(order, anchors, '|4'), 12);
+  const left = order.flatMap((i) => anchors.get(i).map((c) => c.num));
+  assert.deepEqual(left, Array.from({ length: 90 }, (_, i) => i + 1).filter((n) => n !== 65));
+  // 단원마다 1부터 다시 시작하는 짧은 단원은 그대로
+  const units = new Map([[0, range(1, 9)], [1, range(1, 3)], [2, range(1, 8)]]);
+  assert.equal(dropStrayRuns([0, 1, 2], units, '|4'), 0);
+});
+
+test('sameRow: OCR 이 옆 분수까지 묶어 키가 커진 번호 상자도 오른쪽 번호와 같은 줄', async () => {
+  const { sameRow } = await import('../../src/renderer/js/detect.js');
+  const tall = { col: 0, x0: 0.075, y0: 0.659, h: 0.0212 };
+  const right = { col: 0, x0: 0.271, y0: 0.665, h: 0.011 };
+  const below = { col: 0, x0: 0.078, y0: 0.721, h: 0.0114 };
+  assert.equal(sameRow(tall, right), true);
+  assert.equal(sameRow(tall, below), false);
 });
 
 test('analyzeLayout: 단 안쪽의 빈 세로 띠보다 세로 구분선이 있는 진짜 단 경계를 고름', () => {

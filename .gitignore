@@ -6,3 +6,4 @@ test/fixtures/generated/
 *.log
 .DS_Store
 dist-update/
+test/e2e/local-books.json

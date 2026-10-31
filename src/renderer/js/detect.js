@@ -21,7 +21,9 @@ const hOf = (c) => c.h ?? c.y1 - c.y0;
 
 /** 같은 단·같은 줄에 나란히 있는지 (한 줄에 문항이 둘 이상인 편집: "0001 …   0002 …") */
 export function sameRow(a, b) {
-  return a.col === b.col && Math.abs(a.y0 - b.y0) < 0.5 * Math.min(hOf(a), hOf(b));
+  // 위쪽 끝이 아니라 세로로 겹치는 정도로 봄 (OCR 이 옆 분수까지 묶어 상자가 커진 번호도 같은 줄로)
+  const overlap = Math.min(a.y0 + hOf(a), b.y0 + hOf(b)) - Math.max(a.y0, b.y0);
+  return a.col === b.col && overlap > 0.5 * Math.min(hOf(a), hOf(b));
 }
 
 /** b 가 a 와 같은 줄, 오른쪽에 충분히 떨어져 있는지 (나란히 놓인 다음 문항) */
@@ -335,25 +337,48 @@ export function extractCandidates(tokens, layout, opts = {}) {
   return { candidates, bodyH, lineCount: lines.length, headings, ranges };
 }
 
+/** 한 줄(왼쪽→오른쪽) 안에서 1씩 늘어나는 번호가 몇 개 이어지는지 (정답표 한 줄: 1 ② 2 ② 3 ① 4 24 …) */
+function longestRun(row, maxGap) {
+  let best = 0;
+  for (let i = 0; i < row.length; i++) {
+    let n = 1;
+    let cur = row[i];
+    for (let j = i + 1; j < row.length; j++) {
+      if (row[j].num === cur.num + 1 && row[j].x0 - cur.x0 <= maxGap) {
+        n++;
+        cur = row[j];
+      }
+    }
+    best = Math.max(best, n);
+  }
+  return best;
+}
+
 /**
- * 빠른 정답표 같은 쪽인지: 한 단 안에서 같은 높이에 번호가 여러 개 나란히 있는 경우가 많음
+ * 빠른 정답표 같은 쪽인지
+ *  - 한 줄에 1씩 늘어나는 번호가 여럿 나란한 줄이 두 줄 이상, 또는
+ *  - 줄 맨 앞 번호가 촘촘한 줄 간격으로 일정하게 건너뛰거나(1, 7, 13 …) 줄마다 다시 1부터(1, 1, 1 …)
+ *    (답 ①② 가 붙은 번호는 후보가 아니라서 줄 맨 앞 번호만 남는 경우가 많음)
+ * @param {{strict?:boolean}} [opts] strict: 문제집용 — 칸이 촘촘한 표만 (한 줄에 문항이 둘·셋 나란한 쪽과 구분)
  */
-export function looksLikeAnswerTable(all) {
+export function looksLikeAnswerTable(all, { strict = false } = {}) {
   // 분수·지수 속 작은 숫자는 빼고 봄 (번호보다 확실히 작음. 해설 쪽의 1/2, 1/3 … 이 표처럼 보이지 않게)
   const hs = all.map((c) => c.h).sort((a, b) => a - b);
   const big = hs.length ? hs[Math.floor(hs.length * 0.75)] : 0;
   const candidates = all.filter((c) => c.h >= 0.6 * big);
-  if (candidates.length >= 20) {
-    let sideBySide = 0;
-    for (const c of candidates) {
-      // 표의 한 줄에는 서로 다른, 가까운 번호가 나란히 있음 (같은 숫자가 나란한 건 수식)
-      const pair = (d) => d !== c && d.col === c.col && d.num !== c.num && Math.abs(d.num - c.num) <= 30 && Math.abs(d.y0 - c.y0) < 0.4 * c.h && Math.abs(d.x0 - c.x0) > 3 * c.h;
-      if (candidates.some(pair)) sideBySide++;
-    }
-    if (sideBySide >= candidates.length * 0.4) return true;
+  // 해설 속 증감표나 단원 첫머리의 작은 정답 상자 한 줄과 구분하려고, 그런 줄이 두 줄 이상이어야 함
+  const rows = [];
+  for (const c of [...candidates].sort(byReadingOrder)) {
+    const row = rows[rows.length - 1];
+    if (row && sameRow(row[0], c)) row.push(c);
+    else rows.push([c]);
   }
-  // 표를 단 단위로 읽으면 번호가 일정한 간격(예: +6)으로 건너뜀 (스캔본처럼 칸 일부만 읽힌 경우)
+  const tableRows = rows.filter((row) => longestRun(row, strict ? 0.09 : Infinity) >= 4);
+  const members = tableRows.reduce((n, row) => n + row.length, 0);
+  if (tableRows.length >= 2 && members >= candidates.length * (strict ? 0.5 : 0.4)) return true;
+  // 단마다 줄 맨 앞(왼쪽 끝) 번호만 위→아래로
   const diffs = [];
+  const gaps = [];
   const byCol = new Map();
   for (const c of candidates) {
     if (c.prefix) continue;
@@ -361,12 +386,18 @@ export function looksLikeAnswerTable(all) {
     byCol.get(c.col).push(c);
   }
   for (const list of byCol.values()) {
-    list.sort((a, b) => a.y0 - b.y0);
-    for (let i = 1; i < list.length; i++) diffs.push(list[i].num - list[i - 1].num);
+    const minRel = Math.min(...list.map((c) => c.relX ?? c.x0));
+    const left = list.filter((c) => (c.relX ?? c.x0) <= minRel + 0.012).sort((a, b) => a.y0 - b.y0);
+    for (let i = 1; i < left.length; i++) {
+      diffs.push(left[i].num - left[i - 1].num);
+      gaps.push(left[i].y0 - left[i - 1].y0);
+    }
   }
   if (diffs.length < 4) return false;
   const { value, count } = mode(diffs);
-  return value >= 3 && count >= diffs.length * 0.7;
+  if (!(value === 0 || value >= 3) || count < diffs.length * 0.7) return false;
+  // 정답표는 한 줄에 한 칸씩이라 줄 간격이 촘촘함 (한 줄에 문항이 셋 나란한 문제 쪽은 줄 사이가 넓음)
+  return median(gaps) <= 4 * median(candidates.map((c) => c.h));
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +421,8 @@ function startScore(prevLast, c) {
   if (c.num === 1) return 0.8;
   const d = c.num - prevLast;
   if (d > 1 && d <= 4) return 0.3;
-  return -0.6;
+  // 앞 쪽보다 작은 번호로 시작(1번 제외)은 거의 늘 잘못 읽은 것 (부록 표의 숫자 등)
+  return d <= 0 ? -2.5 : -0.6;
 }
 
 /** 페이지 안에서의 정렬 근거(같은 단에서 x 가 거의 같은 후보 수) */
@@ -424,8 +456,8 @@ function priorWithStyle(cands, i, sig) {
   if (c.style === sig.style) s += 0.9;
   else if (c.ocr && (c.style === 'dot' || c.style === 'plain') && (sig.style === 'dot' || sig.style === 'plain')) s -= 0.2; // OCR 은 점을 놓치거나 더 읽기도 함
   else s -= 1.6;
-  // 0 채움(0001, 01)은 아주 뚜렷한 특징이라 다르면 크게 감점
-  s += c.padded === sig.padded ? 0.4 : -3.5;
+  // 0 채움(0001, 01)은 아주 뚜렷한 특징이라 다르면 크게 감점 (단, 0001 체계의 1000 처럼 자릿수가 꽉 찬 번호는 같은 모양)
+  s += c.padded === sig.padded || (sig.padded && fullWidth(c) && c.digits.length === sig.digitsLen) ? 0.4 : -3.5;
   if (sig.padded && sig.digitsLen && c.digits.length !== sig.digitsLen) s -= 2.5;
   if ((c.prefix || '') !== (sig.prefix || '')) s -= 3;
   if (sig.hRatio > 0) {
@@ -582,7 +614,7 @@ export function selectAnchors(pages, opts = {}) {
     const styleOk = (c) => {
       if (forced === 'dot') return c.style === 'dot';
       if (forced === 'plain') return c.style === 'plain' && !c.padded;
-      if (forced === 'pad') return c.padded;
+      if (forced === 'pad') return c.padded || c.digits.length >= 3;
       if (forced === 'bracket') return c.style === 'bracket' || c.style === 'paren';
       return true;
     };
@@ -603,6 +635,17 @@ export function selectAnchors(pages, opts = {}) {
       g.get(p.index).push(c);
     }
   }
+  // 0001 체계에서 1000 이상 번호는 앞에 0 이 없으므로, 같은 자릿수의 0 채움 묶음에도 넣음
+  for (const p of pages) {
+    for (const c of p.candidates) {
+      if (!fullWidth(c)) continue;
+      const g = groups.get(groupKey({ ...c, padded: true }));
+      if (!g) continue;
+      if (!g.has(p.index)) g.set(p.index, []);
+      g.get(p.index).push(c);
+      g.get(p.index).sort(byReadingOrder);
+    }
+  }
   const pagesOf = (byPage) => pages.map((p) => ({ index: p.index, candidates: byPage.get(p.index) || [] }));
 
   // 이미 학습한 번호 체계가 있으면(한 쪽 다시 인식) 그대로 사용
@@ -613,6 +656,7 @@ export function selectAnchors(pages, opts = {}) {
       const byPage = groups.get(sg.key);
       if (!byPage) return;
       const res = runSelection(pagesOf(byPage), { prevLast: i === 0 ? opts.prevLast : null }, sg);
+      markFixedWidth(res.anchors, sg);
       mergeAnchors(anchors, res.anchors);
     });
     return { anchors, signature: known[0], signatures: known };
@@ -640,17 +684,35 @@ export function selectAnchors(pages, opts = {}) {
   const main = results[0];
   // 대표 체계는 이어지는 앞 쪽 번호(prevLast)를 반영해 다시 선택
   const mainRes = opts.prevLast != null ? runSelection(pagesOf(groups.get(main.key)), opts, main.res.signature) : main.res;
+  markFixedWidth(mainRes.anchors, main.res.signature);
   const anchors = new Map(pages.map((p) => [p.index, [...(mainRes.anchors.get(p.index) || [])]]));
   const signatures = [main.res.signature];
   for (const r of results.slice(1)) {
     if (!groupQuality(r.q, r.seq.length, r.res.signature, main.res.signature, r.prefixed)) continue;
     signatures.push(r.res.signature);
+    markFixedWidth(r.res.anchors, r.res.signature);
     mergeAnchors(anchors, r.res.anchors);
   }
   return { anchors, signature: main.res.signature, signatures };
 }
 
-const schemeKey = (c) => `${c.prefix || ''}|${c.padded ? c.digits.length : 0}`;
+/**
+ * 0 채움 없이 자릿수가 꽉 찬 번호(0001 체계의 1000 …)일 수 있는지.
+ * 2자리(01 체계)는 본문의 10 이상 숫자가 너무 흔해서 빼고 3자리 이상만
+ */
+const fullWidth = (c) => !c.padded && c.digits.length >= 3 && c.digits[0] !== '0';
+
+/** 0 채움 체계로 고른 꽉 찬 번호에 표시 (체계 열쇠가 같아지게) */
+function markFixedWidth(anchors, sig) {
+  if (!sig?.padded) return;
+  for (const chain of anchors.values()) for (const c of chain) if (fullWidth(c) && c.digits.length === sig.digitsLen) c.fixedWidth = true;
+}
+
+/** 번호 체계 열쇠: 말머리 | 0 채움 자릿수 (0001 체계의 1000 이상도 같은 체계) */
+export const schemeKey = (c) => `${c.prefix || ''}|${c.padded || c.fixedWidth ? c.digits.length : 0}`;
+
+/** 버려진 후보가 그 체계에 들어갈 수 있는지 (꽉 찬 번호는 0 채움 체계에도) */
+const fitsScheme = (c, key) => schemeKey(c) === key || (fullWidth(c) && key === `${c.prefix || ''}|${c.digits.length}`);
 
 /**
  * 번호가 건너뛴 곳(예: 5 → 7)을 "버려진 후보"에서 찾아 채웁니다.
@@ -689,7 +751,7 @@ export function fillGapsFromCandidates(pages, anchors, signatures = []) {
     for (const [key, seq] of byKey) {
       const sig = sigByScheme.get(key) || signatures[0];
       const okShape = (c) =>
-        schemeKey(c) === key && (!sig || Math.abs(c.relX - sig.relX) <= 0.045) && (!sig?.hRatio || (c.hRatio / sig.hRatio > 0.6 && c.hRatio / sig.hRatio < 1.7));
+        fitsScheme(c, key) && (!sig || Math.abs(c.relX - sig.relX) <= 0.045) && (!sig?.hRatio || (c.hRatio / sig.hRatio > 0.6 && c.hRatio / sig.hRatio < 1.7));
       const points = [{ num: lastByKey.get(key) ?? null, pos: -Infinity }, ...seq.map((c) => ({ num: c.num, pos: order(c) })), { num: null, pos: Infinity }];
       for (let i = 0; i + 1 < points.length; i++) {
         const a = points[i];
@@ -704,12 +766,13 @@ export function fillGapsFromCandidates(pages, anchors, signatures = []) {
         for (const c of between) {
           if (c.num === want || (c.num > want && c.num - want <= 1)) {
             c.filled = true;
+            if (schemeKey(c) !== key) c.fixedWidth = true;
             add.push(c);
             want = c.num + 1;
           }
         }
       }
-      const all = [...seq, ...add.filter((c) => schemeKey(c) === key)];
+      const all = [...seq, ...add.filter((c) => fitsScheme(c, key))];
       if (all.length) lastByKey.set(key, Math.max(...all.map((c) => c.num)));
     }
     if (add.length) {
@@ -752,6 +815,42 @@ export function chooseExpectedChain(cands, prevLast, nextFirst) {
 }
 
 /**
+ * 대표 번호 체계에서 앞뒤 흐름과 동떨어진 짧은 덩어리를 뺍니다.
+ * (책 앞 소개 쪽의 견본 번호, 목차·만화 쪽이나 부록 로그표에서 잘못 읽은 "3939" 같은 숫자)
+ * 덩어리 = 번호가 1~4씩 늘며 이어지는 구간. 6개 이하이고, 가까운 앞·뒤의 긴 덩어리 어느 쪽과도 이어지지 않으면 버림.
+ * 1부터 시작하는 덩어리(단원마다 다시 시작)는 그대로 둠.
+ * @returns {number} 뺀 개수
+ */
+export function dropStrayRuns(order, anchors, key) {
+  const runs = [];
+  for (const idx of order) {
+    for (const c of anchors.get(idx) || []) {
+      if (schemeKey(c) !== key) continue;
+      const run = runs[runs.length - 1];
+      const d = run ? c.num - run[run.length - 1].c.num : 0;
+      if (run && d >= 1 && d <= 4) run.push({ idx, c });
+      else runs.push([{ idx, c }]);
+    }
+  }
+  const isLong = (r) => r.length > 6;
+  if (!runs.some(isLong)) return 0;
+  const follows = (a, b) => !!a && !!b && b[0].c.num - a[a.length - 1].c.num >= 1 && b[0].c.num - a[a.length - 1].c.num <= 10;
+  const stray = new Set();
+  runs.forEach((r, i) => {
+    if (isLong(r) || r[0].c.num === 1) return;
+    const prev = runs.slice(0, i).reverse().find(isLong);
+    const next = runs.slice(i + 1).find(isLong);
+    if (!follows(prev, r) && !follows(r, next)) for (const { c } of r) stray.add(c);
+  });
+  if (!stray.size) return 0;
+  for (const idx of order) {
+    const chain = anchors.get(idx);
+    if (chain?.some((c) => stray.has(c))) anchors.set(idx, chain.filter((c) => !stray.has(c)));
+  }
+  return stray.size;
+}
+
+/**
  * 페이지별 "확인 필요" 표시
  * @param {number[]} order 분석한 페이지 번호(순서대로)
  * @param {Map<number, object[]>} anchors
@@ -773,7 +872,7 @@ export function flagPages(order, anchors, layouts) {
       // 번호 체계별로 연속성 확인 (유제 1,2 와 Level 01,02 처럼 섞여 있을 수 있음)
       const byKey = new Map();
       for (const c of chain) {
-        const key = `${c.prefix || ''}|${c.padded ? c.digits.length : 0}`;
+        const key = schemeKey(c);
         if (!byKey.has(key)) byKey.set(key, []);
         byKey.get(key).push(c);
       }
