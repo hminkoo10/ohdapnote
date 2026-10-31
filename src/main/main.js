@@ -534,6 +534,27 @@ function registerIpc() {
     return { canceled: false, path: result.filePath };
   });
 
+  // 아무 종류의 파일 저장 (한글 문서 등): 저장 창에서 고른 곳에
+  ipcMain.handle('files:saveFile', async (_e, { defaultName, data, filters, title } = {}) => {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: title || '파일 저장',
+      defaultPath: path.join(app.getPath('documents'), path.basename(String(defaultName || '오답노트'))),
+      filters: Array.isArray(filters) && filters.length ? filters : undefined,
+    });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    await fsp.writeFile(result.filePath, Buffer.from(data));
+    return { canceled: false, path: result.filePath };
+  });
+
+  // 한글 문서로 내보낼 때 Gemini 로 옮긴 글자·수식 (책 폴더에 따로 저장해 다시 묻지 않음)
+  ipcMain.handle('books:getTranscripts', async (_e, id) => readJson(path.join(bookDir(id), 'transcripts.json'), {}));
+  ipcMain.handle('books:saveTranscripts', async (_e, { bookId, data } = {}) => {
+    const dir = bookDir(bookId);
+    if (!fs.existsSync(dir)) return false; // 그 사이 지워진 책
+    await writeJsonAtomic(path.join(dir, 'transcripts.json'), data || {});
+    return true;
+  });
+
   ipcMain.handle('shell:openPath', (_e, p) => shell.openPath(p));
   ipcMain.handle('shell:showItem', (_e, p) => shell.showItemInFolder(p));
   ipcMain.handle('shell:openDataDir', () => shell.openPath(dataDir()));

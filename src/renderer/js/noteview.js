@@ -2,8 +2,10 @@
 
 import { h, clear, toast, modal, confirmDialog, icon, animateOut, countUp } from './ui.js';
 import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS } from './exporter.js';
+import { buildHwpx, renderStack, cropImage } from './hwpx.js';
+import { geminiTranscribe, canvasToBase64Jpeg } from './gemini.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
-import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable } from './shared.js';
+import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, geminiModels } from './shared.js';
 import { topbar, renderUpdateBadge } from './chrome.js';
 import { spineFor } from './home.js';
 
@@ -505,6 +507,14 @@ function exportPanel() {
     ),
     h(
       'div.export-options',
+      h(
+        'div.opt-row',
+        h('span.opt-label', '파일'),
+        seg('format', o.format, [['pdf', 'PDF'], ['hwpx', '한글(HWPX)']], (v) => {
+          set('format', v);
+          renderFormatHint();
+        }),
+      ),
       h('div.opt-row', h('span.opt-label', '배치'), seg('cols', o.columns, [[1, '1단'], [2, '2단']], (v) => set('columns', +v))),
       h('div.opt-row', h('span.opt-label', '풀이 여백'), seg('space', o.space, Object.entries(SPACE_OPTIONS).map(([k, v]) => [k, v.short]), (v) => set('space', v))),
       h(
@@ -513,6 +523,7 @@ function exportPanel() {
         h('label.switch', h('input', { type: 'checkbox', checked: o.labels, onchange: (e) => set('labels', e.target.checked) }), h('span.sw'), '출처(책·쪽·번호)'),
         h('label.switch', h('input', { type: 'checkbox', checked: o.renumber, onchange: (e) => set('renumber', e.target.checked) }), h('span.sw'), '새 번호'),
       ),
+      formatHint(),
     ),
     h(
       'div.export-buttons',
@@ -522,6 +533,25 @@ function exportPanel() {
       exportBtn('both-end', '문제 + 해설', '해설은 맨 뒤에', needAns || '문제를 모두 싣고, 해설은 맨 뒤에 모아서', !anyAnswers),
     ),
   );
+}
+
+/** 한글(HWPX)을 고르면 옵션 아래에 보이는 짧은 안내 */
+function formatHint() {
+  const el = h('p.small.muted.export-hint');
+  setFormatHint(el);
+  return el;
+}
+
+function setFormatHint(el) {
+  el.hidden = ns.note?.exportOptions.format !== 'hwpx';
+  el.textContent = geminiReady()
+    ? '문제·해설을 글자와 수식으로 옮겨 한글 수식 편집기로 고칠 수 있어요 (Gemini 사용)'
+    : 'Gemini 키가 없으면 문항이 그림으로 들어가요 (설정에서 키 입력)';
+}
+
+export function renderFormatHint() {
+  const el = document.querySelector('.export-hint');
+  if (el) setFormatHint(el);
 }
 
 /** 시험지 머리 미리보기 (작은 종이 모양) */
@@ -652,16 +682,27 @@ async function doExport(mode) {
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
   const btn = document.querySelector(`.export-btn[data-mode="${mode}"]`);
+  const hwpx = opts.format === 'hwpx';
+  const kindName = hwpx ? '한글 문서' : 'PDF';
   btn?.classList.add('working');
-  const closeToast = toast(`${modeName} PDF 만드는 중…`, { timeout: 0 });
+  const closeToast = toast(`${modeName} ${kindName} 만드는 중…`, { timeout: 0 });
   try {
-    const bytes = await buildPdf({ blocks, options: opts, title: info.title, info: { ...info, subtitle: sub } });
-    closeToast();
     const safe = (s) => String(s || '').replace(/[\\/:*?"<>|]/g, '_').trim();
     const fname = [safe(info.student), safe(info.title), modeName, ymd].filter(Boolean).join('_');
-    const res = await api.savePdf(`${fname}.pdf`, bytes);
+    let res;
+    let note = '';
+    if (hwpx) {
+      const bytes = await exportHwpx(blocks, entries, opts, { ...info, subtitle: sub });
+      closeToast();
+      if (bytes.stats?.picture && bytes.stats?.text) note = ` (그림으로 넣은 문항 ${bytes.stats.picture}개)`;
+      res = await api.saveFile({ defaultName: `${fname}.hwpx`, data: bytes, filters: [{ name: '한글 문서', extensions: ['hwpx'] }], title: '한글 문서 저장' });
+    } else {
+      const bytes = await buildPdf({ blocks, options: opts, title: info.title, info: { ...info, subtitle: sub } });
+      closeToast();
+      res = await api.savePdf(`${fname}.pdf`, bytes);
+    }
     if (res.canceled) return;
-    toast(`저장했어요 — ${res.path}`, {
+    toast(`저장했어요${note} — ${res.path}`, {
       type: 'success',
       timeout: 10000,
       actions: [
@@ -671,11 +712,204 @@ async function doExport(mode) {
     });
   } catch (err) {
     closeToast();
+    if (err?.name === 'AbortError') {
+      toast('한글 문서 만들기를 멈췄어요. 그때까지 옮긴 문항은 저장해 두었어요.');
+      return;
+    }
     console.error(err);
-    toast(`PDF를 만들지 못했어요: ${err.message}`, { type: 'error', timeout: 10000 });
+    toast(`${kindName}를 만들지 못했어요: ${err.message}`, { type: 'error', timeout: 10000 });
   } finally {
     btn?.classList.remove('working');
   }
+}
+
+// ===========================================================================
+// 한글 문서(HWPX): Gemini 로 문항을 글자·수식으로 옮겨 넣음 (키가 없거나 못 옮긴 문항은 그림으로)
+// ===========================================================================
+const TRANSCRIBE_WIDTH = 1500; // Gemini 에 보내는 그림 폭(px)
+const MAX_TRANSCRIPTS = 3000; // 책 하나에 저장해 두는 개수
+const transcripts = new Map(); // 책 id → {items: {열쇠: {blocks, model, at}}, dirty}  (책 폴더의 transcripts.json)
+
+async function loadTranscripts(bookId) {
+  if (!transcripts.has(bookId)) {
+    let data = null;
+    try {
+      data = await api.getTranscripts(bookId);
+    } catch (err) {
+      console.warn('저장해 둔 옮긴 결과를 읽지 못함', err);
+    }
+    transcripts.set(bookId, { items: data?.items || {}, dirty: false });
+  }
+  return transcripts.get(bookId);
+}
+
+async function saveTranscripts() {
+  for (const [bookId, t] of transcripts) {
+    if (!t.dirty) continue;
+    const keys = Object.keys(t.items);
+    if (keys.length > MAX_TRANSCRIPTS) {
+      keys.sort((a, b) => (t.items[a].at || 0) - (t.items[b].at || 0));
+      for (const k of keys.slice(0, keys.length - MAX_TRANSCRIPTS)) delete t.items[k];
+    }
+    try {
+      await api.saveTranscripts(bookId, { version: 1, items: t.items });
+      t.dirty = false;
+    } catch (err) {
+      console.warn('옮긴 결과를 저장하지 못함', err);
+    }
+  }
+}
+
+/** 같은 문항·같은 영역·같은 원본 파일이면 같은 열쇠 */
+function transcriptKey(block) {
+  const raw = JSON.stringify({ files: (block.src?.files || []).map((f) => f.name), rects: block.item.rects, stem: block.stem || null });
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < raw.length; i++) hash = Math.imul(hash ^ raw.charCodeAt(i), 0x01000193);
+  return `${block.role}|${block.item.id}|${(hash >>> 0).toString(36)}`;
+}
+
+async function exportHwpx(blocks, entries, opts, info) {
+  const bookOf = new Map(); // 원본(DocSource) → 책 id
+  for (const e of entries) for (const src of [e.src?.problem, e.src?.answer]) if (src) bookOf.set(src, e.bookId);
+  const work = blocks.filter((b) => (b.kind === 'problem' || b.kind === 'answer') && b.item && bookOf.has(b.src));
+  const useGemini = geminiReady() && work.length > 0;
+  const abort = new AbortController();
+  let ui = null;
+  if (useGemini) {
+    for (const bid of new Set(work.map((b) => bookOf.get(b.src)))) await loadTranscripts(bid);
+    const pending = work.filter((b) => !transcripts.get(bookOf.get(b.src)).items[transcriptKey(b)]);
+    if (pending.length) ui = transcribeDialog(work, pending.length, abort);
+  }
+  let quota = false; // 한도가 차면 나머지는 묻지 않고 그림으로
+
+  const transcribe = async (block, segs) => {
+    if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
+    const store = transcripts.get(bookOf.get(block.src));
+    if (!store) return null;
+    const key = transcriptKey(block);
+    const row = ui?.row(block);
+    let stack = null;
+    const getStack = async () => (stack ||= await renderStack(segs, TRANSCRIBE_WIDTH));
+    // 그림(그래프·도형)은 바로 잘라 두고 큰 canvas 는 버림
+    const finish = async (list) => {
+      const crops = new Map();
+      for (const b of list) if (b.type === 'figure') crops.set(b.box, await cropImage(await getStack(), b.box));
+      stack = null;
+      return {
+        blocks: list,
+        crop: async (box) => {
+          if (!crops.has(box)) throw new Error('잘라 둔 그림이 없음');
+          return crops.get(box);
+        },
+      };
+    };
+    const cached = store.items[key];
+    if (cached?.blocks?.length) {
+      row?.set('ok', '저장해 둔 결과');
+      return finish(cached.blocks);
+    }
+    if (quota) {
+      row?.set('empty', '한도 초과 → 그림으로');
+      return null;
+    }
+    row?.set('run', '옮기는 중…');
+    try {
+      const result = await geminiTranscribe(canvasToBase64Jpeg(await getStack(), 0.85), {
+        role: block.role,
+        models: geminiModels(),
+        rpm: state.settings.geminiRpm,
+        signal: abort.signal,
+        onStatus: (msg) => ui?.status(msg),
+      });
+      if (!result.length) {
+        row?.set('empty', '읽은 내용이 없음 → 그림으로');
+        return null;
+      }
+      store.items[key] = { blocks: [...result], model: result.model, at: Date.now() };
+      store.dirty = true;
+      row?.set('ok', `글자·수식으로 옮김 · ${result.model}`);
+      return finish(store.items[key].blocks);
+    } catch (err) {
+      if (err?.name === 'AbortError') throw err;
+      if (/한도/.test(err.message)) {
+        quota = true;
+        ui?.status(err.message);
+      }
+      row?.set('err', `${err.message} → 그림으로`);
+      return null;
+    }
+  };
+
+  try {
+    return await buildHwpx({
+      blocks,
+      options: opts,
+      title: info.title,
+      info,
+      transcribe: useGemini ? transcribe : null,
+      onProgress: (done, total) => {
+        ui?.progress(done, total);
+        if (done === total) ui?.close(); // 옮기기가 끝나면 창을 닫고 문서를 마저 만듦
+      },
+    });
+  } finally {
+    ui?.close();
+    await saveTranscripts();
+  }
+}
+
+/** 옮기는 동안 보이는 창 (문항별 상태, 진행 막대, 취소하면 바로 요청을 끊음) */
+function transcribeDialog(work, pendingCount, abort) {
+  const rows = new Map();
+  const list = h(
+    'div.gem-list',
+    work.map((b) => {
+      const row = h('div.gem-row', { dataset: { state: 'wait' } }, h('span.gem-dot'), h('strong', `${b.kind === 'answer' ? '해설' : '문제'} ${itemName(b.item)}`), h('span.gem-msg.muted', '기다리는 중'));
+      rows.set(b, row);
+      return row;
+    }),
+  );
+  const status = h('div.small.muted.gem-status', `모델: ${geminiModels().join(' → ')}`);
+  const bar = h('div.progress-bar');
+  let finished = false;
+  modal({
+    title: `문항 ${work.length}개를 글자·수식으로`,
+    body: h(
+      'div.gem-run',
+      h('p.small.muted', `새로 옮길 문항 ${pendingCount}개를 Gemini에게 보내요. 한 문항에 몇 초~수십 초 걸려요. 옮기지 못한 문항은 그림으로 넣어요. 옮긴 결과는 저장해 두어 다음에는 다시 묻지 않아요.`),
+      h('div.progress', bar),
+      status,
+      list,
+    ),
+    width: 480,
+    className: 'gem-modal',
+    buttons: [{ label: '취소', value: 'cancel' }],
+    onClose: () => {
+      if (!finished) abort.abort();
+    },
+  });
+  return {
+    row: (block) => ({
+      set(stateName, msg) {
+        const row = rows.get(block);
+        if (!row) return;
+        row.dataset.state = stateName;
+        row.querySelector('.gem-msg').textContent = msg;
+        if (stateName === 'run') row.scrollIntoView({ block: 'nearest' });
+      },
+    }),
+    status: (msg) => {
+      status.textContent = msg;
+    },
+    progress: (done, total) => {
+      bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
+    },
+    close: () => {
+      if (finished) return;
+      finished = true;
+      document.querySelector('.gem-modal')?.close?.('done');
+    },
+  };
 }
 
 export { noteSelectedCount };
