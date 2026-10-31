@@ -138,6 +138,57 @@ test('looksLikeAnswerTable: 빠른 정답표(같은 높이에 번호가 나란�
   assert.equal(looksLikeAnswerTable(normal), false);
 });
 
+test('looksLikeAnswerTable: 해설 쪽 분수·지수 속 작은 숫자(1, 1, 1 …)는 정답표로 보지 않음', async () => {
+  const { looksLikeAnswerTable } = await import('../../src/renderer/js/detect.js');
+  const nums = [61, 62, 64, 65, 66, 67, 70].map((n, r) => ({ num: n, col: r < 5 ? 0 : 1, x0: 0.09, y0: 0.07 + r * 0.12, h: 0.0105, prefix: '' }));
+  const fracs = [];
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) fracs.push({ num: 1, col: 0, x0: 0.15 + c * 0.04, y0: 0.51 + r * 0.021, h: 0.004, prefix: '' });
+  assert.equal(looksLikeAnswerTable([...nums, ...fracs]), false);
+});
+
+test('한 줄에 나란히 놓인 문항(0001 …  0002 …): 둘 다 고르고 영역을 가로로 나눔', async () => {
+  const { sameRow, byReadingOrder } = await import('../../src/renderer/js/detect.js');
+  const mk = (num, x, y) => ({ num, digits: String(num).padStart(4, '0'), style: 'plain', prefix: '', col: 0, x0: x, x1: x + 0.04, y0: y, y1: y + 0.011, h: 0.011, relX: x - 0.08, hRatio: 1, conf: 95, padded: true, font: '', ocr: true });
+  // 오른쪽 번호는 OCR 상자 높이가 살짝 달라 y0 가 왼쪽보다 조금 위
+  const cands = [mk(1, 0.08, 0.15), mk(2, 0.27, 0.1495), mk(3, 0.08, 0.2), mk(4, 0.27, 0.2002), mk(5, 0.08, 0.3)].sort(byReadingOrder);
+  assert.deepEqual(cands.map((c) => c.num), [1, 2, 3, 4, 5]);
+  assert.equal(sameRow(cands[0], cands[1]), true);
+  const { anchors } = selectAnchors([{ index: 0, candidates: cands }]);
+  assert.deepEqual(anchors.get(0).map((a) => a.num), [1, 2, 3, 4, 5]);
+
+  const w = 100;
+  const h = 140;
+  const data = new Uint8Array(w * h);
+  for (let y = 20; y < 125; y += 3) for (let x = 8; x < 46; x++) data[y * w + x] = 1;
+  const grid = { w, h, data };
+  const layout = { columns: [{ x0: 0.08, x1: 0.46 }], bodyTop: 0.1, bodyBottom: 0.9, spans: [] };
+  const items = computeItems([0], anchors, new Map([[0, layout]]), new Map([[0, grid]]), { flow: 'column' });
+  assert.deepEqual(items.map((i) => i.number), ['0001', '0002', '0003', '0004', '0005']);
+  const [r1, r2, r3] = items.map((i) => i.rects[0]);
+  // 0001 은 0002 앞에서 끝나고, 둘 다 다음 줄(0003) 전까지
+  assert.ok(r1.x + r1.w <= 0.27 && r2.x >= 0.26);
+  assert.ok(r1.y + r1.h <= 0.2 && r2.y + r2.h <= 0.2);
+  assert.ok(r3.y >= 0.19);
+});
+
+test('analyzeLayout: 단 안쪽의 빈 세로 띠보다 세로 구분선이 있는 진짜 단 경계를 고름', () => {
+  const w = 120;
+  const h = 160;
+  const data = new Uint8Array(w * h);
+  for (let y = 10; y < 150; y++) {
+    if (y % 3 === 0) {
+      // 왼쪽 단: 짧은 수식 줄(10~44) + 줄 끝의 답 표시(52~57) → 45~51 이 비어 보임
+      for (let x = 10; x < 44; x++) data[y * w + x] = 1;
+      if (y % 9 === 0) for (let x = 52; x < 57; x++) data[y * w + x] = 1;
+      for (let x = 64; x < 110; x++) data[y * w + x] = 1;
+    }
+    data[y * w + 60] = 1; // 단 사이 세로선
+  }
+  const L = analyzeLayout({ w, h, data });
+  assert.equal(L.columns.length, 2);
+  assert.ok(L.columns[1].x0 > 0.5, `오른쪽 단 시작 ${L.columns[1].x0}`);
+});
+
 test('selectAnchors: 두 번호 체계(유제 1,2… / Level 01,02…)를 함께 인식', () => {
   const mk = (num, digits, col, y, font) => ({ num, digits, style: 'plain', prefix: '', col, x0: 0.07 + col * 0.45, x1: 0.09, y0: y, y1: y + 0.015, h: 0.015, relX: 0.001, hRatio: 1.2, conf: 100, padded: digits[0] === '0', font, ocr: false });
   const pages = [

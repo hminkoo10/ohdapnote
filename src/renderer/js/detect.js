@@ -17,6 +17,23 @@ const median = (arr) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
+const hOf = (c) => c.h ?? c.y1 - c.y0;
+
+/** 같은 단·같은 줄에 나란히 있는지 (한 줄에 문항이 둘 이상인 편집: "0001 …   0002 …") */
+export function sameRow(a, b) {
+  return a.col === b.col && Math.abs(a.y0 - b.y0) < 0.5 * Math.min(hOf(a), hOf(b));
+}
+
+/** b 가 a 와 같은 줄, 오른쪽에 충분히 떨어져 있는지 (나란히 놓인 다음 문항) */
+function besideRight(a, b) {
+  return sameRow(a, b) && b.x0 - (a.x1 ?? a.x0) > 2 * Math.max(hOf(a), hOf(b));
+}
+
+/** 읽는 순서: 단 → 위에서 아래 (같은 줄이면 왼쪽에서 오른쪽) */
+export function byReadingOrder(a, b) {
+  return a.col - b.col || (sameRow(a, b) ? a.x0 - b.x0 : a.y0 - b.y0);
+}
+
 const mode = (arr) => {
   const counts = new Map();
   let best = null;
@@ -314,18 +331,24 @@ export function extractCandidates(tokens, layout, opts = {}) {
       ocr: !!opts.ocr,
     });
   }
-  candidates.sort((a, b) => a.col - b.col || a.y0 - b.y0);
+  candidates.sort(byReadingOrder);
   return { candidates, bodyH, lineCount: lines.length, headings, ranges };
 }
 
 /**
  * 빠른 정답표 같은 쪽인지: 한 단 안에서 같은 높이에 번호가 여러 개 나란히 있는 경우가 많음
  */
-export function looksLikeAnswerTable(candidates) {
+export function looksLikeAnswerTable(all) {
+  // 분수·지수 속 작은 숫자는 빼고 봄 (번호보다 확실히 작음. 해설 쪽의 1/2, 1/3 … 이 표처럼 보이지 않게)
+  const hs = all.map((c) => c.h).sort((a, b) => a - b);
+  const big = hs.length ? hs[Math.floor(hs.length * 0.75)] : 0;
+  const candidates = all.filter((c) => c.h >= 0.6 * big);
   if (candidates.length >= 20) {
     let sideBySide = 0;
     for (const c of candidates) {
-      if (candidates.some((d) => d !== c && d.col === c.col && Math.abs(d.y0 - c.y0) < 0.4 * c.h && Math.abs(d.x0 - c.x0) > 3 * c.h)) sideBySide++;
+      // 표의 한 줄에는 서로 다른, 가까운 번호가 나란히 있음 (같은 숫자가 나란한 건 수식)
+      const pair = (d) => d !== c && d.col === c.col && d.num !== c.num && Math.abs(d.num - c.num) <= 30 && Math.abs(d.y0 - c.y0) < 0.4 * c.h && Math.abs(d.x0 - c.x0) > 3 * c.h;
+      if (candidates.some(pair)) sideBySide++;
     }
     if (sideBySide >= candidates.length * 0.4) return true;
   }
@@ -435,8 +458,8 @@ export function chooseChain(cands, prevLast, priorFn) {
     for (let i = 0; i < j; i++) {
       const a = cands[i];
       const b = cands[j];
-      // 같은 단에서 거의 같은 높이면 같이 선택할 수 없음
-      if (a.col === b.col && b.y0 - a.y0 < 0.6 * Math.max(a.h, b.h)) continue;
+      // 같은 단에서 거의 같은 높이면 같이 선택할 수 없음 (한 줄에 나란히 놓인 문항은 예외)
+      if (a.col === b.col && b.y0 - a.y0 < 0.6 * Math.max(a.h, b.h) && !besideRight(a, b)) continue;
       const v = dp[i] + transitionScore(a, b);
       if (v > best) {
         best = v;
@@ -535,10 +558,11 @@ function mergeAnchors(anchors, extraByPage) {
     const merged = [...(anchors.get(idx) || [])];
     for (const c of extra) {
       // 이미 고른 번호와 거의 같은 자리면 건너뜀
-      if (merged.some((a) => a.col === c.col && Math.abs(a.y0 - c.y0) < 0.6 * Math.max(a.h, c.h))) continue;
+      const hh = (a) => Math.max(a.h, c.h);
+      if (merged.some((a) => a.col === c.col && Math.abs(a.y0 - c.y0) < 0.6 * hh(a) && Math.abs(a.x0 - c.x0) < 3 * hh(a))) continue;
       merged.push(c);
     }
-    merged.sort((a, b) => a.col - b.col || a.y0 - b.y0);
+    merged.sort(byReadingOrder);
     anchors.set(idx, merged);
   }
 }
@@ -640,12 +664,14 @@ export function fillGapsFromCandidates(pages, anchors, signatures = []) {
     const k = `${sg.prefix || ''}|${sg.padded ? sg.digitsLen : 0}`;
     if (!sigByScheme.has(k)) sigByScheme.set(k, sg);
   }
-  const order = (c) => c.col * 10 + c.y0;
   const lastByKey = new Map();
   let filled = 0;
   for (let pi = 0; pi < pages.length; pi++) {
     const p = pages[pi];
     const chain = anchors.get(p.index) || [];
+    // 읽는 순서상의 자리 (같은 줄에 나란한 번호는 왼쪽이 먼저)
+    const rank = new Map([...new Set([...p.candidates, ...chain])].sort(byReadingOrder).map((c, i) => [c, i]));
+    const order = (c) => rank.get(c);
     const chosen = new Set(chain);
     const pool = p.candidates.filter((c) => !chosen.has(c));
     const add = [];
@@ -688,7 +714,7 @@ export function fillGapsFromCandidates(pages, anchors, signatures = []) {
     }
     if (add.length) {
       filled += add.length;
-      anchors.set(p.index, [...chain, ...add].sort((x, y) => x.col - y.col || x.y0 - y.y0));
+      anchors.set(p.index, [...chain, ...add].sort(byReadingOrder));
     }
   }
   return filled;
@@ -701,7 +727,7 @@ export function fillGapsFromCandidates(pages, anchors, signatures = []) {
 export function chooseExpectedChain(cands, prevLast, nextFirst) {
   const lo = prevLast ?? 0;
   const hi = nextFirst ?? lo + 40;
-  const list = cands.filter((c) => c.num > lo && c.num < hi).sort((a, b) => a.col - b.col || a.y0 - b.y0);
+  const list = cands.filter((c) => c.num > lo && c.num < hi).sort(byReadingOrder);
   // 최장 증가 부분수열 (번호가 1씩 늘어날수록, 줄 맨 앞에 가까울수록 가점)
   const n = list.length;
   const best = new Float64Array(n);
@@ -710,7 +736,7 @@ export function chooseExpectedChain(cands, prevLast, nextFirst) {
     best[j] = 1 + (list[j].num === lo + 1 ? 0.5 : 0) - Math.min(0.5, list[j].relX * 5);
     for (let i = 0; i < j; i++) {
       if (list[i].num >= list[j].num) continue;
-      if (list[i].col === list[j].col && list[j].y0 - list[i].y0 < 0.6 * Math.max(list[i].h, list[j].h)) continue;
+      if (list[i].col === list[j].col && list[j].y0 - list[i].y0 < 0.6 * Math.max(list[i].h, list[j].h) && !besideRight(list[i], list[j])) continue;
       const v = best[i] + 1 + (list[j].num - list[i].num === 1 ? 0.6 : 0) - Math.min(0.5, list[j].relX * 5);
       if (v > best[j]) {
         best[j] = v;
@@ -856,9 +882,14 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
         const col = cols[c];
         const x0 = Math.max(0, col.x0 - 0.006);
         const x1 = Math.min(1, col.x1 + 0.006);
-        const inCol = chain
-          .filter((a) => a.col === c && a.y0 >= top - 0.01 && (a.y0 < bottom || z === zones.length - 1))
-          .sort((a, b) => a.y0 - b.y0);
+        const inCol = chain.filter((a) => a.col === c && a.y0 >= top - 0.01 && (a.y0 < bottom || z === zones.length - 1)).sort(byReadingOrder);
+        // 한 줄에 나란히 놓인 번호들은 한 줄로 묶음 (세로는 다음 줄 번호까지, 가로는 오른쪽 번호 앞까지)
+        const rows = [];
+        for (const a of inCol) {
+          const row = rows[rows.length - 1];
+          if (row && sameRow(row[0], a)) row.push(a);
+          else rows.push([a]);
+        }
         // 공통 지문 머리 ([0100~0120]) — 그 아래 첫 문항 전까지가 공통 지문
         const rangesHere = (opts.ranges?.get(pageIdx) || []).filter((r) => r.col === c && r.y0 >= top - 0.01 && r.y0 < bottom);
         // 단원·유형 제목 등에서 영역을 끊음 (이 단과 가로로 겹치는 것만)
@@ -889,29 +920,34 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
           const r = trimRect(grid, { x: x0, y: y0, w: x1 - x0, h: Math.max(0.01, y1 - y0) });
           if (r) stems.push({ a: rg.a, b: rg.b, y: rg.y0, page: pageIdx, z, c, rect: { page: pageIdx, ...r } });
         }
-        for (let k = 0; k < inCol.length; k++) {
-          const a = inCol[k];
-          const next = inCol[k + 1];
-          const y0 = Math.max(top - 0.01, a.y0 - padOf(a));
-          const nominal = next ? next.y0 - padOf(next) : bottom;
-          const y1 = cutBetween(y0, nominal);
-          const raw = { x: Math.min(x0, a.x0 - 0.004), y: y0, w: 0, h: Math.max(0.01, y1 - y0) };
-          raw.w = x1 - raw.x;
-          const r = trimRect(grid, raw) || raw;
-          const item = {
-            page: pageIdx,
-            zone: z,
-            col: c,
-            number: a.digits,
-            num: a.num,
-            prefix: a.prefix || '',
-            rects: [{ page: pageIdx, ...r }],
-            source: opts.source?.get(pageIdx) || 'text',
-            conf: Math.round(a.conf ?? 100),
-          };
-          items.push(item);
-          open = item;
-          if (y1 < nominal - 1e-6) open = null; // 제목에서 끊겼으면 더 잇지 않음
+        for (let ri = 0; ri < rows.length; ri++) {
+          const row = rows[ri];
+          const nextRow = rows[ri + 1];
+          const nominal = nextRow ? Math.min(...nextRow.map((b) => b.y0 - padOf(b))) : bottom;
+          for (let k = 0; k < row.length; k++) {
+            const a = row[k];
+            const right = row[k + 1];
+            const y0 = Math.max(top - 0.01, a.y0 - padOf(a));
+            const y1 = cutBetween(y0, nominal);
+            const rx0 = k === 0 ? Math.min(x0, a.x0 - 0.004) : a.x0 - 0.004;
+            const rx1 = right ? right.x0 - 0.004 : x1;
+            const raw = { x: rx0, y: y0, w: rx1 - rx0, h: Math.max(0.01, y1 - y0) };
+            const r = trimRect(grid, raw) || raw;
+            const item = {
+              page: pageIdx,
+              zone: z,
+              col: c,
+              number: a.digits,
+              num: a.num,
+              prefix: a.prefix || '',
+              rects: [{ page: pageIdx, ...r }],
+              source: opts.source?.get(pageIdx) || 'text',
+              conf: Math.round(a.conf ?? 100),
+            };
+            items.push(item);
+            open = item;
+            if (y1 < nominal - 1e-6) open = null; // 제목에서 끊겼으면 더 잇지 않음
+          }
         }
         if (flow !== 'continue') open = null;
       }
@@ -950,10 +986,11 @@ export function assignIds(items) {
   return items;
 }
 
-/** 문항을 읽는 순서로 정렬(쪽 → 구역 → 단 → 위치) */
+/** 문항을 읽는 순서로 정렬(쪽 → 구역 → 단 → 위치, 같은 줄에 나란하면 왼쪽부터) */
 export function sortItems(items) {
+  const pos = (r, s) => (Math.abs(r.y - s.y) < 0.008 ? r.x - s.x : r.y - s.y);
   return [...items].sort(
-    (a, b) => a.page - b.page || (a.zone ?? 0) - (b.zone ?? 0) || (a.col ?? 0) - (b.col ?? 0) || a.rects[0].y - b.rects[0].y,
+    (a, b) => a.page - b.page || (a.zone ?? 0) - (b.zone ?? 0) || (a.col ?? 0) - (b.col ?? 0) || pos(a.rects[0], b.rects[0]),
   );
 }
 

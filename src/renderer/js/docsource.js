@@ -55,6 +55,7 @@ export class DocSource {
     this._images = new Map();
     this._pageCache = new Map();
     this._tasks = [];
+    this._hiddenStreak = new Map(); // 파일별: 연달아 "숨은 OCR 글자뿐"이었던 쪽 수
   }
 
   get numPages() {
@@ -220,6 +221,48 @@ export class DocSource {
       }
     }
     return tokens;
+  }
+
+  /**
+   * 글자가 모두 보이지 않게(렌더 모드 3·7) 깔려 있는지.
+   * 스캔본 위에 휴대폰·스캐너가 OCR 글자를 숨겨 넣은 PDF 로, 한글이 엉터리로 읽혀 있는 경우가 많아 믿지 않습니다.
+   */
+  async hasOnlyHiddenText(i) {
+    const p = this.pages[i];
+    if (p.kind !== 'pdf') return false;
+    // 같은 파일에서 3쪽 연달아 그랬다면 스캔 앱으로 만든 PDF 로 보고 더 검사하지 않음(쪽 이미지를 다시 읽느라 느림)
+    const streak = this._hiddenStreak.get(p.fileIndex) || 0;
+    if (streak >= 3) return true;
+    const hidden = await this._checkHiddenText(i);
+    this._hiddenStreak.set(p.fileIndex, hidden ? streak + 1 : 0);
+    return hidden;
+  }
+
+  async _checkHiddenText(i) {
+    const page = await this.getPdfPage(i);
+    let ops;
+    try {
+      ops = await page.getOperatorList();
+    } catch {
+      return false;
+    }
+    const OPS = pdfjsLib.OPS;
+    const SHOW = new Set([OPS.showText, OPS.showSpacedText, OPS.nextLineShowText, OPS.nextLineSetSpacingShowText]);
+    const stack = [];
+    let mode = 0;
+    let shown = 0;
+    let hidden = 0;
+    for (let k = 0; k < ops.fnArray.length; k++) {
+      const fn = ops.fnArray[k];
+      if (fn === OPS.save) stack.push(mode);
+      else if (fn === OPS.restore) mode = stack.length ? stack.pop() : 0;
+      else if (fn === OPS.setTextRenderingMode) mode = ops.argsArray[k][0];
+      else if (SHOW.has(fn)) {
+        if ((mode & 3) === 3) hidden++;
+        else shown++;
+      }
+    }
+    return hidden > 0 && shown === 0;
   }
 
   /** 내보내기용: 원본 파일 바이트 */
