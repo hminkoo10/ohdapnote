@@ -240,6 +240,31 @@ test('dropStrayRuns: 소개 쪽 견본 번호·만화 쪽·부록 표의 동떨�
   // 단원마다 1부터 다시 시작하는 짧은 단원은 그대로
   const units = new Map([[0, range(1, 9)], [1, range(1, 3)], [2, range(1, 8)]]);
   assert.equal(dropStrayRuns([0, 1, 2], units, '|4'), 0);
+  // 번호가 큰 책(수능특강)에서 책 소개 쪽 견본 그림 속 번호, 개념 쪽 소제목 "1, 2" 는 뺌 (Level 3 의 1~3 은 둠)
+  const plain = (num, h) => ({ num, digits: String(num), padded: false, prefix: '', h, ocr: false });
+  const book = new Map([
+    [0, [plain(1, 0.0053), plain(2, 0.0053)]],
+    [1, [1, 2, 3, 4, 5, 6, 7, 8].map((n) => plain(n, 0.0249))],
+    [2, [1, 2, 3].map((n) => plain(n, 0.0249))],
+    [3, [plain(1, 0.0138), plain(2, 0.0138)]],
+    [4, [1, 2, 3, 4, 5, 6].map((n) => plain(n, 0.018))],
+  ]);
+  assert.equal(dropStrayRuns([0, 1, 2, 3, 4], book, '|0'), 4);
+  assert.deepEqual([...book.values()].map((ch) => ch.length), [0, 8, 3, 0, 6]);
+});
+
+test('extractCandidates: 해설 단원 첫머리 작은 정답 상자(1 ② 2 ② 3 ① 4 24 … / 7 ① 8 ③)의 번호는 후보에서 뺌', () => {
+  const t = (str, x, y, h = 0.0152) => ({ str, x0: x, x1: x + 0.012, y0: y, y1: y + h });
+  const tokens = [];
+  // 상자 첫 줄: 번호와 답이 번갈아 (답은 ①② 같은 기호)
+  ['1', '2', '3', '4', '5', '6'].forEach((n, i) => tokens.push(t(n, 0.13 + i * 0.061, 0.178), t('②', 0.15 + i * 0.061, 0.178)));
+  tokens.push(t('7', 0.13, 0.201), t('①', 0.15, 0.201), t('8', 0.191, 0.201), t('③', 0.211, 0.201));
+  // 해설 1, 2 (큰 번호, 뒤에 본문)
+  tokens.push(t('1', 0.107, 0.247, 0.0221), t('함수의', 0.14, 0.25, 0.012), t('2', 0.107, 0.58, 0.0221), t('따라서', 0.14, 0.583, 0.012));
+  const layout = { columns: [{ x0: 0.1, x1: 0.5 }], bodyTop: 0.05, bodyBottom: 0.95 };
+  const { candidates } = extractCandidates(tokens, layout);
+  assert.deepEqual(candidates.map((c) => c.num), [1, 2]);
+  assert.ok(candidates.every((c) => c.x0 < 0.11));
 });
 
 test('sameRow: OCR 이 옆 분수까지 묶어 키가 커진 번호 상자도 오른쪽 번호와 같은 줄', async () => {

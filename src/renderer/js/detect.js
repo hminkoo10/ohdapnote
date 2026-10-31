@@ -182,6 +182,9 @@ export function extractCandidates(tokens, layout, opts = {}) {
         } else segs.push({ words: [w], x0: w.x0, x1: w.x1 });
       }
       for (const seg of segs) {
+        // "예제 1  함수의 극한" 처럼 말머리로 시작하는 줄은 (글씨가 커도) 제목이 아니라 문항 머리
+        const first = seg.words[0].str;
+        if (PREFIXES.some((p) => first === p || (first.startsWith(p) && /^\d/.test(first.slice(p.length))))) continue;
         const textWords = seg.words.filter((w) => !/^[\d.()[\]]+$/.test(w.str));
         const hangul = textWords.reduce((n, w) => n + (w.str.match(HANGUL)?.length || 0), 0);
         if (hangul < 2) continue;
@@ -334,24 +337,59 @@ export function extractCandidates(tokens, layout, opts = {}) {
     });
   }
   candidates.sort(byReadingOrder);
-  return { candidates, bodyH, lineCount: lines.length, headings, ranges };
+  return { candidates: dropAnswerRows(candidates), bodyH, lineCount: lines.length, headings, ranges };
 }
 
-/** 한 줄(왼쪽→오른쪽) 안에서 1씩 늘어나는 번호가 몇 개 이어지는지 (정답표 한 줄: 1 ② 2 ② 3 ① 4 24 …) */
+/** 한 줄(왼쪽→오른쪽) 안에서 1씩 늘어나며 이어지는 가장 긴 번호들 (정답표 한 줄: 1 ② 2 ② 3 ① 4 24 …) */
 function longestRun(row, maxGap) {
-  let best = 0;
+  let best = [];
   for (let i = 0; i < row.length; i++) {
-    let n = 1;
-    let cur = row[i];
+    const run = [row[i]];
     for (let j = i + 1; j < row.length; j++) {
-      if (row[j].num === cur.num + 1 && row[j].x0 - cur.x0 <= maxGap) {
-        n++;
-        cur = row[j];
-      }
+      const cur = run[run.length - 1];
+      if (row[j].num === cur.num + 1 && row[j].x0 - cur.x0 <= maxGap) run.push(row[j]);
     }
-    best = Math.max(best, n);
+    if (run.length > best.length) best = run;
   }
   return best;
+}
+
+/** 같은 단·같은 줄끼리 묶기 (읽는 순서) */
+function rowsOf(cands) {
+  const rows = [];
+  for (const c of [...cands].sort(byReadingOrder)) {
+    const row = rows[rows.length - 1];
+    if (row && sameRow(row[0], c)) row.push(c);
+    else rows.push([c]);
+  }
+  return rows;
+}
+
+/**
+ * 해설 단원 첫머리의 작은 정답 상자("1 ② 2 ② 3 ① 4 24 …") 번호를 뺍니다:
+ * 한 줄에 1씩 늘어나는 번호가 촘촘히 4개 이상(답이 셋뿐인 "Level 3" 상자는 더 촘촘히 3개) 나란한 줄
+ * + 바로 아래에서 그 번호를 이어 가는 줄. (한 줄에 문항이 둘·셋 나란한 문제 쪽은 번호 사이가 넓어서 해당 없음)
+ */
+function dropAnswerRows(cands) {
+  const rows = rowsOf(cands);
+  const drop = new Set();
+  rows.forEach((row, i) => {
+    let run = longestRun(row, 0.09);
+    if (run.length < 4) run = longestRun(row, 0.075);
+    if (run.length < 3) return;
+    row.forEach((c) => drop.add(c));
+    let last = run[run.length - 1];
+    let prev = row;
+    for (let j = i + 1; j < rows.length; j++) {
+      const next = rows[j];
+      if (next[0].col !== row[0].col || next[0].y0 - prev[0].y0 > 3 * hOf(prev[0])) break;
+      if (!next.some((c) => c.num === last.num + 1)) break;
+      next.forEach((c) => drop.add(c));
+      for (const c of next) if (c.num === last.num + 1) last = c;
+      prev = next;
+    }
+  });
+  return drop.size ? cands.filter((c) => !drop.has(c)) : cands;
 }
 
 /**
@@ -367,13 +405,7 @@ export function looksLikeAnswerTable(all, { strict = false } = {}) {
   const big = hs.length ? hs[Math.floor(hs.length * 0.75)] : 0;
   const candidates = all.filter((c) => c.h >= 0.6 * big);
   // 해설 속 증감표나 단원 첫머리의 작은 정답 상자 한 줄과 구분하려고, 그런 줄이 두 줄 이상이어야 함
-  const rows = [];
-  for (const c of [...candidates].sort(byReadingOrder)) {
-    const row = rows[rows.length - 1];
-    if (row && sameRow(row[0], c)) row.push(c);
-    else rows.push([c]);
-  }
-  const tableRows = rows.filter((row) => longestRun(row, strict ? 0.09 : Infinity) >= 4);
+  const tableRows = rowsOf(candidates).filter((row) => longestRun(row, strict ? 0.09 : Infinity).length >= 4);
   const members = tableRows.reduce((n, row) => n + row.length, 0);
   if (tableRows.length >= 2 && members >= candidates.length * (strict ? 0.5 : 0.4)) return true;
   // 단마다 줄 맨 앞(왼쪽 끝) 번호만 위→아래로
@@ -727,6 +759,13 @@ export function fillGapsFromCandidates(pages, anchors, signatures = []) {
     if (!sigByScheme.has(k)) sigByScheme.set(k, sg);
   }
   const lastByKey = new Map();
+  const nextFirstOf = (pi, key) => {
+    for (let j = pi + 1; j < pages.length; j++) {
+      const c = (anchors.get(pages[j].index) || []).find((x) => schemeKey(x) === key);
+      if (c) return c.num;
+    }
+    return null;
+  };
   let filled = 0;
   for (let pi = 0; pi < pages.length; pi++) {
     const p = pages[pi];
@@ -757,11 +796,12 @@ export function fillGapsFromCandidates(pages, anchors, signatures = []) {
         const a = points[i];
         const b = points[i + 1];
         if (a.num == null) continue;
-        const hi = b.num != null ? b.num : a.num + 12;
-        if (hi - a.num < 2 && b.num != null) continue;
+        // 쪽 끝 구간은 다음 쪽 첫 번호가 실제로 건너뛰었을 때만 그 사이를 채움 (다음 단원이 1번부터면 빠진 게 없음)
+        const hi = b.num != null ? b.num : nextFirstOf(pi, key);
+        if (hi == null || hi - a.num < 2) continue;
         let want = a.num + 1;
         const between = pool
-          .filter((c) => okShape(c) && order(c) > a.pos && order(c) < b.pos && c.num > a.num && c.num < (b.num ?? hi + 1))
+          .filter((c) => okShape(c) && order(c) > a.pos && order(c) < b.pos && c.num > a.num && c.num < hi)
           .sort((x, y) => order(x) - order(y));
         for (const c of between) {
           if (c.num === want || (c.num > want && c.num - want <= 1)) {
@@ -818,7 +858,8 @@ export function chooseExpectedChain(cands, prevLast, nextFirst) {
  * 대표 번호 체계에서 앞뒤 흐름과 동떨어진 짧은 덩어리를 뺍니다.
  * (책 앞 소개 쪽의 견본 번호, 목차·만화 쪽이나 부록 로그표에서 잘못 읽은 "3939" 같은 숫자)
  * 덩어리 = 번호가 1~4씩 늘며 이어지는 구간. 6개 이하이고, 가까운 앞·뒤의 긴 덩어리 어느 쪽과도 이어지지 않으면 버림.
- * 1부터 시작하는 덩어리(단원마다 다시 시작)는 그대로 둠.
+ * 1부터 시작하는 덩어리(단원마다 다시 시작)는 그대로 두되, 글자 레이어로 잰 높이가 이 책 번호들보다 확실히 작은
+ * 숫자로만 된 3개 이하 덩어리(개념 쪽 소제목 "1 함수의 수렴과 발산", 책 소개 쪽 견본 그림 속 번호)는 버림.
  * @returns {number} 뺀 개수
  */
 export function dropStrayRuns(order, anchors, key) {
@@ -836,7 +877,13 @@ export function dropStrayRuns(order, anchors, key) {
   if (!runs.some(isLong)) return 0;
   const follows = (a, b) => !!a && !!b && b[0].c.num - a[a.length - 1].c.num >= 1 && b[0].c.num - a[a.length - 1].c.num <= 10;
   const stray = new Set();
+  const typicalH = median(runs.flat().map(({ c }) => c.h));
+  const small = ({ c }) => !c.ocr && c.h < 0.6 * typicalH;
   runs.forEach((r, i) => {
+    if (r.length <= 3 && r.every(small)) {
+      for (const { c } of r) stray.add(c);
+      return;
+    }
     if (isLong(r) || r[0].c.num === 1) return;
     const prev = runs.slice(0, i).reverse().find(isLong);
     const next = runs.slice(i + 1).find(isLong);
