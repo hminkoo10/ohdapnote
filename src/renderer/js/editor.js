@@ -3,6 +3,7 @@
 //  - [문항 추가] 모드에서 빈 곳을 드래그: 새 문항
 //  - [영역 추가] 모드: 선택한 문항에 영역(다음 단/쪽으로 이어지는 부분) 추가
 //  - Delete: 선택한 영역(또는 문항) 삭제
+//  - 점선 번호(인식은 했지만 고르지 않은 후보)를 누르면 그 자리에 문항 추가
 
 import { h, clear, icon, debounce, toast } from './ui.js';
 import { ROLE_NAME, pageLabel, itemsByPage } from './store.js';
@@ -58,7 +59,8 @@ export function createEditor(ctx) {
       side.append(h('p.muted.small', '파일이 없어요.'));
       return;
     }
-    const flaggedCount = Object.values(d.pageInfo || {}).filter((pi) => pi.flags?.length).length;
+    const flaggedCount = Object.values(d.pageInfo || {}).filter((pi) => pi.flags?.length && !pi.ok).length;
+    const missing = ctx.missing?.(st.role) || new Map();
     side.append(
       h(
         'label.check.small',
@@ -77,14 +79,17 @@ export function createEditor(ctx) {
     const list = h('div.page-list');
     for (let i = 0; i < s.numPages; i++) {
       const info = d.pageInfo?.[i];
-      const flagged = info?.flags?.length > 0;
+      const miss = missing.get(i)?.length || 0;
+      const flagged = (info?.flags?.length > 0 && !info.ok) || miss > 0;
       if (st.onlyFlagged && !flagged) continue;
       const n = byPage.get(i)?.length || 0;
+      const why = [...(info?.ok ? [] : info?.flags || []), ...(miss ? [`빠진 번호 ${miss}개`] : [])];
       const row = h(
         `button.page-row${i === st.page ? '.active' : ''}${flagged ? '.flagged' : ''}${info?.analyzed ? '' : '.unanalyzed'}`,
-        { onclick: () => show(st.role, i), title: flagged ? info.flags.join(', ') : '' },
+        { onclick: () => show(st.role, i), title: why.join(', ') },
         h('span.pr-page', pageLabel(d, i)),
         h('span.pr-count', info?.analyzed ? `${n}개` : '–'),
+        miss ? h('span.pr-miss', `?${miss}`) : null,
         flagged ? icon('warn') : null,
       );
       list.append(row);
@@ -96,7 +101,7 @@ export function createEditor(ctx) {
   function firstPage(role) {
     const d = ctx.project()?.docs?.[role];
     if (!d) return 0;
-    const flagged = Object.entries(d.pageInfo || {}).find(([, v]) => v.flags?.length);
+    const flagged = Object.entries(d.pageInfo || {}).find(([, v]) => v.flags?.length && !v.ok);
     if (flagged) return Number(flagged[0]);
     const first = sortItems(d.items || [])[0];
     return first ? first.page : 0;
@@ -158,7 +163,7 @@ export function createEditor(ctx) {
         h('label.tb-num', '번호', numInput),
       ),
       h('div.tb-group.tb-right',
-        h('button.btn.btn-small', { onclick: () => ctx.reanalyzePage(st.role, st.page), title: '이 쪽만 다시 자동 인식합니다 (이 쪽에서 직접 고친 내용은 사라집니다)' }, icon('refresh'), '다시 인식'),
+        h('button.btn.btn-small', { onclick: () => ctx.reanalyzePage(st.role, st.page), title: '이 쪽만 고해상도로 한 번 더, 앞뒤 쪽 번호에 맞춰 꼼꼼히 다시 찾아요 (이 쪽에서 직접 고친 내용은 바뀔 수 있어요)' }, icon('search'), '꼼꼼히 다시 찾기'),
         h('button.btn.btn-small', { onclick: () => ctx.geminiPage(st.role, st.page), title: 'Gemini 로 이 쪽을 인식합니다 (설정에서 API 키 필요)' }, icon('sparkle'), 'Gemini'),
         h('button.btn.btn-icon.btn-ghost', { title: '축소', onclick: () => setZoom(st.zoom / 1.2) }, icon('zoomOut')),
         h('span.muted.small.tb-zoom', `${Math.round(st.zoom * 100)}%`),
@@ -177,7 +182,23 @@ export function createEditor(ctx) {
     else {
       const src = { text: 'PDF 글자', ocr: 'OCR(스캔 인식)', gemini: 'Gemini', manual: '직접 편집' }[info.source] || info.source;
       parts.push(h('span.muted', `인식 방법: ${src}`));
-      if (info.flags?.length) parts.push(h('span.warn-text', icon('warn'), `확인 필요: ${info.flags.join(', ')}`));
+      const miss = ctx.missing?.(st.role)?.get(st.page) || [];
+      const why = [...(info.ok ? [] : info.flags || []), ...(miss.length ? [`빠진 번호 ${miss.map((m) => m.num).join(', ')}`] : [])];
+      if (why.length) {
+        parts.push(h('span.warn-text', icon('warn'), `확인 필요: ${why.join(', ')}`));
+        if (ctx.onDismiss) {
+          parts.push(
+            h('button.btn.btn-small.btn-ok', {
+              onclick: () => {
+                ctx.onDismiss(st.role, st.page);
+                refresh();
+              },
+              title: '이 쪽은 이대로 괜찮아요 (확인 표시 지우기)',
+            }, icon('check'), '문제없음'),
+          );
+        }
+      } else if (info.ok && info.flags?.length) parts.push(h('span.ok-text', icon('circleCheck'), '확인함'));
+      if (why.length && ghostCands().length) parts.push(h('span.muted', '점선 번호를 누르면 그 자리에 문항이 추가돼요.'));
     }
     const modeHint = {
       select: '상자를 눌러 고르고, 끌어서 옮기거나 모서리로 크기를 바꿀 수 있어요.',
@@ -244,6 +265,86 @@ export function createEditor(ctx) {
         overlay.append(box);
       });
     });
+    if (st.mode !== 'select') return;
+    const missing = new Set((ctx.missing?.(st.role)?.get(st.page) || []).map((m) => `${m.prefix}|${m.num}`));
+    // 확인이 필요한 쪽에서만 후보를 보여 줌 (빠진 번호와 같은 후보는 눈에 띄게)
+    const info = d.pageInfo?.[st.page];
+    const needsCheck = missing.size > 0 || (info?.flags?.length > 0 && !info.ok);
+    if (!needsCheck) return;
+    ghostCands().forEach((c, k) => {
+      const want = missing.has(`${c.prefix || ''}|${c.num}`);
+      overlay.append(
+        h(
+          `button.cand${want ? '.want' : ''}`,
+          {
+            title: `${c.prefix ? `${c.prefix} ` : ''}${c.digits}번으로 문항 추가`,
+            style: { left: pct(c.x0 - 0.004), top: pct(c.y0 - 0.003), width: pct(c.x1 - c.x0 + 0.008), height: pct(c.y1 - c.y0 + 0.006), '--i': String(Math.min(k, 20)) },
+            onpointerdown: (e) => e.stopPropagation(),
+            onclick: (e) => {
+              e.stopPropagation();
+              addFromCandidate(c);
+            },
+          },
+          h('span.cand-label', '+', c.digits),
+        ),
+      );
+    });
+  }
+
+  /** 아직 문항이 아닌 번호 후보 (이미 그 자리에 문항이 있으면 뺌) */
+  function ghostCands() {
+    const d = doc();
+    const info = d?.pageInfo?.[st.page];
+    if (!info?.cands?.length) return [];
+    const rects = (d.items || []).filter((it) => it.page === st.page).map((it) => it.rects[0]);
+    return info.cands
+      .filter((c) => !rects.some((r) => r.page === st.page && c.y0 >= r.y - 0.006 && c.y0 <= r.y + 0.025 && c.x0 < r.x + r.w && c.x1 > r.x))
+      .slice(0, 40);
+  }
+
+  /** 후보 번호 자리에서 시작하는 문항 만들기: 위 문항이 그 자리를 덮고 있으면 거기서 끊음 */
+  function addFromCandidate(c) {
+    const d = doc();
+    const info = d.pageInfo?.[st.page] || {};
+    const cols = info.cols?.length ? info.cols : [{ x0: 0.05, x1: 0.95 }];
+    const col = cols[Math.min(cols.length - 1, Math.max(0, c.col ?? 0))] || cols[0];
+    const bodyBottom = info.body?.[1] ?? 0.95;
+    const x0 = Math.max(0, Math.min(col.x0, c.x0 - 0.004));
+    const x1 = Math.max(x0 + 0.05, col.x1);
+    const y0 = Math.max(0, c.y0 - 0.006);
+    let y1 = bodyBottom;
+    for (const it of d.items || []) {
+      for (const r of it.rects) {
+        if (r.page !== st.page || !(r.x < x1 && r.x + r.w > x0)) continue;
+        if (r.y < y0 && r.y + r.h > y0) {
+          // 위 문항이 이 번호를 덮고 있음 → 그 문항을 여기서 끊고, 남은 아래는 새 문항으로
+          y1 = Math.min(bodyBottom, r.y + r.h);
+          r.h = Math.max(0.01, y0 - 0.004 - r.y);
+          it.source = 'manual';
+        } else if (r.y >= y0 + 0.004) {
+          y1 = Math.min(y1, r.y - 0.004);
+        }
+      }
+    }
+    const num = parseInt(c.digits, 10);
+    const item = {
+      page: st.page,
+      zone: 0,
+      col: c.col ?? 0,
+      number: String(c.digits),
+      num,
+      prefix: c.prefix || undefined,
+      rects: [{ page: st.page, x: x0, y: y0, w: x1 - x0, h: Math.max(0.02, y1 - y0) }],
+      source: 'manual',
+      conf: 100,
+      id: `new-${Date.now()}`,
+    };
+    const above = (d.items || []).filter((x) => x.page === st.page && x.rects[0].y <= y0);
+    item.zone = above.length ? Math.max(...above.map((x) => x.zone ?? 0)) : 0;
+    if (!item.prefix) delete item.prefix;
+    d.items.push(item);
+    commit(item);
+    toast(`${c.prefix ? `${c.prefix} ` : ''}${c.digits}번을 추가했어요. 영역이 맞는지 확인해 주세요.`);
   }
 
   const pct = (v) => `${(v * 100).toFixed(3)}%`;

@@ -107,10 +107,14 @@ jobs:
         env:
           NOTES: ${{ inputs.notes }}
         run: |
-          # 1) 수동 실행 때 입력한 내용  2) 태그 메시지  3) 지난 버전 이후 커밋 제목  4) RELEASE_NOTES.md  5) 기본 문구
+          # 1) 수동 실행 때 입력한 내용  2) 태그 메시지  3) 지난 버전 이후 고친 RELEASE_NOTES.md
+          # 4) 지난 버전 이후 커밋 제목  5) RELEASE_NOTES.md  6) 기본 문구
           if [ -z "$NOTES" ] && [ "${{ github.ref_type }}" = "tag" ]; then
             git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" || true
             NOTES="$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)')"
+          fi
+          if [ -z "$NOTES" ] && [ -n "$PREV_TAG" ] && [ -f RELEASE_NOTES.md ] && ! git diff --quiet "$PREV_TAG" HEAD -- RELEASE_NOTES.md; then
+            NOTES="$(cat RELEASE_NOTES.md)"
           fi
           if [ -z "$NOTES" ] && [ -n "$PREV_TAG" ]; then
             NOTES="$(git log --no-merges --pretty='- %s' "${PREV_TAG}..HEAD" | grep -v '자동 배포' | head -30 || true)"

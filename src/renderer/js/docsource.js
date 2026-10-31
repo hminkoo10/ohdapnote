@@ -18,8 +18,8 @@ const PDF_OPTIONS = {
 /** 이미지 페이지의 가상 폭(pt). A4 폭에 맞춰 크기를 정규화합니다. */
 const IMAGE_VIRTUAL_WIDTH = 595.28;
 
-export function projectFileUrl(projectId, name) {
-  return `app://project/${encodeURIComponent(projectId)}/${encodeURIComponent(name)}`;
+export function bookFileUrl(bookId, name) {
+  return `app://book/${encodeURIComponent(bookId)}/${encodeURIComponent(name)}`;
 }
 
 export async function fetchBytes(url) {

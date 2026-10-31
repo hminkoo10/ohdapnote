@@ -8,15 +8,25 @@ contextBridge.exposeInMainWorld('ohdap', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
 
-  listProjects: () => ipcRenderer.invoke('projects:list'),
-  createProject: (name) => ipcRenderer.invoke('projects:create', { name }),
-  getProject: (id) => ipcRenderer.invoke('projects:get', id),
-  saveProject: (project) => ipcRenderer.invoke('projects:save', project),
-  saveProjectSync: (project) => ipcRenderer.sendSync('projects:saveSync', project),
-  deleteProject: (id) => ipcRenderer.invoke('projects:delete', id),
+  // 책 (문제집 + 답지 + 분석 결과)
+  listBooks: () => ipcRenderer.invoke('books:list'),
+  createBook: (name) => ipcRenderer.invoke('books:create', { name }),
+  getBook: (id) => ipcRenderer.invoke('books:get', id),
+  saveBook: (book) => ipcRenderer.invoke('books:save', book),
+  saveBookSync: (book) => ipcRenderer.sendSync('books:saveSync', book),
+  deleteBook: (id) => ipcRenderer.invoke('books:delete', id),
+  renameBookItems: (bookId, renames, removed) => ipcRenderer.invoke('books:renameItems', { bookId, renames, removed }),
+
+  // 학생 오답노트 (책에서 고른 문항)
+  listNotes: () => ipcRenderer.invoke('notes:list'),
+  createNote: (args) => ipcRenderer.invoke('notes:create', args),
+  getNote: (id) => ipcRenderer.invoke('notes:get', id),
+  saveNote: (note) => ipcRenderer.invoke('notes:save', note),
+  saveNoteSync: (note) => ipcRenderer.sendSync('notes:saveSync', note),
+  deleteNote: (id) => ipcRenderer.invoke('notes:delete', id),
 
   pickFiles: (title) => ipcRenderer.invoke('files:pick', { title }),
-  importFiles: (projectId, role, paths) => ipcRenderer.invoke('files:import', { projectId, role, paths }),
+  importFiles: (bookId, role, paths) => ipcRenderer.invoke('files:import', { bookId, role, paths }),
   pathForFile: (file) => webUtils.getPathForFile(file),
   savePdf: (defaultName, data) => ipcRenderer.invoke('files:savePdf', { defaultName, data }),
 
@@ -26,6 +36,7 @@ contextBridge.exposeInMainWorld('ohdap', {
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
   geminiGenerate: (args) => ipcRenderer.invoke('gemini:generate', args),
+  geminiAbort: (requestId) => ipcRenderer.invoke('gemini:abort', requestId),
   geminiListModels: (apiKey) => ipcRenderer.invoke('gemini:listModels', { apiKey }),
 
   checkForUpdates: () => ipcRenderer.invoke('update:check'),

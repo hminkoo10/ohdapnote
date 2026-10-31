@@ -1,4 +1,5 @@
-// 문서 분석 파이프라인: 렌더링 → 레이아웃 → (텍스트 | OCR) → 번호 선택 → 영역 계산 → (Gemini 보조)
+// 문서 분석 파이프라인: 렌더링 → 레이아웃 → (텍스트 | OCR) → 번호 선택 → 영역 계산
+// (Gemini 는 사용자가 고른 쪽만 따로: detectPageWithGemini)
 
 import { analyzeLayout, inkGridFromCanvas, trimRect, inkCount } from './layout.js';
 import {
@@ -369,7 +370,6 @@ function inkBands(grid, x0, x1, y0, y1) {
  *   flow: 'column'|'continue'
  *   numberStyle: 'auto'|...
  *   ocrLang
- *   gemini: {mode:'off'|'auto'|'all', model, rpm}
  *   onProgress({phase, done, total, message})
  *   signal
  */
@@ -508,15 +508,15 @@ export function buildCutters(results, anchors, signature) {
 }
 
 /** Gemini 로 한 페이지 인식 → 문항 배열 */
-export async function detectPageWithGemini(src, idx, { role, gemini, grid, layout, signal }) {
+export async function detectPageWithGemini(src, idx, { role, gemini, grid, layout, signal, onStatus }) {
   const canvas = await src.renderPage(idx, GEMINI_WIDTH);
   if (!grid || !layout) {
     const small = await src.renderPage(idx, ANALYSIS_WIDTH);
     grid = inkGridFromCanvas(small);
     layout = analyzeLayout(grid);
   }
-  const found = await geminiDetect(canvasToBase64Jpeg(canvas), { role, model: gemini.model, rpm: gemini.rpm, signal });
-  return found.map((f) => {
+  const found = await geminiDetect(canvasToBase64Jpeg(canvas), { role, models: gemini.models, model: gemini.model, rpm: gemini.rpm, signal, onStatus });
+  const items = found.map((f) => {
     const pad = 0.006;
     const expanded = {
       x: Math.max(0, f.rect.x - pad),
@@ -536,6 +536,8 @@ export async function detectPageWithGemini(src, idx, { role, gemini, grid, layou
       conf: 100,
     };
   });
+  items.model = found.model;
+  return items;
 }
 
 /**
