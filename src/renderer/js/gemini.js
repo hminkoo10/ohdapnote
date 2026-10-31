@@ -111,6 +111,23 @@ function callGemini(model, body, signal) {
   });
 }
 
+/** 이미지 한 장 + 지시문 → JSON 으로 답하라는 요청 내용 */
+function imageJsonBody(base64Jpeg, prompt, schema) {
+  return {
+    contents: [
+      {
+        role: 'user',
+        parts: [{ inlineData: { mimeType: 'image/jpeg', data: base64Jpeg } }, { text: prompt }],
+      },
+    ],
+    generationConfig: {
+      temperature: 0,
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+    },
+  };
+}
+
 /**
  * 페이지 이미지로 문항 위치 인식
  * 1순위 모델이 한도 초과·사용 불가면 2순위 모델로 넘어갑니다.
@@ -118,22 +135,20 @@ function callGemini(model, body, signal) {
  * @param {{role?:string, models?:string[], model?:string, rpm?:number, signal?:AbortSignal, onStatus?:(msg:string)=>void}} opts
  * @returns {Promise<{number:string,num:number,rect:{x:number,y:number,w:number,h:number}}[]>} (배열에 .model = 실제로 쓴 모델)
  */
-export async function geminiDetect(base64Jpeg, { role = 'problem', models, model, rpm = 8, signal, onStatus } = {}) {
+export async function geminiDetect(base64Jpeg, { role = 'problem', ...opts } = {}) {
+  const out = await generate(imageJsonBody(base64Jpeg, PROMPTS[role] || PROMPTS.problem, RESPONSE_SCHEMA), opts);
+  const list = parseResponse(out.json);
+  list.model = out.model;
+  return list;
+}
+
+/**
+ * Gemini 호출: 분당 요청 수를 지키고, 1순위 모델이 한도 초과·사용 불가면 2순위 모델로
+ * @returns {Promise<{json:object, model:string}>}
+ */
+async function generate(baseBody, { models, model, rpm = 8, signal, onStatus } = {}) {
   const list = [...new Set([...(models || []), model].map((m) => String(m || '').trim().replace(/^models\//, '')).filter(Boolean))];
   if (!list.length) list.push('gemini-flash-latest');
-  const baseBody = {
-    contents: [
-      {
-        role: 'user',
-        parts: [{ inlineData: { mimeType: 'image/jpeg', data: base64Jpeg } }, { text: PROMPTS[role] || PROMPTS.problem }],
-      },
-    ],
-    generationConfig: {
-      temperature: 0,
-      responseMimeType: 'application/json',
-      responseSchema: RESPONSE_SCHEMA,
-    },
-  };
   // 한도가 찬 모델은 뒤로
   const now = Date.now();
   const ordered = [...list.filter((m) => !(exhausted.get(m) > now)), ...list.filter((m) => exhausted.get(m) > now)];
@@ -148,11 +163,7 @@ export async function geminiDetect(base64Jpeg, { role = 'problem', models, model
       const body = thinking ? { ...baseBody, generationConfig: { ...baseBody.generationConfig, thinkingConfig: thinking } } : baseBody;
       const res = await throttled(() => callGemini(m, body, signal), rpm, signal);
       if (res.aborted) throw abortError();
-      if (res.ok) {
-        const out = parseResponse(res.json);
-        out.model = m;
-        return out;
-      }
+      if (res.ok) return { json: res.json, model: m };
       attempt++;
       // 생각 설정을 모르는 모델 → 빼고 다시
       if (res.status === 400 && thinking && /think/i.test(res.error || '')) {
@@ -195,32 +206,118 @@ export async function geminiDetect(base64Jpeg, { role = 'problem', models, model
   throw new Error(`Gemini 오류: ${lastError || '알 수 없음'}`);
 }
 
-export function parseResponse(json) {
+/** 응답에서 JSON 꺼내기 (생각 부분은 빼고). 내용이 없으면 null */
+function responseJson(json) {
   const parts = json?.candidates?.[0]?.content?.parts || [];
   const text = parts
     .filter((p) => typeof p.text === 'string' && !p.thought)
     .map((p) => p.text)
     .join('');
-  if (!text.trim()) return [];
-  let arr;
+  if (!text.trim()) return null;
   try {
-    arr = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+    return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
   } catch {
     throw new Error('Gemini 응답을 해석하지 못했습니다.');
   }
+}
+
+/** [ymin, xmin, ymax, xmax] (0~1000) → {x, y, w, h} (0~1). 너무 작으면 null */
+function boxRect(box) {
+  if (!Array.isArray(box) || box.length !== 4) return null;
+  let [ymin, xmin, ymax, xmax] = box.map((v) => Math.max(0, Math.min(1000, Number(v) || 0)) / 1000);
+  if (ymax < ymin) [ymin, ymax] = [ymax, ymin];
+  if (xmax < xmin) [xmin, xmax] = [xmax, xmin];
+  if (ymax - ymin < 0.005 || xmax - xmin < 0.01) return null;
+  return { x: xmin, y: ymin, w: xmax - xmin, h: ymax - ymin };
+}
+
+export function parseResponse(json) {
+  const arr = responseJson(json);
   if (!Array.isArray(arr)) return [];
   const out = [];
   for (const e of arr) {
     const digits = String(e?.number ?? '').replace(/\D/g, '');
-    const box = e?.box_2d;
-    if (!digits || !Array.isArray(box) || box.length !== 4) continue;
-    let [ymin, xmin, ymax, xmax] = box.map((v) => Math.max(0, Math.min(1000, Number(v) || 0)) / 1000);
-    if (ymax < ymin) [ymin, ymax] = [ymax, ymin];
-    if (xmax < xmin) [xmin, xmax] = [xmax, xmin];
-    if (ymax - ymin < 0.005 || xmax - xmin < 0.01) continue;
-    out.push({ number: digits, num: parseInt(digits, 10), rect: { x: xmin, y: ymin, w: xmax - xmin, h: ymax - ymin } });
+    const rect = boxRect(e?.box_2d);
+    if (!digits || !rect) continue;
+    out.push({ number: digits, num: parseInt(digits, 10), rect });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// 문항 그림 → 글자 + 수식 (한글 문서 내보내기)
+// ---------------------------------------------------------------------------
+const TRANSCRIBE_COMMON = `Transcribe the content in reading order so it can be retyped in a word processor with an equation editor.
+Return "blocks", each one of:
+- {"type":"para","text":...}: one paragraph of text. Copy Korean text exactly as printed (do not translate, summarize, correct or solve anything). Write every mathematical expression, variable and number with mathematical meaning as LaTeX between single dollar signs, e.g. "함수 $f(x)=x^{2}-2x$ 의 최솟값은?". Start a new para where the printed text starts a new line of meaning (e.g. each line of a <보기> box: ㄱ. ㄴ. ㄷ.).
+- {"type":"math","latex":...}: an equation displayed on its own line, LaTeX without dollar signs.
+- {"type":"choices","items":[...]}: the answer choices ①②③④⑤ in order; each item is the choice content WITHOUT the circled number, math in $...$.
+- {"type":"figure","box_2d":[ymin,xmin,ymax,xmax]}: a graph, diagram, geometric figure, table or picture that cannot be written as text, as a box normalized to 0-1000 on this image. Text inside the figure is not transcribed separately.
+Use standard LaTeX: \\frac{a}{b}, \\sqrt{x}, \\sqrt[n]{x}, x^{2}, a_{n}, \\log_{a} b, \\lim_{x \\to a}, \\sum_{k=1}^{n}, \\int_{a}^{b}, \\left( \\right), \\overline{AB}, \\angle, \\triangle, \\begin{cases} ... \\end{cases}. Use \\text{...} for Korean words inside math.
+Ignore page headers/footers and anything that belongs to a neighbouring item.`;
+
+const TRANSCRIBE_PROMPTS = {
+  problem: `This image is ONE problem cropped from a Korean high-school math workbook (문제집).
+${TRANSCRIBE_COMMON}
+Do not include the problem number itself at the start (e.g. "0153", "12.", "유제 3") — it is printed separately. Keep score marks such as [4점].`,
+  answer: `This image is ONE solution entry cropped from a Korean high-school math answer book (정답과 해설).
+${TRANSCRIBE_COMMON}
+Do not include the problem number the entry refers to at the start — it is printed separately. Keep the answer line (e.g. "답 ③") and the whole explanation.`,
+};
+
+const TRANSCRIBE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    blocks: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          type: { type: 'STRING', enum: ['para', 'math', 'choices', 'figure'] },
+          text: { type: 'STRING' },
+          latex: { type: 'STRING' },
+          items: { type: 'ARRAY', items: { type: 'STRING' } },
+          box_2d: { type: 'ARRAY', items: { type: 'INTEGER' } },
+        },
+        required: ['type'],
+      },
+    },
+  },
+  required: ['blocks'],
+};
+
+/** 옮긴 결과 다듬기: 모르는 종류·빈 내용은 빼고 그림 상자는 0~1 비율로 */
+export function parseTranscription(json) {
+  const obj = responseJson(json);
+  const list = Array.isArray(obj) ? obj : obj?.blocks;
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const b of list) {
+    const str = (v) => (typeof v === 'string' ? v.trim() : '');
+    if (b?.type === 'para' && str(b.text)) out.push({ type: 'para', text: str(b.text) });
+    else if (b?.type === 'math' && str(b.latex)) out.push({ type: 'math', latex: str(b.latex).replace(/^\$+|\$+$/g, '') });
+    else if (b?.type === 'choices' && Array.isArray(b.items)) {
+      const items = b.items.map(str).filter(Boolean);
+      if (items.length) out.push({ type: 'choices', items });
+    } else if (b?.type === 'figure') {
+      const box = boxRect(b.box_2d);
+      if (box) out.push({ type: 'figure', box });
+    }
+  }
+  return out;
+}
+
+/**
+ * 문제(또는 해설) 하나를 자른 그림 → 글자·수식 블록
+ * @param {string} base64Jpeg
+ * @param {{role?:'problem'|'answer', models?:string[], model?:string, rpm?:number, signal?:AbortSignal, onStatus?:(msg:string)=>void}} opts
+ * @returns {Promise<{type:'para'|'math'|'choices'|'figure', text?:string, latex?:string, items?:string[], box?:{x,y,w,h}}[]>} (배열에 .model)
+ */
+export async function geminiTranscribe(base64Jpeg, { role = 'problem', ...opts } = {}) {
+  const out = await generate(imageJsonBody(base64Jpeg, TRANSCRIBE_PROMPTS[role] || TRANSCRIBE_PROMPTS.problem, TRANSCRIBE_SCHEMA), opts);
+  const blocks = parseTranscription(out.json);
+  blocks.model = out.model;
+  return blocks;
 }
 
 export function canvasToBase64Jpeg(canvas, quality = 0.85) {

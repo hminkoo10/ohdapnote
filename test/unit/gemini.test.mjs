@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { geminiDetect } from '../../src/renderer/js/gemini.js';
+import { geminiDetect, geminiTranscribe } from '../../src/renderer/js/gemini.js';
 
 const okJson = (list) => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(list) }] } }] });
 const install = (fn) => {
@@ -54,4 +54,32 @@ test('gemini: 취소하면 응답을 기다리지 않고 바로 멈춤 + 요청 
   await assert.rejects(p, { name: 'AbortError' });
   assert.ok(Date.now() - t0 < 1000);
   assert.ok(calls.some((c) => c.abort));
+});
+
+test('gemini: 문항 글자로 옮기기 — JSON 블록 다듬기 + 2순위 모델', async () => {
+  const reply = {
+    blocks: [
+      { type: 'para', text: ' 함수 $f(x)=x^{2}$ 의 값은? ' },
+      { type: 'math', latex: '$a_{n}=2n$' },
+      { type: 'choices', items: ['$1$', '', '$2$'] },
+      { type: 'figure', box_2d: [100, 500, 600, 900] },
+      { type: 'figure', box_2d: [1, 2] },
+      { type: 'para', text: '' },
+      { type: 'unknown', text: 'x' },
+    ],
+  };
+  const calls = install(({ model }) =>
+    model === 'q-model' ? { ok: false, status: 429, error: 'quota', json: { error: { message: 'PerDay' } } } : { ok: true, status: 200, json: okJson(reply) },
+  );
+  const out = await geminiTranscribe('x', { role: 'answer', models: ['q-model', 'r-model'], rpm: 6000 });
+  assert.equal(out.model, 'r-model');
+  assert.deepEqual([...out], [
+    { type: 'para', text: '함수 $f(x)=x^{2}$ 의 값은?' },
+    { type: 'math', latex: 'a_{n}=2n' },
+    { type: 'choices', items: ['$1$', '$2$'] },
+    { type: 'figure', box: { x: 0.5, y: 0.1, w: 0.4, h: 0.5 } },
+  ]);
+  const body = calls[0].body;
+  assert.equal(body.generationConfig.responseSchema.properties.blocks.type, 'ARRAY');
+  assert.match(body.contents[0].parts[1].text, /solution entry/);
 });
