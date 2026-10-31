@@ -81,7 +81,9 @@ export function buildLines(tokens) {
     const words = [];
     for (const t of L.tokens) {
       const last = words[words.length - 1];
-      if (last && t.x0 - last.x1 < 0.12 * L.h && t.x0 >= last.x0) {
+      // 글자 단위로 쪼개진 숫자는 합치되, 번호(굵은 글꼴 등) 바로 뒤에 다른 글꼴 글자가 붙어 있으면 따로 둠
+      const numberThenOtherFont = last && /^[\[(]?\d{1,4}[.)\]]?$/.test(last.str) && t.font && last.font && t.font !== last.font && !/^[\d.)\]]/.test(t.str);
+      if (last && !numberThenOtherFont && t.x0 - last.x1 < 0.12 * L.h && t.x0 >= last.x0) {
         last.str += t.str;
         last.x1 = Math.max(last.x1, t.x1);
         last.y0 = Math.min(last.y0, t.y0);
@@ -197,9 +199,21 @@ export function extractCandidates(tokens, layout, opts = {}) {
     }
     return out;
   };
+  // 번호 왼쪽의 체크 칸(□), 별(★), 화살표 같은 기호는 "앞 글자"로 치지 않음
+  // (수식 기호 =, +, − 등은 빼야 함 — 그 뒤 숫자는 줄 맨 앞이 아님)
+  const SYMBOL_ONLY = /^[\u25A0-\u25FF\u2605\u2606\u2610-\u2612\u2713-\u2718\u27A4\u25B6\u25B7\u2022\u203B\u2766-\u2793]+$/u;
+  // 같은 단 안의 왼쪽 글자만 봄 (단 사이가 아주 좁으면 옆 단 글자가 가까이 있을 수 있음)
+  const sameCol = (u, w) => cols.length < 2 || colOf((u.x0 + u.x1) / 2) === colOf((w.x0 + w.x1) / 2);
   const hasLeftNeighbor = (w) => {
     const gap = Math.max(1.6 * (w.y1 - w.y0), 0.012);
-    return neighbours(w).some((u) => u.x0 < w.x0 && u.x1 >= w.x0 - gap);
+    return neighbours(w).some((u) => u.x0 < w.x0 && u.x1 >= w.x0 - gap && !SYMBOL_ONLY.test(u.str) && sameCol(u, w));
+  };
+  // 번호 바로 앞의 체크 칸·별 같은 기호가 있으면 그 기호 위치를 줄 시작으로 봄
+  const lineStartX = (w) => {
+    let x = w.x0;
+    const gap = Math.max(1.6 * (w.y1 - w.y0), 0.012);
+    for (const u of neighbours(w)) if (u.x0 < x && u.x1 >= w.x0 - gap && SYMBOL_ONLY.test(u.str) && sameCol(u, w)) x = u.x0;
+    return x;
   };
   // 같은 줄 오른쪽 바로 다음 단어
   const nextWord = (w) => {
@@ -228,9 +242,38 @@ export function extractCandidates(tokens, layout, opts = {}) {
     return col;
   };
 
+  // ---- 공통 지문 머리 "[0100~0120]", "[100~102] 다음 글을 읽고…" ----
+  const ranges = [];
+  const RANGE_RE = /^[[(【〔]?\s*(\d{1,4})\s*[~∼～〜\-–—]\s*(\d{1,4})\s*[\])】〕]?/;
+  for (const L of lines) {
+    for (let k = 0; k < L.words.length; k++) {
+      const w = L.words[k];
+      if (!/^[[(【〔]?\d/.test(w.str)) continue;
+      // 첫 몇 단어를 이어 붙여 검사 ("[0100", "~", "0120]" 처럼 쪼개진 경우)
+      let text = '';
+      let last = w;
+      for (let j = k; j < Math.min(L.words.length, k + 4); j++) {
+        if (j > k && L.words[j].x0 - last.x1 > 1.2 * L.h) break;
+        text += L.words[j].str;
+        last = L.words[j];
+        const m = RANGE_RE.exec(text);
+        if (m && +m[2] > +m[1] && +m[2] - +m[1] <= 40) {
+          if (!hasLeftNeighbor(w)) {
+            const cy = (w.y0 + w.y1) / 2;
+            if (!(layout?.hasHeader && cy < bodyTop) && !(layout?.hasFooter && cy > bodyBottom)) {
+              ranges.push({ a: +m[1], b: +m[2], x0: w.x0, x1: last.x1, y0: Math.min(w.y0, last.y0), y1: Math.max(w.y1, last.y1), col: colOf((w.x0 + w.x1) / 2) });
+            }
+          }
+          break;
+        }
+      }
+    }
+  }
+  const inRangeHeader = (w) => ranges.some((r) => w.y0 < r.y1 && w.y1 > r.y0 && w.x0 >= r.x0 - 0.001 && w.x1 <= r.x1 + 0.001);
+
   const candidates = [];
   for (const w of words) {
-    if (headingWords.has(w)) continue;
+    if (headingWords.has(w) || inRangeHeader(w)) continue;
     let str = opts.ocr ? normalizeOcrWord(w.str) : w.str;
     let prefix = '';
     let numWord = w;
@@ -263,7 +306,7 @@ export function extractCandidates(tokens, layout, opts = {}) {
       y1: Math.max(w.y1, numWord.y1),
       h: numWord.y1 - numWord.y0,
       col,
-      relX: w.x0 - cols[col].x0,
+      relX: lineStartX(w) - cols[col].x0,
       hRatio: (numWord.y1 - numWord.y0) / bodyH,
       conf: Math.min(w.conf ?? 100, numWord.conf ?? 100),
       padded: parsed.digits.length >= 2 && parsed.digits[0] === '0',
@@ -272,7 +315,7 @@ export function extractCandidates(tokens, layout, opts = {}) {
     });
   }
   candidates.sort((a, b) => a.col - b.col || a.y0 - b.y0);
-  return { candidates, bodyH, lineCount: lines.length, headings };
+  return { candidates, bodyH, lineCount: lines.length, headings, ranges };
 }
 
 /**
@@ -583,6 +626,105 @@ export function selectAnchors(pages, opts = {}) {
   return { anchors, signature: main.res.signature, signatures };
 }
 
+const schemeKey = (c) => `${c.prefix || ''}|${c.padded ? c.digits.length : 0}`;
+
+/**
+ * 번호가 건너뛴 곳(예: 5 → 7)을 "버려진 후보"에서 찾아 채웁니다.
+ * 글꼴·크기가 조금 달라 대표 모양에서 떨어진 진짜 번호를 되살리는 단계.
+ * 채운 번호에는 filled=true 를 붙여 "확인 필요"로 알려 줍니다.
+ * @returns {number} 채운 개수
+ */
+export function fillGapsFromCandidates(pages, anchors, signatures = []) {
+  const sigByScheme = new Map();
+  for (const sg of signatures) {
+    const k = `${sg.prefix || ''}|${sg.padded ? sg.digitsLen : 0}`;
+    if (!sigByScheme.has(k)) sigByScheme.set(k, sg);
+  }
+  const order = (c) => c.col * 10 + c.y0;
+  const lastByKey = new Map();
+  let filled = 0;
+  for (let pi = 0; pi < pages.length; pi++) {
+    const p = pages[pi];
+    const chain = anchors.get(p.index) || [];
+    const chosen = new Set(chain);
+    const pool = p.candidates.filter((c) => !chosen.has(c));
+    const add = [];
+    const byKey = new Map();
+    for (const c of chain) {
+      if (!byKey.has(schemeKey(c))) byKey.set(schemeKey(c), []);
+      byKey.get(schemeKey(c)).push(c);
+    }
+    // 이 쪽에 번호가 하나도 없으면, 앞 쪽 마지막 번호 다음부터 이어지는 후보를 찾아 봄
+    if (!chain.length && sigByScheme.size) {
+      const mainKey = [...sigByScheme.keys()][0];
+      const last = lastByKey.get(mainKey);
+      if (last != null) byKey.set(mainKey, []);
+    }
+    for (const [key, seq] of byKey) {
+      const sig = sigByScheme.get(key) || signatures[0];
+      const okShape = (c) =>
+        schemeKey(c) === key && (!sig || Math.abs(c.relX - sig.relX) <= 0.045) && (!sig?.hRatio || (c.hRatio / sig.hRatio > 0.6 && c.hRatio / sig.hRatio < 1.7));
+      const points = [{ num: lastByKey.get(key) ?? null, pos: -Infinity }, ...seq.map((c) => ({ num: c.num, pos: order(c) })), { num: null, pos: Infinity }];
+      for (let i = 0; i + 1 < points.length; i++) {
+        const a = points[i];
+        const b = points[i + 1];
+        if (a.num == null) continue;
+        const hi = b.num != null ? b.num : a.num + 12;
+        if (hi - a.num < 2 && b.num != null) continue;
+        let want = a.num + 1;
+        const between = pool
+          .filter((c) => okShape(c) && order(c) > a.pos && order(c) < b.pos && c.num > a.num && c.num < (b.num ?? hi + 1))
+          .sort((x, y) => order(x) - order(y));
+        for (const c of between) {
+          if (c.num === want || (c.num > want && c.num - want <= 1)) {
+            c.filled = true;
+            add.push(c);
+            want = c.num + 1;
+          }
+        }
+      }
+      const all = [...seq, ...add.filter((c) => schemeKey(c) === key)];
+      if (all.length) lastByKey.set(key, Math.max(...all.map((c) => c.num)));
+    }
+    if (add.length) {
+      filled += add.length;
+      anchors.set(p.index, [...chain, ...add].sort((x, y) => x.col - y.col || x.y0 - y.y0));
+    }
+  }
+  return filled;
+}
+
+/**
+ * "꼼꼼히 다시 찾기": 모양은 따지지 않고, 앞·뒤 쪽 번호 사이(prevLast < n < nextFirst)에 들어가는
+ * 번호를 읽는 순서대로 가장 길게 이어지게 고릅니다.
+ */
+export function chooseExpectedChain(cands, prevLast, nextFirst) {
+  const lo = prevLast ?? 0;
+  const hi = nextFirst ?? lo + 40;
+  const list = cands.filter((c) => c.num > lo && c.num < hi).sort((a, b) => a.col - b.col || a.y0 - b.y0);
+  // 최장 증가 부분수열 (번호가 1씩 늘어날수록, 줄 맨 앞에 가까울수록 가점)
+  const n = list.length;
+  const best = new Float64Array(n);
+  const back = new Int32Array(n).fill(-1);
+  for (let j = 0; j < n; j++) {
+    best[j] = 1 + (list[j].num === lo + 1 ? 0.5 : 0) - Math.min(0.5, list[j].relX * 5);
+    for (let i = 0; i < j; i++) {
+      if (list[i].num >= list[j].num) continue;
+      if (list[i].col === list[j].col && list[j].y0 - list[i].y0 < 0.6 * Math.max(list[i].h, list[j].h)) continue;
+      const v = best[i] + 1 + (list[j].num - list[i].num === 1 ? 0.6 : 0) - Math.min(0.5, list[j].relX * 5);
+      if (v > best[j]) {
+        best[j] = v;
+        back[j] = i;
+      }
+    }
+  }
+  let end = -1;
+  for (let j = 0; j < n; j++) if (end < 0 || best[j] > best[end]) end = j;
+  const chain = [];
+  for (let k = end; k >= 0; k = back[k]) chain.push(list[k]);
+  return chain.reverse();
+}
+
 /**
  * 페이지별 "확인 필요" 표시
  * @param {number[]} order 분석한 페이지 번호(순서대로)
@@ -622,6 +764,7 @@ export function flagPages(order, anchors, layouts) {
         lastByKey.set(key, seq[seq.length - 1].num);
       }
       if (chain.some((c) => c.conf < 65)) reasons.push('인식 신뢰도 낮음');
+      if (chain.some((c) => c.filled)) reasons.push('빠진 번호를 추정해서 채움');
     }
     if (reasons.length) flags.set(idx, reasons);
   }
@@ -692,6 +835,7 @@ export function zoneOf(L, y) {
 export function computeItems(order, anchors, layouts, grids, opts = {}) {
   const flow = opts.flow || 'column';
   const items = [];
+  const stems = [];
   let open = null;
   const padOf = (a) => 0.45 * a.h + 0.004;
   for (const pageIdx of order) {
@@ -715,6 +859,8 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
         const inCol = chain
           .filter((a) => a.col === c && a.y0 >= top - 0.01 && (a.y0 < bottom || z === zones.length - 1))
           .sort((a, b) => a.y0 - b.y0);
+        // 공통 지문 머리 ([0100~0120]) — 그 아래 첫 문항 전까지가 공통 지문
+        const rangesHere = (opts.ranges?.get(pageIdx) || []).filter((r) => r.col === c && r.y0 >= top - 0.01 && r.y0 < bottom);
         // 단원·유형 제목 등에서 영역을 끊음 (이 단과 가로로 겹치는 것만)
         const cuts = (opts.cutters?.get(pageIdx) || [])
           .filter((k) => k.x1 > col.x0 + 0.005 && k.x0 < col.x1 - 0.005)
@@ -735,6 +881,13 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
             if (r && r.h > 0.008) open.rects.push({ page: pageIdx, ...r });
           }
           if (segBottom < nominal - 1e-6) open = null; // 제목에서 끊김
+        }
+        for (const rg of rangesHere) {
+          const nextA = inCol.find((a) => a.y0 > rg.y1);
+          const y0 = rg.y0 - 0.006;
+          const y1 = nextA ? nextA.y0 - padOf(nextA) : bottom;
+          const r = trimRect(grid, { x: x0, y: y0, w: x1 - x0, h: Math.max(0.01, y1 - y0) });
+          if (r) stems.push({ a: rg.a, b: rg.b, y: rg.y0, page: pageIdx, z, c, rect: { page: pageIdx, ...r } });
         }
         for (let k = 0; k < inCol.length; k++) {
           const a = inCol[k];
@@ -764,7 +917,25 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
       }
     });
   }
+  attachStems(items, stems);
   return assignIds(items);
+}
+
+/** 공통 지문을 범위 안 번호의 문항들에 붙임 (지문 뒤에 나오는 문항부터, 다음 지문 전까지) */
+function attachStems(items, stems) {
+  if (!stems.length) return;
+  const key = (page, z, c, y) => page * 1e6 + z * 1e4 + c * 100 + y;
+  const sortedStems = stems.sort((a, b) => key(a.page, a.z, a.c, a.y) - key(b.page, b.z, b.c, b.y));
+  for (const it of items) {
+    if (it.prefix) continue;
+    const k = key(it.page, it.zone ?? 0, it.col ?? 0, it.rects[0].y);
+    let st = null;
+    for (const s of sortedStems) if (key(s.page, s.z, s.c, s.y) < k && it.num >= s.a && it.num <= s.b) st = s;
+    if (st) {
+      it.stem = [st.rect];
+      it.stemLabel = `${st.a}~${st.b}`;
+    }
+  }
 }
 
 /** 같은 쪽·같은 번호가 여러 개면 #2, #3 을 붙여 고유 ID 생성 */

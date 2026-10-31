@@ -226,6 +226,63 @@ function suteukBooks() {
   return { prob, ans: ansDoc, probKeys, ansKeys, longKeys: [...longKeys], header: '수능특강 수학Ⅰ', ansHeader: '정답과 풀이' };
 }
 
+// ---------------------------------------------------------------------------
+// 까다로운 책: [0100~0105] 공통 지문 + "100." 번호, 체크칸(□), 번호와 글자가 붙은 경우,
+// 모양이 다른 번호 하나, 단 사이가 아주 좁아 잉크로는 단 구분이 안 되는 쪽
+// ---------------------------------------------------------------------------
+function hardBooks() {
+  const probKeys = [];
+  const ansKeys = [];
+  let probHtml = '';
+  let ansHtml = '';
+  let n = 99;
+  const q = (label, body, opts = {}) => {
+    const box = opts.check ? '<span class="cb">□</span>' : '';
+    const cls = opts.odd ? 'qn odd' : 'qn';
+    const glue = opts.glue ? '' : ' ';
+    return `<div class="q">${box}<span class="${cls}">${label}</span>${glue}${body}${rnd() < 0.6 ? choices() : ''}</div>`;
+  };
+  for (let set = 0; set < 3; set++) {
+    const a = n + 1;
+    const b = n + 3;
+    probHtml += `<div class="stem"><b class="rg">[${String(a).padStart(4, '0')}~${String(b).padStart(4, '0')}]</b> 다음 글을 읽고 물음에 답하시오.<br>${explanation(3, false)}</div>`;
+    for (let k = 0; k < 3; k++) {
+      n++;
+      probKeys.push(String(n));
+      ansKeys.push(String(n));
+      probHtml += q(`${n}.`, pick(Q), { check: k === 1, glue: k === 2 });
+      ansHtml += `<div class="a"><b class="an">${n}.</b> 정답 ${pick(CH)} ${explanation(int(2, 4))} 따라서 답은 ③이다.${marker(String(n))}</div>`;
+    }
+    for (let k = 0; k < 3; k++) {
+      n++;
+      probKeys.push(String(n));
+      ansKeys.push(String(n));
+      probHtml += q(`${n}.`, pick(Q) + (rnd() < 0.3 ? fig() : ''), { check: k === 0, odd: set === 1 && k === 1 });
+      ansHtml += `<div class="a"><b class="an">${n}.</b> 정답 ${pick(CH)} ${explanation(int(2, 4))} 따라서 답은 ①이다.${marker(String(n))}</div>`;
+    }
+  }
+  const common = `body{font-family:${FONT};color:#151515;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .eq{margin:2px 0;font-style:italic}.mk{font-size:1px;color:#fff;line-height:0}`;
+  const prob = `<!doctype html><html><head><meta charset="utf-8"><style>
+    @page{size:A4;margin:20mm 14mm 16mm 14mm}
+    ${common} body{font-size:10pt;line-height:1.6}
+    .cols{column-count:2;column-gap:2mm}
+    .stem{border:.6pt solid #888;border-radius:1.5mm;padding:2.5mm;margin-bottom:5mm;break-inside:avoid;background:#f6f6f6}
+    .rg{font-family:'DejaVu Sans';color:#333}
+    .q{margin-bottom:9mm;break-inside:avoid}
+    .cb{font-size:11pt;margin-right:1.5mm;color:#666}
+    .qn{font-family:'DejaVu Sans';font-weight:700;font-size:12pt;color:#1d5bd8}
+    .qn.odd{font-family:'Liberation Serif';font-weight:400;font-size:11pt;color:#c0392b}
+    .ch{margin-top:1.5mm}
+  </style></head><body><div class="cols">${probHtml}</div></body></html>`;
+  const ansDoc = `<!doctype html><html><head><meta charset="utf-8"><style>
+    @page{size:A4;margin:20mm 14mm 16mm 14mm}
+    ${common} body{font-size:9pt;line-height:1.55;column-count:2;column-gap:8mm;column-rule:.4pt solid #ccc}
+    .a{margin-bottom:4mm}.an{font-family:'DejaVu Sans';font-size:10.5pt;color:#1d5bd8}
+  </style></head><body>${ansHtml}</body></html>`;
+  return { prob, ans: ansDoc, probKeys, ansKeys, longKeys: [], header: '실전 모의 문제', ansHeader: '정답과 해설' };
+}
+
 const headerTpl = (label, color) =>
   `<div style="width:100%;font-family:${FONT};font-size:7.5pt;margin:0 12mm;display:flex;justify-content:space-between;align-items:center;border-bottom:.8pt solid ${color};padding-bottom:1mm;color:${color};-webkit-print-color-adjust:exact"><b>${label}</b><span class="title"></span></div>`;
 const footerTpl = (color) =>
@@ -244,8 +301,9 @@ const expected = {};
 for (const [name, make, color] of [
   ['ssen', ssenBooks, '#1f4fbf'],
   ['suteuk', suteukBooks, '#0b6e4f'],
+  ['hard', hardBooks, '#444444'],
 ]) {
-  seed = name === 'ssen' ? 11 : 23;
+  seed = name === 'ssen' ? 11 : name === 'suteuk' ? 23 : 37;
   const b = make();
   await pdf(b.prob, `${name}-problem.pdf`, b.header, color, {});
   await pdf(b.ans, `${name}-answer.pdf`, b.ansHeader, color, {});

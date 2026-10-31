@@ -10,6 +10,7 @@ const CASES = {
   ssen: { prob: 'ssen-problem.pdf', ans: 'ssen-answer.pdf', key: 'ssen', cols: 3 },
   suteuk: { prob: 'suteuk-problem.pdf', ans: 'suteuk-answer.pdf', key: 'suteuk', cols: 2 },
   // 스캔본(흐림·잡티·기울기)은 OCR 특성상 90% 이상이면 통과로 봄 (놓친 쪽은 '확인 필요'로 표시됨)
+  hard: { prob: 'hard-problem.pdf', ans: 'hard-answer.pdf', key: 'hard', cols: 2, stems: true },
   'ssen-scan': { prob: 'ssen-problem.pdf', ans: 'ssen-answer-scan.pdf', markers: 'ssen-answer.pdf', key: 'ssen', cols: 3, tolerance: 0.9 },
 };
 const only = process.argv.slice(2);
@@ -51,7 +52,7 @@ for (const [name, c] of Object.entries(CASES)) {
       const P = sortItems(pr.items);
       const A = sortItems(ar.items);
       const m = matchItems(P, A);
-      const strip = (it) => ({ id: it.id, page: it.page, number: it.number, prefix: it.prefix || '', rects: it.rects });
+      const strip = (it) => ({ id: it.id, page: it.page, number: it.number, prefix: it.prefix || '', rects: it.rects, stemLabel: it.stemLabel || '' });
       return { ms, P: P.map(strip), A: A.map(strip), match: Object.fromEntries(m), markers, ansFlags: ar.pageInfo, probFlags: pr.pageInfo };
     },
     [base + c.prob, base + c.ans, base + (c.markers || c.ans)],
@@ -91,6 +92,17 @@ for (const [name, c] of Object.entries(CASES)) {
     if (ok) longOk++;
     longReport.push(`${key}: ${a ? `쪽 ${spanPages.map((p) => p + 1).join('→')} (영역 ${a.rects.length}개)` : '항목 없음'}${pt.page !== startPage ? ' [쪽 넘어감]' : ''}${ok ? '' : ' ✗'}`);
   }
+  // 공통 지문: [a~b] 범위 안 문항에 지문이 붙었는지
+  let stemReport = '';
+  if (c.stems) {
+    const withStem = res.P.filter((p) => p.stemLabel);
+    const okStem = withStem.filter((p) => {
+      const [a, b] = p.stemLabel.split('~').map(Number);
+      return +p.number >= a && +p.number <= b;
+    });
+    stemReport = `공통 지문 붙은 문항: ${okStem.length}/${withStem.length} (기대 9)`;
+    if (okStem.length !== 9 || withStem.length !== 9) failures++;
+  }
   const need = c.tolerance ? Math.ceil(res.P.length * c.tolerance) : res.P.length;
   const allOk = probOk && correct >= need && longOk === exp.longKeys.length;
   if (!allOk) failures++;
@@ -103,6 +115,7 @@ for (const [name, c] of Object.entries(CASES)) {
   console.log(`  답지 항목: ${res.A.length}개 (해설과 연결된 것 ${keyOfAns.size}/${exp.ansKeys.length})`);
   console.log(`  해설 짝: ${correct}/${res.P.length} 정확 (답지에 없는 예제는 '짝 없음'이 정답)`);
   if (wrong.length) console.log('    틀림:', wrong.slice(0, 12).join('  '));
+  if (stemReport) console.log('  ' + stemReport);
   console.log(`  긴 해설(단·쪽 넘어감): ${longOk}/${exp.longKeys.length}`);
   longReport.forEach((l) => console.log('    ' + l));
   const flagged = Object.entries(res.ansFlags).filter(([, v]) => v.flags.length).map(([k, v]) => `${+k + 1}쪽:${v.flags.join('/')}`);

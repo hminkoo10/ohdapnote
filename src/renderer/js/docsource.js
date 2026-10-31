@@ -168,6 +168,26 @@ export class DocSource {
     } catch {
       return [];
     }
+    // 글꼴 구분 열쇠: PDF 안의 글꼴 조각 이름(g_d0_f3 …)은 쪽마다 달라질 수 있으므로
+    // 글꼴 종류·높이 정보·굵기로 정규화 (같은 글꼴이면 쪽이 달라도 같은 열쇠)
+    const fontKeys = new Map();
+    const fontKey = (name) => {
+      if (!name) return '';
+      if (fontKeys.has(name)) return fontKeys.get(name);
+      const st = content.styles?.[name] || {};
+      let flags = '';
+      try {
+        if (page.commonObjs.has(name)) {
+          const f = page.commonObjs.get(name);
+          flags = `${f.bold ? 'B' : ''}${f.black ? 'K' : ''}${f.italic ? 'I' : ''}`;
+        }
+      } catch {
+        /* 아직 불러오지 않은 글꼴 */
+      }
+      const key = `${st.fontFamily || ''}|${Math.round((st.ascent || 0) * 100)}|${Math.round((st.descent || 0) * 100)}|${flags}`;
+      fontKeys.set(name, key);
+      return key;
+    };
     const tokens = [];
     for (const item of content.items) {
       if (!item.str || !item.str.trim()) continue;
@@ -195,7 +215,7 @@ export class DocSource {
           x1: (x + width * Math.max(b, a + 0.01)) / vp.width,
           y0: top / vp.height,
           y1: bottom / vp.height,
-          font: item.fontName || '',
+          font: fontKey(item.fontName),
         });
       }
     }
