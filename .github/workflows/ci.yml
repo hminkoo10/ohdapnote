@@ -33,8 +33,20 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx electron-builder --win --x64 --publish never
+      # 배포 때 쓰는 것과 같은 파일 세 개(설치 파일, blockmap, 자동 업데이트용 latest.yml)가 다 만들어졌는지
+      - name: 업데이트 파일 확인
+        shell: bash
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          ls -l dist
+          test -f "dist/OhdapNote-Setup-$v.exe"
+          test -f "dist/OhdapNote-Setup-$v.exe.blockmap"
+          grep -q "OhdapNote-Setup-$v.exe" dist/latest.yml
+          cat dist/latest.yml
       - uses: actions/upload-artifact@v4
         with:
           name: OhdapNote-Setup
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/latest.yml
           retention-days: 14

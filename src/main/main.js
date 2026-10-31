@@ -635,6 +635,16 @@ function setUpdateState(state) {
   send('update:status', updateState);
 }
 
+/** 업데이트 오류 → 사용자에게 보여 줄 짧은 문구 (긴 HTTP 응답·스택은 로그에만) */
+function friendlyUpdateError(err) {
+  const raw = String(err?.message || err || '');
+  log.warn('[update] error', raw);
+  if (/latest\.yml|404/.test(raw)) return '새 버전 파일을 아직 올리는 중이거나 찾지 못했어요. 잠시 뒤에 다시 확인해 주세요.';
+  if (/ENOTFOUND|ECONNRESET|ETIMEDOUT|net::|network/i.test(raw)) return '인터넷에 연결할 수 없어요. 연결을 확인한 뒤 다시 시도해 주세요.';
+  if (/sha512|checksum/i.test(raw)) return '내려받은 파일이 손상됐어요. 다시 확인을 눌러 주세요.';
+  return raw.split('\n')[0].slice(0, 160);
+}
+
 /** GitHub 릴리스 설명(HTML/마크다운) → 짧은 일반 글 */
 function plainNotes(notes) {
   const raw = Array.isArray(notes) ? notes.map((n) => n.note || '').join('\n') : String(notes || '');
@@ -690,7 +700,7 @@ function setupAutoUpdater() {
     setUpdateState({ status: 'downloaded', ...pending, version: info.version });
     if (process.env.OHDAP_UPDATE_TEST === '1') setTimeout(() => installUpdateNow(), 800);
   });
-  updater.on('error', (err) => setUpdateState({ status: 'error', ...pending, message: String(err?.message || err) }));
+  updater.on('error', (err) => setUpdateState({ status: 'error', ...pending, message: friendlyUpdateError(err) }));
 
   setTimeout(() => checkForUpdates(false), process.env.OHDAP_UPDATE_TEST === '1' ? 1500 : 4000);
   setInterval(() => checkForUpdates(false), 4 * 60 * 60 * 1000);
@@ -717,7 +727,7 @@ async function checkForUpdates(manual) {
     await updater.checkForUpdates();
   } catch (err) {
     log.warn('업데이트 확인 실패', err);
-    if (manual) setUpdateState({ status: 'error', message: String(err?.message || err) });
+    if (manual) setUpdateState({ status: 'error', message: friendlyUpdateError(err) });
   }
   return updateState;
 }
