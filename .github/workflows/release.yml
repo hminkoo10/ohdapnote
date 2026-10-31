@@ -68,12 +68,17 @@ jobs:
             exit 1
           fi
 
-      - name: 업데이트 내용 준비
+      - name: 업데이트 내용 준비 (입력한 내용 → 없으면 태그 메시지 → 없으면 기본 문구)
         shell: bash
         env:
           NOTES: ${{ inputs.notes }}
         run: |
-          node -e "const v=require('./package.json').version; const n=(process.env.NOTES||'').trim(); require('fs').writeFileSync('release-notes.md', n || ('오답노트 ' + v + ' 업데이트'))"
+          if [ -z "$NOTES" ] && [ "${{ github.event_name }}" = "push" ]; then
+            git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" || true
+            NOTES="$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)')"
+          fi
+          export NOTES
+          node -e "const v=require('./package.json').version; const n=(process.env.NOTES||'').replace(/-----BEGIN PGP SIGNATURE-----[\\s\\S]*$/, '').trim(); require('fs').writeFileSync('release-notes.md', n || ('오답노트 ' + v + ' 업데이트'))"
           cat release-notes.md
 
       - name: 설치 파일 빌드 + GitHub Release 업로드
