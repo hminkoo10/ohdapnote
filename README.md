@@ -79,23 +79,27 @@
 설치된 프로그램은 이 저장소의 **GitHub Releases** 최신 버전을 보고 스스로 업데이트합니다.
 (켤 때와 4시간마다 확인 → 백그라운드로 내려받기 → 오른쪽 위/설정에 **"지금 다시 시작해서 설치"** 표시, 그냥 두면 끌 때 설치)
 
-### 방법 1 — GitHub 화면에서 버튼으로 (가장 쉬움)
+### 방법 1 — 버전 올려서 main 에 합치기 (기본)
 
-1. GitHub 저장소 → **Actions** → **Release (Windows)** → **Run workflow**
-2. 올릴 버전(`patch` 0.1.0→0.1.1 / `minor` 0.1.0→0.2.0 / `major` → 1.0.0)과 **업데이트 내용**을 적고 실행
-3. 워크플로가 `package.json` 버전을 올려 커밋·태그하고, 설치 파일(`OhdapNote-Setup-x.y.z.exe`)과 `latest.yml` 을 만들어 Release 로 올립니다.
-   적은 업데이트 내용은 사용자의 업데이트 알림(설정 → 업데이트)에 그대로 보입니다.
+1. `package.json` 의 `version` 을 올리고(예: `0.1.0` → `0.1.1`), `RELEASE_NOTES.md` 에 바뀐 점을 적습니다.
+2. main 에 합치면(푸시/PR 병합) **Release (Windows)** 워크플로가 "아직 배포 안 된 버전"인 것을 보고
+   태그 `v0.1.1` 을 만들고 설치 파일(`OhdapNote-Setup-0.1.1.exe`)과 `latest.yml` 을 Release 로 올립니다.
+   `RELEASE_NOTES.md` 내용은 사용자의 업데이트 알림(설정 → 업데이트)에 그대로 보입니다.
 
-> "Run workflow" 버튼은 워크플로 파일이 **기본 브랜치(main)** 에 있어야 나타납니다.
+### 방법 2 — GitHub 화면에서 버튼으로
 
-### 방법 2 — 명령으로
+GitHub 저장소 → **Actions** → **Release (Windows)** → **Run workflow** → 올릴 버전(`patch`/`minor`/`major`, 또는 지금 버전 그대로 `none`)과
+업데이트 내용을 적고 실행하면 버전 올리기·커밋·태그·설치 파일 빌드·Release 업로드까지 한 번에 합니다.
+(이 버튼은 워크플로 파일이 기본 브랜치 main 에 있어야 보입니다.)
+
+### 방법 3 — 명령으로
 
 ```bash
 npm run release:patch
 ```
 
-(`release:minor`, `release:major` 도 있음) 버전을 올려 커밋·태그를 푸시하면 같은 워크플로가 설치 파일을 만들어 올립니다.
-직접 태그를 붙여도 됩니다. 이때 태그(`v0.1.1`)와 `package.json` 버전이 같아야 합니다.
+(`release:minor`, `release:major` 도 있음) 버전을 올려 커밋·태그를 푸시하면 같은 워크플로가 배포합니다.
+직접 태그를 붙일 때는 태그(`v0.1.1`)와 `package.json` 버전이 같아야 하고, 태그 메시지가 업데이트 내용이 됩니다.
 
 > 저장소가 공개(public)여야 설치된 프로그램이 업데이트를 받을 수 있습니다.
 
