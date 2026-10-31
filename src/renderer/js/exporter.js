@@ -294,41 +294,40 @@ async function buildPdfInner({ blocks, sources, options, title, onProgress, forc
   return out.save({ useObjectStreams: true });
 }
 
+/** 문항 표시 이름: "12번", "유제 3", "예제 1" */
+export function itemName(item) {
+  return item.prefix ? `${item.prefix} ${item.number}` : `${item.number}번`;
+}
+
 /**
  * 선택 항목 → 내보낼 블록 목록
- * @param {'problems'|'answers'|'both'} mode
+ * @param {'problems'|'answers'|'both-inline'|'both-end'} mode
+ *    problems: 문제만, answers: 해설만,
+ *    both-inline: 문제마다 바로 뒤에 해설, both-end: 문제를 모두 싣고 해설은 맨 뒤에 모아서
  * @param {{problem:object, answer:object|null}[]} entries 읽는 순서로 정렬된 선택 항목
  * @param {(role:string, item:object)=>string} pageLabel  쪽 표시 (예: "p.12")
  */
 export function makeBlocks(mode, entries, options, pageLabel) {
   const opts = { ...DEFAULT_EXPORT_OPTIONS, ...(options || {}) };
+  if (mode === 'both') mode = opts.bothOrder === 'interleave' ? 'both-inline' : 'both-end'; // 예전 설정 호환
   const blocks = [];
   const num = (i) => (opts.renumber ? `${i + 1}. ` : '');
   const problemBlock = (e, i) => ({
     kind: 'problem',
     role: 'problem',
     item: e.problem,
-    addSpace: mode === 'problems' || (mode === 'both' && opts.bothOrder === 'append'),
-    label: opts.labels ? `${num(i)}${pageLabel('problem', e.problem)} ${e.problem.number}번` : '',
+    addSpace: mode === 'problems' || mode === 'both-end',
+    label: opts.labels ? `${num(i)}${pageLabel('problem', e.problem)} ${itemName(e.problem)}` : '',
   });
+  const answerLabel = (e, i) => (opts.labels ? `${num(i)}해설 · 문제 ${pageLabel('problem', e.problem)} ${itemName(e.problem)}` : '');
   const answerBlock = (e, i) =>
     e.answer
-      ? {
-          kind: 'answer',
-          role: 'answer',
-          item: e.answer,
-          label: opts.labels ? `${num(i)}해설 · 문제 ${pageLabel('problem', e.problem)} ${e.problem.number}번` : '',
-        }
-      : {
-          kind: 'note',
-          label: opts.labels ? `${num(i)}해설 · 문제 ${pageLabel('problem', e.problem)} ${e.problem.number}번` : '',
-          text: '(답지에서 짝이 되는 해설을 찾지 못했습니다)',
-          segs: [],
-        };
+      ? { kind: 'answer', role: 'answer', item: e.answer, label: answerLabel(e, i) }
+      : { kind: 'note', label: answerLabel(e, i), text: '(답지에서 짝이 되는 해설을 찾지 못했어요)', segs: [] };
 
   if (mode === 'problems') entries.forEach((e, i) => blocks.push(problemBlock(e, i)));
   else if (mode === 'answers') entries.forEach((e, i) => blocks.push(answerBlock(e, i)));
-  else if (opts.bothOrder === 'interleave') {
+  else if (mode === 'both-inline') {
     entries.forEach((e, i) => {
       blocks.push(problemBlock(e, i));
       blocks.push(answerBlock(e, i));

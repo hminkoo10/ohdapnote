@@ -420,7 +420,7 @@ function registerIpc() {
   ipcMain.handle('update:check', () => checkForUpdates(true));
   ipcMain.handle('update:install', () => {
     if (!updater) return false;
-    setImmediate(() => updater.quitAndInstall(false, true));
+    setImmediate(() => installUpdateNow());
     return true;
   });
   ipcMain.handle('update:getState', () => updateState);
@@ -431,16 +431,44 @@ function registerIpc() {
 // ---------------------------------------------------------------------------
 
 let updater = null;
-let updateState = { status: 'idle' };
+let updateState = { status: 'idle', current: app.getVersion() };
+
+// 테스트용: 업데이트 과정을 파일에 남김 (OHDAP_UPDATE_TEST=1)
+function testLog(line) {
+  if (process.env.OHDAP_UPDATE_TEST !== '1') return;
+  try {
+    fs.appendFileSync(path.join(app.getPath('userData'), 'update-test.log'), `${new Date().toISOString()} ${line}\n`);
+  } catch {
+    /* 무시 */
+  }
+}
 
 function setUpdateState(state) {
-  updateState = state;
-  send('update:status', state);
+  updateState = { current: app.getVersion(), ...state };
+  testLog(`state ${JSON.stringify(updateState)}`);
+  send('update:status', updateState);
+}
+
+/** GitHub 릴리스 설명(HTML/마크다운) → 짧은 일반 글 */
+function plainNotes(notes) {
+  const raw = Array.isArray(notes) ? notes.map((n) => n.note || '').join('\n') : String(notes || '');
+  return raw
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|li|h\d)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, 2000);
 }
 
 function setupAutoUpdater() {
+  testLog(`start ${app.getVersion()} packaged=${app.isPackaged}`);
   if (!app.isPackaged || isSmokeTest) {
-    updateState = { status: 'disabled', message: '개발 모드에서는 자동 업데이트가 꺼져 있습니다.' };
+    updateState = { status: 'disabled', current: app.getVersion(), message: '개발 모드에서는 자동 업데이트가 꺼져 있습니다.' };
     return;
   }
   try {
@@ -452,18 +480,48 @@ function setupAutoUpdater() {
   updater.logger = log;
   updater.autoDownload = true;
   updater.autoInstallOnAppQuit = true;
+  // 테스트용: GitHub 대신 다른 주소에서 업데이트 받기
+  if (process.env.OHDAP_UPDATE_URL) updater.setFeedURL({ provider: 'generic', url: process.env.OHDAP_UPDATE_URL });
 
+  let pending = null; // 새 버전 정보
   updater.on('checking-for-update', () => setUpdateState({ status: 'checking' }));
-  updater.on('update-available', (info) => setUpdateState({ status: 'available', version: info.version }));
-  updater.on('update-not-available', () => setUpdateState({ status: 'latest', version: app.getVersion() }));
+  updater.on('update-available', (info) => {
+    pending = { version: info.version, notes: plainNotes(info.releaseNotes), date: info.releaseDate };
+    setUpdateState({ status: 'available', ...pending });
+  });
+  updater.on('update-not-available', () => setUpdateState({ status: 'latest' }));
   updater.on('download-progress', (p) =>
-    setUpdateState({ status: 'downloading', percent: Math.round(p.percent || 0), version: updateState.version }),
+    setUpdateState({
+      status: 'downloading',
+      ...pending,
+      percent: Math.round(p.percent || 0),
+      transferred: p.transferred,
+      total: p.total,
+      speed: p.bytesPerSecond,
+    }),
   );
-  updater.on('update-downloaded', (info) => setUpdateState({ status: 'downloaded', version: info.version }));
-  updater.on('error', (err) => setUpdateState({ status: 'error', message: String(err?.message || err) }));
+  updater.on('update-downloaded', (info) => {
+    setUpdateState({ status: 'downloaded', ...pending, version: info.version });
+    if (process.env.OHDAP_UPDATE_TEST === '1') setTimeout(() => installUpdateNow(), 800);
+  });
+  updater.on('error', (err) => setUpdateState({ status: 'error', ...pending, message: String(err?.message || err) }));
 
-  setTimeout(() => checkForUpdates(false), 4000);
+  setTimeout(() => checkForUpdates(false), process.env.OHDAP_UPDATE_TEST === '1' ? 1500 : 4000);
   setInterval(() => checkForUpdates(false), 4 * 60 * 60 * 1000);
+}
+
+/** 받아 둔 새 버전 설치 후 다시 실행 */
+function installUpdateNow() {
+  if (!updater) return false;
+  testLog('install');
+  // 새로 켜질 앱이 "한 번에 하나만 실행" 잠금에 막히지 않게 먼저 풀어 줌
+  try {
+    app.releaseSingleInstanceLock();
+  } catch {
+    /* 무시 */
+  }
+  updater.quitAndInstall(false, true);
+  return true;
 }
 
 async function checkForUpdates(manual) {

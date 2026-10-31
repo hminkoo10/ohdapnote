@@ -91,6 +91,7 @@ export function analyzeLayout(grid) {
     hasHeader: false,
     hasFooter: false,
     columns: [{ x0: 0, x1: 1 }],
+    spans: [],
   };
   if (blank) return result;
 
@@ -137,6 +138,18 @@ export function analyzeLayout(grid) {
       } else run = 0;
     }
     if (best >= 0.55 * w) spanning[y] = 1;
+  }
+  // 본문 안의 가로 띠(단원 제목 막대 등) — 여러 단 쪽에서 문항 영역을 끊는 데 씀
+  result.spans = [];
+  for (let y = bodyTopRow; y < bodyBottomRow; ) {
+    if (!spanning[y]) {
+      y++;
+      continue;
+    }
+    let e = y;
+    while (e < bodyBottomRow && spanning[e]) e++;
+    result.spans.push({ y0: y / h, y1: e / h }); // 한 줄짜리 가로선도 구분선
+    y = e;
   }
   const colInk = new Uint16Array(w);
   const colInkAll = new Uint16Array(w);

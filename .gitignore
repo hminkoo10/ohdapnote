@@ -5,3 +5,4 @@ test/e2e/out/
 test/fixtures/generated/
 *.log
 .DS_Store
+dist-update/

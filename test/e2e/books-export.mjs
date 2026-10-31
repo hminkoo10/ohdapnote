@@ -1,0 +1,36 @@
+// 쪽을 넘어가는 긴 해설이 내보낸 PDF 에 이어 붙는지 확인 (문제+해설)
+import { chromium } from '../lib/playwright.mjs';
+import { startServer } from '../lib/server.mjs';
+import { writeFileSync, mkdirSync } from 'node:fs';
+const [name = 'ssen', ...nums] = process.argv.slice(2);
+const want = nums.length ? nums : ['0024', '0031'];
+const { server, url } = await startServer();
+const browser = await chromium.launch();
+const page = await browser.newPage();
+await page.goto(`${url}/test/e2e/harness.html`);
+await page.waitForFunction(() => window.harnessReady);
+const b64 = await page.evaluate(async ([pu, au, want]) => {
+  const { openDocSource } = await import('/src/renderer/js/docsource.js');
+  const { analyzeDocument, parsePageRange } = await import('/src/renderer/js/analyze.js');
+  const { matchItems } = await import('/src/renderer/js/match.js');
+  const { sortItems } = await import('/src/renderer/js/detect.js');
+  const { buildPdf, makeBlocks } = await import('/src/renderer/js/exporter.js');
+  const ps = await openDocSource([{ name: pu, kind: 'pdf' }], (n) => n);
+  const as = await openDocSource([{ name: au, kind: 'pdf' }], (n) => n);
+  const pr = await analyzeDocument(ps, { pages: parsePageRange('', ps.numPages), role: 'problem', flow: 'column' });
+  const ar = await analyzeDocument(as, { pages: parsePageRange('', as.numPages), role: 'answer', flow: 'continue' });
+  const P = sortItems(pr.items);
+  const A = sortItems(ar.items);
+  const m = matchItems(P, A);
+  const entries = P.filter((p) => want.includes(p.number)).map((p) => ({ problem: p, answer: A.find((a) => a.id === m.get(p.id)) || null }));
+  const bytes = await buildPdf({ blocks: makeBlocks('both-inline', entries, { columns: 1, space: 'none' }, (r, it) => `p.${it.page + 1}`), sources: { problem: ps, answer: as }, options: { columns: 1 }, title: '긴 해설 확인' });
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}, [`${url}/test/fixtures/generated/${name}-problem.pdf`, `${url}/test/fixtures/generated/${name}-answer.pdf`, want]);
+mkdirSync(new URL('./out/', import.meta.url), { recursive: true });
+const out = new URL(`./out/books-${name}-long.pdf`, import.meta.url);
+writeFileSync(out, Buffer.from(b64, 'base64'));
+console.log(out.pathname);
+await browser.close();
+server.close();

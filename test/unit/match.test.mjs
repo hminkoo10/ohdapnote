@@ -35,3 +35,17 @@ test('matchByOccurrence', () => {
   assert.equal(m.get('p1'), 'a2');
   assert.equal(m.get('p2'), 'a1');
 });
+
+test('matchItems: 말머리(예제/유제)·0 채움·해설 크기가 같은 짝을 우선', () => {
+  const it = (id, num, number, prefix = '', h = 0.1) => ({ id, num, number, prefix, rects: [{ w: 0.3, h }] });
+  // 문제: 예제1, 1, 2 / 답지: 1, 2 → 예제1 은 짝 없음
+  const m1 = matchItems([it('e1', 1, '1', '예제'), it('p1', 1, '1'), it('p2', 2, '2')], [it('a1', 1, '1'), it('a2', 2, '2')]);
+  assert.equal(m1.get('e1'), undefined);
+  assert.equal(m1.get('p1'), 'a1');
+  // 빠른 정답표(작은 칸) 뒤에 실제 해설(큰 영역)이 있으면 실제 해설과 짝
+  const quick = [it('q1', 1, '0001', '', 0.01), it('q2', 2, '0002', '', 0.01)];
+  const real = [it('r1', 1, '0001', '', 0.2), it('r2', 2, '0002', '', 0.3)];
+  const m2 = matchItems([it('p1', 1, '0001'), it('p2', 2, '0002')], [...quick, ...real]);
+  assert.equal(m2.get('p1'), 'r1');
+  assert.equal(m2.get('p2'), 'r2');
+});

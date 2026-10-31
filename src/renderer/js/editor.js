@@ -236,7 +236,7 @@ export function createEditor(ctx) {
             dataset: { id: it.id, ri: String(ri) },
             style: { left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h), '--hue': String(HUES[k % HUES.length]), '--i': String(Math.min(k, 20)) },
           },
-          h('span.box-label', `${it.number}${cont ? ' (이어짐)' : ''}${it.page !== st.page ? ` · ${pageLabel(d, it.page)}` : ''}`),
+          h('span.box-label', `${it.prefix ? `${it.prefix} ` : ''}${it.number}${cont ? ' (이어짐)' : ''}${it.page !== st.page ? ` · ${pageLabel(d, it.page)}` : ''}`),
         );
         if (isSel && st.selected.rect === ri) {
           for (const hd of ['nw', 'ne', 'sw', 'se']) box.append(h(`div.handle.h-${hd}`, { dataset: { handle: hd } }));
@@ -352,7 +352,10 @@ export function createEditor(ctx) {
         return;
       }
       const guess = guessNumber(d, st.page, r);
-      const item = { page: st.page, col: r.x + r.w / 2 > 0.5 && r.w < 0.6 ? 1 : 0, number: String(guess), num: guess, rects: [{ page: st.page, ...r }], source: 'manual', conf: 100, id: `new-${Date.now()}` };
+      // 같은 쪽에서 이 상자보다 위에 있는 문항의 구역(전체 폭 제목으로 나뉜 영역)을 따름
+      const above = (d.items || []).filter((x) => x.page === st.page && x.rects[0].y <= r.y);
+      const zone = above.length ? Math.max(...above.map((x) => x.zone ?? 0)) : 0;
+      const item = { page: st.page, zone, col: r.x + r.w / 2 > 0.5 && r.w < 0.6 ? 1 : 0, number: String(guess), num: guess, rects: [{ page: st.page, ...r }], source: 'manual', conf: 100, id: `new-${Date.now()}` };
       d.items.push(item);
       st.pendingFocus = true;
       commit(item);

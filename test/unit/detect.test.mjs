@@ -126,3 +126,27 @@ test('guessPageOffset: 쪽번호로 책 쪽 보정값 추정', () => {
   assert.equal(guessPageOffset(footers), 10);
   assert.equal(guessPageOffset([{ index: 0, numbers: [] }]), null);
 });
+
+test('looksLikeAnswerTable: 빠른 정답표(같은 높이에 번호가 나란히 / 일정 간격으로 건너뜀)', async () => {
+  const { looksLikeAnswerTable } = await import('../../src/renderer/js/detect.js');
+  const grid = [];
+  for (let r = 0; r < 6; r++) for (let c = 0; c < 6; c++) grid.push({ num: r * 6 + c + 1, col: 0, x0: 0.1 + c * 0.13, y0: 0.1 + r * 0.03, h: 0.012, prefix: '' });
+  assert.equal(looksLikeAnswerTable(grid), true);
+  const stepped = [0, 1, 2, 3, 4].map((r) => ({ num: 1 + r * 6, col: 0, x0: 0.1, y0: 0.1 + r * 0.03, h: 0.012, prefix: '' }));
+  assert.equal(looksLikeAnswerTable(stepped), true);
+  const normal = [1, 2, 3, 4, 5].map((n, r) => ({ num: n, col: 0, x0: 0.1, y0: 0.1 + r * 0.15, h: 0.012, prefix: '' }));
+  assert.equal(looksLikeAnswerTable(normal), false);
+});
+
+test('selectAnchors: 두 번호 체계(유제 1,2… / Level 01,02…)를 함께 인식', () => {
+  const mk = (num, digits, col, y, font) => ({ num, digits, style: 'plain', prefix: '', col, x0: 0.07 + col * 0.45, x1: 0.09, y0: y, y1: y + 0.015, h: 0.015, relX: 0.001, hRatio: 1.2, conf: 100, padded: digits[0] === '0', font, ocr: false });
+  const pages = [
+    { index: 0, candidates: [mk(1, '1', 0, 0.2, 'B'), mk(2, '2', 0, 0.5, 'B'), mk(3, '3', 1, 0.2, 'B'), mk(4, '4', 1, 0.5, 'B')] },
+    { index: 1, candidates: [mk(1, '01', 0, 0.2, 'B'), mk(2, '02', 0, 0.4, 'B'), mk(3, '03', 0, 0.6, 'B'), mk(4, '04', 1, 0.2, 'B'), mk(1, '01', 1, 0.5, 'B'), mk(2, '02', 1, 0.7, 'B')] },
+    { index: 2, candidates: [mk(5, '5', 0, 0.2, 'B'), mk(6, '6', 0, 0.5, 'B'), mk(1, '01', 1, 0.2, 'B'), mk(2, '02', 1, 0.4, 'B'), mk(3, '03', 1, 0.6, 'B')] },
+  ];
+  const { anchors, signatures } = selectAnchors(pages);
+  assert.equal(signatures.length, 2);
+  const got = [0, 1, 2].flatMap((i) => anchors.get(i).map((a) => a.digits));
+  assert.deepEqual(got, ['1', '2', '3', '4', '01', '02', '03', '04', '01', '02', '5', '6', '01', '02', '03']);
+});

@@ -1,28 +1,65 @@
-# 태그(v1.2.3)를 푸시하면 윈도우 설치 파일을 빌드해 GitHub Releases 에 올립니다.
-# 설치된 프로그램은 이 Releases 를 보고 자동으로 업데이트합니다.
+# 새 버전 배포 (윈도우 설치 파일 + 자동 업데이트)
+#
+# 방법 1) GitHub → Actions → "Release (Windows)" → Run workflow
+#         올릴 버전(patch/minor/major)과 업데이트 내용을 적고 실행하면
+#         package.json 버전을 올려 커밋·태그하고, 설치 파일을 만들어 Releases 에 올립니다.
+# 방법 2) package.json 버전을 직접 올리고 같은 이름의 태그(v1.2.3)를 푸시
+#
+# 설치된 프로그램은 Releases 의 최신 버전을 보고 자동으로 업데이트합니다.
 name: Release (Windows)
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      bump:
+        description: '올릴 버전 (patch 0.1.0→0.1.1 / minor 0.1.0→0.2.0 / major 0.1.0→1.0.0)'
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      notes:
+        description: '이번 업데이트 내용 (앱의 업데이트 알림에 표시됩니다)'
+        type: string
+        required: false
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
 
-      - name: 태그와 package.json 버전 확인
-        if: startsWith(github.ref, 'refs/tags/v')
+      - run: npm ci
+
+      - run: npm test
+
+      - name: 버전 올리기 + 태그 (Actions 화면에서 실행한 경우)
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          npm version "$BUMP" -m "v%s 배포"
+          git push origin "HEAD:${GITHUB_REF_NAME}" --follow-tags
+
+      - name: 태그와 package.json 버전 확인 (태그를 푸시한 경우)
+        if: github.event_name == 'push'
         shell: bash
         run: |
           v="v$(node -p "require('./package.json').version")"
@@ -31,11 +68,16 @@ jobs:
             exit 1
           fi
 
-      - run: npm ci
-
-      - run: npm test
+      - name: 업데이트 내용 준비
+        shell: bash
+        env:
+          NOTES: ${{ inputs.notes }}
+        run: |
+          node -e "const v=require('./package.json').version; const n=(process.env.NOTES||'').trim(); require('fs').writeFileSync('release-notes.md', n || ('오답노트 ' + v + ' 업데이트'))"
+          cat release-notes.md
 
       - name: 설치 파일 빌드 + GitHub Release 업로드
-        run: npx electron-builder --win --x64 --publish always
+        shell: bash
+        run: npx electron-builder --win --x64 --publish always -c.releaseInfo.releaseNotesFile=release-notes.md
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -3,7 +3,7 @@
 import { h, clear, toast, modal, confirmDialog, promptDialog, debounce, formatDate, icon, logo, animateOut } from './ui.js';
 import { openDocSource, projectFileUrl } from './docsource.js';
 import { analyzeDocument, parsePageRange, reanalyzeSinglePage, detectPageWithGemini, replacePageItems } from './analyze.js';
-import { buildPdf, makeBlocks, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS } from './exporter.js';
+import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS } from './exporter.js';
 import {
   ROLES,
   ROLE_NAME,
@@ -85,8 +85,9 @@ async function boot() {
   api.onUpdateStatus((s) => {
     state.update = s;
     renderUpdateBadge();
+    updateListeners.forEach((fn) => fn(s));
     if (s.status === 'downloaded') {
-      toast(`새 버전 ${s.version}을(를) 받아 두었어요.`, {
+      toast(`새 버전 ${s.version}을(를) 받아 두었어요.${s.notes ? `\n${s.notes.split('\n')[0].slice(0, 80)}` : ''}`, {
         type: 'success',
         timeout: 0,
         actions: [{ label: '지금 재시작해서 설치', onClick: () => installUpdate() }],
@@ -94,6 +95,62 @@ async function boot() {
     }
   });
   await showHome();
+}
+
+const updateListeners = new Set();
+const fmtMB = (b) => (b ? `${(b / 1048576).toFixed(1)}MB` : '');
+
+/** 설정 화면의 업데이트 카드 (상태에 따라 실시간으로 바뀜) */
+function updateCard() {
+  const card = h('div.update-card');
+  const render = (u = state.update || {}) => {
+    if (!card.isConnected && card.dataset.mounted) {
+      updateListeners.delete(render);
+      return;
+    }
+    card.dataset.mounted = '1';
+    clear(card);
+    const packaged = state.appInfo.isPackaged;
+    const statusText =
+      {
+        disabled: '개발 모드에서는 자동 업데이트가 꺼져 있어요.',
+        checking: '새 버전이 있는지 확인하는 중…',
+        latest: '최신 버전을 쓰고 있어요.',
+        available: `새 버전 ${u.version}을(를) 받기 시작했어요.`,
+        downloading: `새 버전 ${u.version} 받는 중 · ${u.percent || 0}% ${u.total ? `(${fmtMB(u.transferred)} / ${fmtMB(u.total)})` : ''}`,
+        downloaded: `새 버전 ${u.version} 준비 완료 — 다시 시작하면 설치돼요.`,
+        error: `업데이트 확인 실패: ${u.message || ''}`,
+        idle: packaged ? '프로그램을 켤 때와 4시간마다 자동으로 확인해요.' : '설치한 프로그램에서만 업데이트를 확인할 수 있어요.',
+      }[u.status] || '';
+    const parts = [
+      h(
+        'div.uc-head',
+        h('span.uc-icon', icon('refresh')),
+        h('div', h('strong', '업데이트'), h('div.small.muted', `지금 버전 ${state.appInfo.version}`)),
+        h('span.spacer'),
+        u.status === 'downloaded'
+          ? h('button.btn.btn-small.btn-primary', { onclick: installUpdate }, icon('refresh'), '지금 다시 시작해서 설치')
+          : h(
+              'button.btn.btn-small',
+              {
+                disabled: !packaged || ['checking', 'downloading', 'available'].includes(u.status),
+                onclick: async () => {
+                  state.update = await api.checkForUpdates();
+                  render(state.update);
+                },
+              },
+              '업데이트 확인',
+            ),
+      ),
+      h(`div.uc-status${u.status === 'error' ? '.warn-text' : ''}`, statusText),
+      u.status === 'downloading' || u.status === 'available' ? h('div.progress', h('div.progress-bar', { style: { width: `${u.percent || 0}%` } })) : null,
+      u.notes ? h('div.uc-notes', h('div.small.muted', `${u.version} 에서 바뀐 점`), h('pre', u.notes)) : null,
+    ];
+    card.append(...parts.filter(Boolean));
+  };
+  updateListeners.add(render);
+  render();
+  return card;
 }
 
 async function installUpdate() {
@@ -674,6 +731,7 @@ async function analyzeRole(role) {
     doc.items = res.items;
     doc.pageInfo = res.pageInfo;
     doc.signature = res.signature;
+    doc.signatures = res.signatures || (res.signature ? [res.signature] : []);
     doc.analyzedAt = Date.now();
     doc.edited = false;
     if (doc.pageOffsetAuto !== false && res.pageOffset != null) doc.pageOffset = res.pageOffset;
@@ -843,10 +901,11 @@ function selectView() {
                 `button.chip${sel.has(it.id) ? '.on' : ''}${hasAnswers && !ans ? '.noans' : ''}${state.focus === it.id ? '.focus' : ''}`,
                 {
                   dataset: { id: it.id },
-                  title: `${pageLabel(doc, it.page)} ${it.number}번${hasAnswers && !ans ? ' (해설 짝 없음)' : ''}`,
+                  title: `${pageLabel(doc, it.page)} ${itemName(it)}${hasAnswers && !ans ? ' (해설 짝 없음)' : ''}`,
                   onclick: () => toggleOne(it, page, items),
                   onmouseenter: () => schedulePreview(it.id),
                 },
+                it.prefix ? h('span.chip-pre', it.prefix) : null,
                 it.number,
               );
             }),
@@ -960,7 +1019,7 @@ async function renderPreview() {
     h(
       'div.preview-head',
       h('span.tag', '문제'),
-      h('strong', `${pageLabel(doc, item.page)} ${item.number}번`),
+      h('strong', `${pageLabel(doc, item.page)} ${itemName(item)}`),
       h('span.muted.small', `PDF ${item.page + 1}쪽`),
       h('button.btn.btn-small.btn-ghost.push', { title: '페이지 검토에서 보기', onclick: () => { switchTab('review'); getEditor().show('problem', item.page, item.id); } }, icon('eye')),
       h(`button.btn.btn-small${selected ? '.btn-active' : ''}`, {
@@ -997,14 +1056,14 @@ async function renderPreview() {
         },
       },
       h('option', { value: '__auto' }, '자동으로 찾기'),
-      options.map((a) => h('option', { value: a.id, selected: has && ans?.id === a.id }, `답지 ${pageLabel(ansDoc, a.page)} ${a.number}번`)),
+      options.map((a) => h('option', { value: a.id, selected: has && ans?.id === a.id }, `답지 ${pageLabel(ansDoc, a.page)} ${itemName(a)}`)),
       h('option', { value: '', selected: has && !p.answerOverrides[item.id] }, '해설 없음'),
     );
     box.append(
       h(
         'div.preview-head.ans',
         h('span.tag.teal', '해설'),
-        h('strong', ans ? `답지 ${pageLabel(ansDoc, ans.page)} ${ans.number}번` : '짝을 못 찾음'),
+        h('strong', ans ? `답지 ${pageLabel(ansDoc, ans.page)} ${itemName(ans)}` : '짝을 못 찾음'),
         h('span.push', sel),
         ans ? h('button.btn.btn-small.btn-ghost', { title: '답지에서 보기', onclick: () => { switchTab('review'); getEditor().show('answer', ans.page, ans.id); } }, icon('eye')) : null,
       ),
@@ -1044,7 +1103,6 @@ function exportPanel() {
       'div.export-options',
       h('div.opt-row', h('span.opt-label', '배치'), seg('cols', o.columns, [[1, '1단'], [2, '2단']], (v) => set('columns', +v))),
       h('div.opt-row', h('span.opt-label', '풀이 여백'), seg('space', o.space, Object.entries(SPACE_OPTIONS).map(([k, v]) => [k, v.short]), (v) => set('space', v))),
-      h('div.opt-row', h('span.opt-label', '해설 위치'), seg('order', o.bothOrder, [['append', '뒤에 모아서'], ['interleave', '문제 바로 뒤']], (v) => set('bothOrder', v))),
       h(
         'div.opt-row',
         h('span.opt-label', '표시'),
@@ -1054,9 +1112,20 @@ function exportPanel() {
     ),
     h(
       'div.export-buttons',
-      h('button.btn.btn-primary', { onclick: () => doExport('problems') }, icon('download'), '문제'),
-      h('button.btn.btn-primary', { onclick: () => doExport('answers'), disabled: !hasAnswer, title: needAns }, icon('download'), '답지'),
-      h('button.btn.btn-primary', { onclick: () => doExport('both'), disabled: !hasAnswer, title: needAns }, icon('download'), '문제+답지'),
+      h('button.btn.btn-primary', { onclick: () => doExport('problems'), dataset: { mode: 'problems' }, title: '고른 문제만' }, icon('download'), h('span.eb', h('b', '문제만'))),
+      h('button.btn.btn-primary', { onclick: () => doExport('answers'), dataset: { mode: 'answers' }, disabled: !hasAnswer, title: needAns || '고른 문제의 해설만' }, icon('download'), h('span.eb', h('b', '해설만'))),
+      h(
+        'button.btn.btn-primary',
+        { onclick: () => doExport('both-inline'), dataset: { mode: 'both-inline' }, disabled: !hasAnswer, title: needAns || '문제마다 바로 뒤에 그 문제의 해설' },
+        icon('download'),
+        h('span.eb', h('b', '문제 + 해설'), h('small', '문제마다 바로 뒤에')),
+      ),
+      h(
+        'button.btn.btn-primary',
+        { onclick: () => doExport('both-end'), dataset: { mode: 'both-end' }, disabled: !hasAnswer, title: needAns || '문제를 모두 싣고, 해설은 맨 뒤에 모아서' },
+        icon('download'),
+        h('span.eb', h('b', '문제 + 해설'), h('small', '해설은 맨 뒤에')),
+      ),
     ),
   );
 }
@@ -1085,7 +1154,7 @@ function renderExportSummary() {
         h(
           'span.sel-chip',
           { onclick: () => { state.focus = it.id; renderPreview(); }, title: '미리보기' },
-          `${pageLabel(doc, it.page)} ${it.number}번`,
+          `${pageLabel(doc, it.page)} ${itemName(it)}`,
           h('button.sel-x', {
             title: '빼기',
             onclick: (e) => {
@@ -1117,7 +1186,7 @@ async function doExport(mode) {
   const label = (role, it) => pageLabel(p.docs[role], it.page);
   const opts = p.exportOptions;
   const blocks = makeBlocks(mode, entries, opts, label);
-  const modeName = { problems: '문제', answers: '해설', both: '문제+해설' }[mode];
+  const modeName = { problems: '문제', answers: '해설', 'both-inline': '문제+해설(바로)', 'both-end': '문제+해설(뒤)' }[mode];
   const today = new Date();
   const ymd = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
   const closeToast = toast(`${modeName} PDF 만드는 중…`, { timeout: 0 });
@@ -1262,21 +1331,6 @@ async function openSettings() {
     ['eng', '영어만 (더 빠름)'],
   ].map(([v, t]) => h('option', { value: v, selected: s.ocrLang === v }, t)));
   const modelMsg = h('span.small.muted');
-  const updateMsg = h('span.small.muted');
-  const showUpdate = (u) => {
-    updateMsg.textContent =
-      {
-        disabled: u.message || '자동 업데이트 꺼짐',
-        checking: '확인 중…',
-        latest: '최신 버전입니다.',
-        available: `새 버전 ${u.version} 다운로드 시작`,
-        downloading: `다운로드 중 ${u.percent || 0}%`,
-        downloaded: `새 버전 ${u.version} 준비됨 — 재시작하면 설치됩니다.`,
-        error: `업데이트 오류: ${u.message || ''}`,
-        idle: '',
-      }[u.status] || '';
-  };
-  showUpdate(state.update || {});
 
   const body = h(
     'div.settings',
@@ -1310,16 +1364,7 @@ async function openSettings() {
     h('h4', icon('scan'), '스캔본 글자 인식 (OCR)'),
     h('label.field', h('span', '언어'), ocrSelect),
     h('h4', icon('gear'), '프로그램'),
-    h('div.field-row', h('span', `버전 ${state.appInfo.version}`), h('button.btn.btn-small', {
-      onclick: async () => {
-        if (!state.appInfo.isPackaged) {
-          updateMsg.textContent = '설치한 프로그램에서만 업데이트를 확인할 수 있어요.';
-          return;
-        }
-        updateMsg.textContent = '확인 중…';
-        showUpdate(await api.checkForUpdates());
-      },
-    }, '업데이트 확인'), updateMsg),
+    updateCard(),
     h('div.field-row', h('button.btn.btn-small', { onclick: () => api.openDataDir() }, icon('folder'), '데이터 폴더 열기'), h('span.small.muted', '올린 파일과 분석 결과가 저장되는 곳')),
   );
   const r = await modal({

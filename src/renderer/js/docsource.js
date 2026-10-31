@@ -195,6 +195,7 @@ export class DocSource {
           x1: (x + width * Math.max(b, a + 0.01)) / vp.width,
           y0: top / vp.height,
           y1: bottom / vp.height,
+          font: item.fontName || '',
         });
       }
     }

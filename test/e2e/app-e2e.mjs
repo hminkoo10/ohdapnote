@@ -89,7 +89,7 @@ try {
   await win.screenshot({ path: join(OUT, 'app-3-select.png') });
 
   step('PDF 내보내기 3종');
-  for (const [idx, name] of [[0, 'problems'], [1, 'answers'], [2, 'both']]) {
+  for (const [idx, name] of [[0, 'problems'], [1, 'answers'], [2, 'both-inline'], [3, 'both-end']]) {
     const out = join(OUT, `app-export-${name}.pdf`);
     rmSync(out, { force: true });
     await app.evaluate(({ dialog }, p) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: p }); }, out);

@@ -88,7 +88,7 @@ export function buildLines(tokens) {
         last.y1 = Math.max(last.y1, t.y1);
         last.conf = Math.min(last.conf ?? 100, t.conf ?? 100);
       } else {
-        words.push({ str: t.str, x0: t.x0, x1: t.x1, y0: t.y0, y1: t.y1, conf: t.conf ?? 100 });
+        words.push({ str: t.str, x0: t.x0, x1: t.x1, y0: t.y0, y1: t.y1, conf: t.conf ?? 100, font: t.font || '', h: t.y1 - t.y0 });
       }
     }
     L.words = words;
@@ -123,17 +123,57 @@ export function parseNumberWord(str) {
   return { num, digits, style };
 }
 
+/** 번호 앞에 붙는 말머리 (같은 줄, 바로 뒤에 번호) */
+export const PREFIXES = ['예제', '유제', '필수예제', '대표예제', '기본예제', '발전예제', '확인문제', '확인체크', '개념확인', '필수유형', '대표문제'];
+const HANGUL = /[가-힣]/g;
+
 /**
  * 한 페이지의 번호 후보 추출
  * @param {Token[]} tokens
  * @param {object} layout analyzeLayout 결과
  * @param {{ocr?:boolean}} [opts]
+ * @returns {{candidates:object[], bodyH:number, lineCount:number, headings:{x0:number,x1:number,y0:number,y1:number}[]}}
  */
 export function extractCandidates(tokens, layout, opts = {}) {
   const lines = buildLines(tokens);
   const bodyH = median(lines.map((l) => l.h)) || 0.012;
   const words = [];
-  for (const L of lines) for (const w of L.words) words.push({ ...w, lineH: L.h });
+  for (const L of lines) {
+    for (const w of L.words) {
+      w.lineH = L.h;
+      words.push(w);
+    }
+  }
+
+  // ---- 제목 줄 찾기: 글자(번호 제외)가 본문보다 확실히 큰 줄 조각 ----
+  // (텍스트 PDF 에서만. 제목 안의 "01" 같은 숫자는 문제 번호 후보에서 뺌)
+  const headings = [];
+  const headingWords = new Set();
+  if (!opts.ocr) {
+    for (const L of lines) {
+      // 줄을 큰 빈칸 기준으로 조각내기 (단이 여러 개면 같은 높이의 다른 단 글자와 분리)
+      const segs = [];
+      for (const w of L.words) {
+        const last = segs[segs.length - 1];
+        if (last && w.x0 - last.x1 < 2.5 * L.h) {
+          last.words.push(w);
+          last.x1 = Math.max(last.x1, w.x1);
+        } else segs.push({ words: [w], x0: w.x0, x1: w.x1 });
+      }
+      for (const seg of segs) {
+        const textWords = seg.words.filter((w) => !/^[\d.()[\]]+$/.test(w.str));
+        const hangul = textWords.reduce((n, w) => n + (w.str.match(HANGUL)?.length || 0), 0);
+        if (hangul < 2) continue;
+        const hText = median(textWords.map((w) => w.h ?? w.y1 - w.y0));
+        if (hText >= 1.2 * bodyH) {
+          const y0 = Math.min(...seg.words.map((w) => w.y0));
+          const y1 = Math.max(...seg.words.map((w) => w.y1));
+          headings.push({ x0: seg.x0, x1: seg.x1, y0, y1 });
+          seg.words.forEach((w) => headingWords.add(w));
+        }
+      }
+    }
+  }
 
   // 세로로 겹치는 단어를 빨리 찾기 위한 버킷
   const BUCKET = 0.01;
@@ -144,38 +184,38 @@ export function extractCandidates(tokens, layout, opts = {}) {
       buckets.get(b).push(w);
     }
   }
-  const hasLeftNeighbor = (w) => {
-    const h = w.y1 - w.y0;
-    const gap = Math.max(1.6 * h, 0.012);
+  const neighbours = (w) => {
+    const out = [];
     const seen = new Set();
     for (let b = Math.floor(w.y0 / BUCKET); b <= Math.floor(w.y1 / BUCKET); b++) {
       for (const u of buckets.get(b) || []) {
         if (u === w || seen.has(u)) continue;
         seen.add(u);
-        if (u.x0 >= w.x0) continue;
-        if (u.x1 < w.x0 - gap) continue;
         const ov = Math.min(u.y1, w.y1) - Math.max(u.y0, w.y0);
-        if (ov > 0.35 * Math.min(h, u.y1 - u.y0)) return true;
+        if (ov > 0.35 * Math.min(w.y1 - w.y0, u.y1 - u.y0)) out.push(u);
       }
     }
-    return false;
+    return out;
+  };
+  const hasLeftNeighbor = (w) => {
+    const gap = Math.max(1.6 * (w.y1 - w.y0), 0.012);
+    return neighbours(w).some((u) => u.x0 < w.x0 && u.x1 >= w.x0 - gap);
+  };
+  // 같은 줄 오른쪽 바로 다음 단어
+  const nextWord = (w) => {
+    let best = null;
+    for (const u of neighbours(w)) {
+      if (u.x0 <= w.x0) continue;
+      if (u.x0 - w.x1 > 1.2 * (w.y1 - w.y0)) continue;
+      if (!best || u.x0 < best.x0) best = u;
+    }
+    return best;
   };
 
   const cols = layout?.columns?.length ? layout.columns : [{ x0: 0, x1: 1 }];
   const bodyTop = layout?.bodyTop ?? 0;
   const bodyBottom = layout?.bodyBottom ?? 1;
-
-  const candidates = [];
-  for (const w of words) {
-    const str = opts.ocr ? normalizeOcrWord(w.str) : w.str;
-    const parsed = parseNumberWord(str);
-    if (!parsed) continue;
-    const cy = (w.y0 + w.y1) / 2;
-    // 머리말/꼬리말(쪽번호) 제외
-    if (layout?.hasHeader && cy < bodyTop) continue;
-    if (layout?.hasFooter && cy > bodyBottom) continue;
-    if (hasLeftNeighbor(w)) continue;
-    const cx = (w.x0 + w.x1) / 2;
+  const colOf = (cx) => {
     let col = 0;
     let bestD = Infinity;
     cols.forEach((c, i) => {
@@ -185,23 +225,82 @@ export function extractCandidates(tokens, layout, opts = {}) {
         col = i;
       }
     });
+    return col;
+  };
+
+  const candidates = [];
+  for (const w of words) {
+    if (headingWords.has(w)) continue;
+    let str = opts.ocr ? normalizeOcrWord(w.str) : w.str;
+    let prefix = '';
+    let numWord = w;
+    // "유제 3", "예제3" 처럼 말머리가 붙은 번호
+    const glued = /^([가-힣]{2,4})(\d{1,3})([.)]?)$/.exec(str);
+    if (glued && PREFIXES.includes(glued[1])) {
+      prefix = glued[1];
+      str = glued[2] + glued[3];
+    } else if (PREFIXES.includes(str)) {
+      const nw = nextWord(w);
+      if (!nw) continue;
+      prefix = str;
+      numWord = nw;
+      str = opts.ocr ? normalizeOcrWord(nw.str) : nw.str;
+    }
+    const parsed = parseNumberWord(str);
+    if (!parsed) continue;
+    const cy = (w.y0 + w.y1) / 2;
+    // 머리말/꼬리말(쪽번호) 제외
+    if (layout?.hasHeader && cy < bodyTop) continue;
+    if (layout?.hasFooter && cy > bodyBottom) continue;
+    if (hasLeftNeighbor(w)) continue;
+    const col = colOf((w.x0 + w.x1) / 2);
     candidates.push({
       ...parsed,
+      prefix,
       x0: w.x0,
-      x1: w.x1,
-      y0: w.y0,
-      y1: w.y1,
-      h: w.y1 - w.y0,
+      x1: Math.max(w.x1, numWord.x1),
+      y0: Math.min(w.y0, numWord.y0),
+      y1: Math.max(w.y1, numWord.y1),
+      h: numWord.y1 - numWord.y0,
       col,
       relX: w.x0 - cols[col].x0,
-      hRatio: (w.y1 - w.y0) / bodyH,
-      conf: w.conf ?? 100,
+      hRatio: (numWord.y1 - numWord.y0) / bodyH,
+      conf: Math.min(w.conf ?? 100, numWord.conf ?? 100),
       padded: parsed.digits.length >= 2 && parsed.digits[0] === '0',
+      font: numWord.font || '',
       ocr: !!opts.ocr,
     });
   }
   candidates.sort((a, b) => a.col - b.col || a.y0 - b.y0);
-  return { candidates, bodyH, lineCount: lines.length };
+  return { candidates, bodyH, lineCount: lines.length, headings };
+}
+
+/**
+ * 빠른 정답표 같은 쪽인지: 한 단 안에서 같은 높이에 번호가 여러 개 나란히 있는 경우가 많음
+ */
+export function looksLikeAnswerTable(candidates) {
+  if (candidates.length >= 20) {
+    let sideBySide = 0;
+    for (const c of candidates) {
+      if (candidates.some((d) => d !== c && d.col === c.col && Math.abs(d.y0 - c.y0) < 0.4 * c.h && Math.abs(d.x0 - c.x0) > 3 * c.h)) sideBySide++;
+    }
+    if (sideBySide >= candidates.length * 0.4) return true;
+  }
+  // 표를 단 단위로 읽으면 번호가 일정한 간격(예: +6)으로 건너뜀 (스캔본처럼 칸 일부만 읽힌 경우)
+  const diffs = [];
+  const byCol = new Map();
+  for (const c of candidates) {
+    if (c.prefix) continue;
+    if (!byCol.has(c.col)) byCol.set(c.col, []);
+    byCol.get(c.col).push(c);
+  }
+  for (const list of byCol.values()) {
+    list.sort((a, b) => a.y0 - b.y0);
+    for (let i = 1; i < list.length; i++) diffs.push(list[i].num - list[i - 1].num);
+  }
+  if (diffs.length < 4) return false;
+  const { value, count } = mode(diffs);
+  return value >= 3 && count >= diffs.length * 0.7;
 }
 
 // ---------------------------------------------------------------------------
@@ -215,7 +314,7 @@ function transitionScore(a, b) {
   if (d === 3) return -0.2;
   if (d >= 4 && d <= 8) return -3;
   // 단원이 바뀌며 1번부터 다시 시작 (단원 제목의 "01" 같은 것과 구분하기 위해 앞 번호가 3 이상일 때만)
-  if (b.num === 1) return a.num >= 3 ? -0.4 : -6;
+  if (b.num === 1) return a.num >= 3 ? -0.4 : a.num === 2 ? -1.5 : -6;
   return -6;
 }
 
@@ -259,13 +358,20 @@ function priorWithStyle(cands, i, sig) {
   if (c.style === sig.style) s += 0.9;
   else if (c.ocr && (c.style === 'dot' || c.style === 'plain') && (sig.style === 'dot' || sig.style === 'plain')) s -= 0.2; // OCR 은 점을 놓치거나 더 읽기도 함
   else s -= 1.6;
-  s += c.padded === sig.padded ? 0.4 : -1.2;
-  if (sig.padded && sig.digitsLen && c.digits.length !== sig.digitsLen) s -= 1.5;
+  // 0 채움(0001, 01)은 아주 뚜렷한 특징이라 다르면 크게 감점
+  s += c.padded === sig.padded ? 0.4 : -3.5;
+  if (sig.padded && sig.digitsLen && c.digits.length !== sig.digitsLen) s -= 2.5;
+  if ((c.prefix || '') !== (sig.prefix || '')) s -= 3;
   if (sig.hRatio > 0) {
     const r = c.hRatio / sig.hRatio;
-    if (r > 0.92 && r < 1.2) s += 0.4;
-    else if (r < 0.65 || r > 1.6) s -= 0.8;
+    if (c.ocr) {
+      if (r > 0.85 && r < 1.2) s += 0.3;
+      else if (r < 0.65 || r > 1.6) s -= 0.8;
+    } else if (Math.abs(r - 1) <= 0.06) s += 0.6;
+    else if (Math.abs(r - 1) > 0.12) s -= 1.2;
   }
+  // 글꼴(굵은 번호 전용 글꼴 등)이 같으면 가점, 다르면 감점
+  if (sig.font && c.font) s += c.font === sig.font ? 0.8 : -2;
   if (c.conf < 60) s -= 0.6;
   return s;
 }
@@ -307,55 +413,174 @@ export function chooseChain(cands, prevLast, priorFn) {
   return chain.filter((c) => prior[cands.indexOf(c)] > -2.5);
 }
 
-/**
- * 문서 전체 번호 선택(2단계).
- * @param {{index:number, candidates:object[]}[]} pages  분석한 페이지(쪽 순서)
- * @param {{numberStyle?:string, signature?:object, prevLast?:number}} [opts]
- *   numberStyle: auto|dot|plain|pad|bracket, signature: 이전에 학습한 대표 스타일
- * @returns {{anchors: Map<number, object[]>, signature: object|null}}
- */
-export function selectAnchors(pages, opts = {}) {
-  const forced = opts.numberStyle && opts.numberStyle !== 'auto' ? opts.numberStyle : null;
-  const styleOk = (c) => {
-    if (!forced) return true;
-    if (forced === 'dot') return c.style === 'dot';
-    if (forced === 'plain') return c.style === 'plain' && !c.padded;
-    if (forced === 'pad') return c.padded;
-    if (forced === 'bracket') return c.style === 'bracket' || c.style === 'paren';
-    return true;
+function learnSignature(chosen) {
+  if (chosen.length < 3) return null;
+  const fonts = chosen.map((c) => c.font).filter(Boolean);
+  const fm = mode(fonts);
+  return {
+    relX: median(chosen.map((c) => c.relX)),
+    style: mode(chosen.map((c) => c.style)).value,
+    padded: mode(chosen.map((c) => c.padded)).value,
+    hRatio: median(chosen.map((c) => c.hRatio)),
+    digitsLen: mode(chosen.filter((c) => c.padded).map((c) => c.digits.length)).value || 0,
+    prefix: mode(chosen.map((c) => c.prefix || '')).value || '',
+    font: fonts.length >= chosen.length * 0.6 && fm.count >= fonts.length * 0.6 ? fm.value : '',
   };
-  const filtered = pages.map((p) => ({ ...p, candidates: p.candidates.filter(styleOk) }));
+}
 
+/** 번호 모양 묶음 열쇠 (말머리 / 점·괄호 / 0 채움 자릿수 / 글꼴) */
+function groupKey(c) {
+  if (c.style === 'paren' && !c.prefix) return null; // (1), (2) 는 소문항 표시일 때가 많음
+  const st = c.ocr && (c.style === 'dot' || c.style === 'plain') ? 'pd' : c.style;
+  return `${c.prefix ? `pre:${c.prefix}` : st}|${c.padded ? c.digits.length : 0}|${c.font || ''}`;
+}
+const sigKey = (sig) => sig.key;
+
+function runSelection(pages, opts, signatureIn) {
   // 1단계: 페이지별(스타일 정보 없이) 선택 → 대표 스타일 추정
-  const firstPass = [];
-  let prev = opts.prevLast ?? null;
-  for (const p of filtered) {
-    const chain = chooseChain(p.candidates, prev, (i) => priorLocal(p.candidates, i));
-    if (chain.length) prev = chain[chain.length - 1].num;
-    firstPass.push(...chain);
+  let signature = signatureIn || null;
+  if (!signature) {
+    const firstPass = [];
+    let prev = opts.prevLast ?? null;
+    for (const p of pages) {
+      const chain = chooseChain(p.candidates, prev, (i) => priorLocal(p.candidates, i));
+      if (chain.length) prev = chain[chain.length - 1].num;
+      firstPass.push(...chain);
+    }
+    signature = learnSignature(firstPass);
   }
-
-  let signature = opts.signature || null;
-  if (!signature && firstPass.length >= 4) {
-    signature = {
-      relX: median(firstPass.map((c) => c.relX)),
-      style: mode(firstPass.map((c) => c.style)).value,
-      padded: mode(firstPass.map((c) => c.padded)).value,
-      hRatio: median(firstPass.map((c) => c.hRatio)),
-      digitsLen: mode(firstPass.filter((c) => c.padded).map((c) => c.digits.length)).value || 0,
-    };
-  }
-
   // 2단계: 대표 스타일과의 유사도를 반영해 다시 선택
   const anchors = new Map();
-  prev = opts.prevLast ?? null;
-  for (const p of filtered) {
+  let prev = opts.prevLast ?? null;
+  for (const p of pages) {
     const priorFn = signature ? (i) => priorWithStyle(p.candidates, i, signature) : (i) => priorLocal(p.candidates, i);
     const chain = chooseChain(p.candidates, prev, priorFn);
     if (chain.length) prev = chain[chain.length - 1].num;
     anchors.set(p.index, chain);
   }
   return { anchors, signature };
+}
+
+/** 번호 사슬이 얼마나 "1씩 늘어나는 번호"다운지 */
+function sequenceScore(seq) {
+  let good = 0;
+  let bad = 0;
+  let resets = 0;
+  for (let i = 1; i < seq.length; i++) {
+    const d = seq[i].num - seq[i - 1].num;
+    if (d === 1) good++;
+    else if (seq[i].num === 1) resets++;
+    else bad++;
+  }
+  const maxNum = seq.length ? Math.max(...seq.map((c) => c.num)) : 0;
+  return { good, bad, resets, maxNum, score: good - 1.5 * bad - 0.8 * resets + 0.05 * seq.length };
+}
+
+/** 두 번째 번호 체계(예: 유제 1,2… 와 Level 01,02…)가 믿을 만한지 */
+function groupQuality(q, count, sig, mainSig, prefixed) {
+  if (count < (prefixed ? 2 : 4)) return false;
+  if (q.maxNum < 3 && !prefixed) return false;
+  if (q.good < (prefixed ? 1 : 2) || q.bad > 0.3 * (q.good + q.bad)) return false;
+  if (q.resets > q.good) return false;
+  if (!prefixed && mainSig && Math.abs(sig.relX - mainSig.relX) > 0.02) return false;
+  return true;
+}
+
+function mergeAnchors(anchors, extraByPage) {
+  for (const [idx, extra] of extraByPage) {
+    if (!extra.length) continue;
+    const merged = [...(anchors.get(idx) || [])];
+    for (const c of extra) {
+      // 이미 고른 번호와 거의 같은 자리면 건너뜀
+      if (merged.some((a) => a.col === c.col && Math.abs(a.y0 - c.y0) < 0.6 * Math.max(a.h, c.h))) continue;
+      merged.push(c);
+    }
+    merged.sort((a, b) => a.col - b.col || a.y0 - b.y0);
+    anchors.set(idx, merged);
+  }
+}
+
+/**
+ * 문서 전체 번호 선택.
+ *  - 번호 후보를 모양(말머리·자릿수·글꼴)별로 묶고, 묶음마다 연속 번호 사슬을 고른 뒤
+ *  - 가장 "1씩 늘어나는" 묶음을 대표 번호 체계로, 믿을 만한 다른 묶음(유제/Level 등)도 함께 씀
+ * @param {{index:number, candidates:object[]}[]} pages  분석한 페이지(쪽 순서)
+ * @param {{numberStyle?:string, signature?:object, signatures?:object[], prevLast?:number}} [opts]
+ *   numberStyle: auto|dot|plain|pad|bracket, signatures: 이전에 학습한 번호 체계들(다시 인식할 때)
+ * @returns {{anchors: Map<number, object[]>, signature: object|null, signatures: object[]}}
+ */
+export function selectAnchors(pages, opts = {}) {
+  const forced = opts.numberStyle && opts.numberStyle !== 'auto' ? opts.numberStyle : null;
+  if (forced) {
+    const styleOk = (c) => {
+      if (forced === 'dot') return c.style === 'dot';
+      if (forced === 'plain') return c.style === 'plain' && !c.padded;
+      if (forced === 'pad') return c.padded;
+      if (forced === 'bracket') return c.style === 'bracket' || c.style === 'paren';
+      return true;
+    };
+    const filtered = pages.map((p) => ({ ...p, candidates: p.candidates.filter(styleOk) }));
+    const res = runSelection(filtered, opts, opts.signatures?.[0] || opts.signature || null);
+    return { anchors: res.anchors, signature: res.signature, signatures: res.signature ? [res.signature] : [] };
+  }
+
+  // 후보를 모양별로 묶기
+  const groups = new Map();
+  for (const p of pages) {
+    for (const c of p.candidates) {
+      const k = groupKey(c);
+      if (!k) continue;
+      if (!groups.has(k)) groups.set(k, new Map());
+      const g = groups.get(k);
+      if (!g.has(p.index)) g.set(p.index, []);
+      g.get(p.index).push(c);
+    }
+  }
+  const pagesOf = (byPage) => pages.map((p) => ({ index: p.index, candidates: byPage.get(p.index) || [] }));
+
+  // 이미 학습한 번호 체계가 있으면(한 쪽 다시 인식) 그대로 사용
+  const known = opts.signatures || (opts.signature ? [opts.signature] : null);
+  if (known?.length && known.every((sg) => sg.key)) {
+    const anchors = new Map(pages.map((p) => [p.index, []]));
+    known.forEach((sg, i) => {
+      const byPage = groups.get(sg.key);
+      if (!byPage) return;
+      const res = runSelection(pagesOf(byPage), { prevLast: i === 0 ? opts.prevLast : null }, sg);
+      mergeAnchors(anchors, res.anchors);
+    });
+    return { anchors, signature: known[0], signatures: known };
+  }
+
+  // 묶음마다 사슬 고르기 + 점수
+  const results = [];
+  for (const [key, byPage] of groups) {
+    const gp = pagesOf(byPage);
+    const total = gp.reduce((n, p) => n + p.candidates.length, 0);
+    if (total < 2) continue;
+    const res = runSelection(gp, { prevLast: null }, null);
+    if (!res.signature) continue;
+    res.signature.key = key;
+    const seq = gp.flatMap((p) => res.anchors.get(p.index) || []);
+    results.push({ key, res, seq, q: sequenceScore(seq), prefixed: key.startsWith('pre:') });
+  }
+  if (!results.length) {
+    // 묶음이 너무 작으면 예전 방식(전체 후보 한꺼번에)
+    const res = runSelection(pages, opts, null);
+    if (res.signature) res.signature.key = '';
+    return { anchors: res.anchors, signature: res.signature, signatures: res.signature ? [res.signature] : [] };
+  }
+  results.sort((a, b) => b.q.score - a.q.score);
+  const main = results[0];
+  // 대표 체계는 이어지는 앞 쪽 번호(prevLast)를 반영해 다시 선택
+  const mainRes = opts.prevLast != null ? runSelection(pagesOf(groups.get(main.key)), opts, main.res.signature) : main.res;
+  const anchors = new Map(pages.map((p) => [p.index, [...(mainRes.anchors.get(p.index) || [])]]));
+  const signatures = [main.res.signature];
+  for (const r of results.slice(1)) {
+    if (!groupQuality(r.q, r.seq.length, r.res.signature, main.res.signature, r.prefixed)) continue;
+    signatures.push(r.res.signature);
+    mergeAnchors(anchors, r.res.anchors);
+  }
+  return { anchors, signature: main.res.signature, signatures };
 }
 
 /**
@@ -366,7 +591,7 @@ export function selectAnchors(pages, opts = {}) {
  */
 export function flagPages(order, anchors, layouts) {
   const flags = new Map();
-  let prevLast = null;
+  const lastByKey = new Map(); // 번호 체계별 마지막 번호
   for (let k = 0; k < order.length; k++) {
     const idx = order[k];
     const chain = anchors.get(idx) || [];
@@ -377,16 +602,26 @@ export function flagPages(order, anchors, layouts) {
       const nextHas = k + 1 < order.length && (anchors.get(order[k + 1]) || []).length > 0;
       if (L && !L.blank && L.inkRatio > 0.02 && prevHas && nextHas) reasons.push('번호를 찾지 못함');
     } else {
-      if (prevLast != null && chain[0].num !== prevLast + 1 && chain[0].num !== 1) reasons.push('앞 쪽과 번호가 이어지지 않음');
-      for (let i = 1; i < chain.length; i++) {
-        const d = chain[i].num - chain[i - 1].num;
-        if (d !== 1 && chain[i].num !== 1) {
-          reasons.push('중간에 빠진 번호가 있음');
-          break;
+      // 번호 체계별로 연속성 확인 (유제 1,2 와 Level 01,02 처럼 섞여 있을 수 있음)
+      const byKey = new Map();
+      for (const c of chain) {
+        const key = `${c.prefix || ''}|${c.padded ? c.digits.length : 0}`;
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key).push(c);
+      }
+      for (const [key, seq] of byKey) {
+        const prev = lastByKey.get(key);
+        if (prev != null && seq[0].num !== prev + 1 && seq[0].num !== 1 && !reasons.length) reasons.push('앞 쪽과 번호가 이어지지 않음');
+        for (let i = 1; i < seq.length; i++) {
+          const d = seq[i].num - seq[i - 1].num;
+          if (d !== 1 && seq[i].num !== 1) {
+            if (!reasons.includes('중간에 빠진 번호가 있음')) reasons.push('중간에 빠진 번호가 있음');
+            break;
+          }
         }
+        lastByKey.set(key, seq[seq.length - 1].num);
       }
       if (chain.some((c) => c.conf < 65)) reasons.push('인식 신뢰도 낮음');
-      prevLast = chain[chain.length - 1].num;
     }
     if (reasons.length) flags.set(idx, reasons);
   }
@@ -405,8 +640,9 @@ export function findCutters(pages, anchors, signature) {
     const list = p.candidates.filter(
       (c) =>
         !chosen.has(c) &&
+        !c.ocr && // OCR 글자 크기는 믿기 어려움
         Math.abs(c.relX - signature.relX) < 0.03 &&
-        (c.padded !== signature.padded || c.hRatio > signature.hRatio * 1.15),
+        c.hRatio > signature.hRatio * 1.15,
     );
     if (list.length) map.set(p.index, list);
   }
@@ -418,75 +654,115 @@ export function findCutters(pages, anchors, signature) {
 // ---------------------------------------------------------------------------
 
 /**
+ * 여러 단 쪽에서 전체 폭 가로 띠(단원 제목 막대 등)로 나뉜 "구역".
+ * 읽는 순서는 구역 → 단 → 위→아래 입니다. (띠 위쪽 단들을 다 읽고 띠 아래로)
+ */
+export function zonesOf(L) {
+  const top = L?.bodyTop ?? 0;
+  const bottom = L?.bodyBottom ?? 1;
+  const cols = L?.columns?.length ? L.columns : [{ x0: 0, x1: 1 }];
+  if (cols.length < 2 || !L.spans?.length) return [{ y0: top, y1: bottom, afterBand: false }];
+  const zones = [];
+  let y = top;
+  let afterBand = false;
+  for (const b of [...L.spans].sort((a, c) => a.y0 - c.y0)) {
+    if (b.y0 - y > 0.01) zones.push({ y0: y, y1: b.y0, afterBand });
+    y = Math.max(y, b.y1);
+    afterBand = true;
+  }
+  if (bottom - y > 0.01) zones.push({ y0: y, y1: bottom, afterBand });
+  return zones.length ? zones : [{ y0: top, y1: bottom, afterBand: false }];
+}
+
+export function zoneOf(L, y) {
+  const zones = zonesOf(L);
+  for (let i = zones.length - 1; i >= 0; i--) if (y >= zones[i].y0 - 0.01) return i;
+  return 0;
+}
+
+/**
  * 번호 위치로 문항 영역을 계산합니다.
  * @param {number[]} order  분석한 페이지(순서대로)
  * @param {Map<number, object[]>} anchors
  * @param {Map<number, object>} layouts  페이지별 analyzeLayout 결과
  * @param {Map<number, object>} grids    페이지별 잉크 격자
- * @param {{flow?:'column'|'continue', source?:Map<number,string>}} opts
+ * @param {{flow?:'column'|'continue', source?:Map<number,string>, cutters?:Map, stopPages?:Set<number>}} opts
  *    flow = 'continue' 이면 문항(해설)이 다음 단/페이지로 이어질 수 있음
  */
 export function computeItems(order, anchors, layouts, grids, opts = {}) {
   const flow = opts.flow || 'column';
   const items = [];
   let open = null;
+  const padOf = (a) => 0.45 * a.h + 0.004;
   for (const pageIdx of order) {
     const L = layouts.get(pageIdx);
     const grid = grids.get(pageIdx);
     const chain = anchors.get(pageIdx) || [];
-    if (!L || !grid) {
+    if (!L || !grid || opts.stopPages?.has(pageIdx)) {
       open = null;
       continue;
     }
     const cols = L.columns?.length ? L.columns : [{ x0: 0, x1: 1 }];
-    const top = L.bodyTop ?? 0;
-    const bottom = L.bodyBottom ?? 1;
-    for (let c = 0; c < cols.length; c++) {
-      const col = cols[c];
-      const x0 = Math.max(0, col.x0 - 0.006);
-      const x1 = Math.min(1, col.x1 + 0.006);
-      const inCol = chain.filter((a) => a.col === c).sort((a, b) => a.y0 - b.y0);
-      const padOf = (a) => 0.45 * a.h + 0.004;
-      // 단원 제목 등(번호처럼 생겼지만 문제 번호가 아닌 줄)에서 영역을 끊음
-      const cuts = (opts.cutters?.get(pageIdx) || []).filter((k) => k.col === c).map((k) => k.y0 - padOf(k));
-      const cutBetween = (ya, yb) => {
-        let v = yb;
-        for (const cy of cuts) if (cy > ya + 0.005 && cy < v) v = cy;
-        return v;
-      };
-
-      // 단 위쪽: 이전 문항이 이어지는 부분
-      if (open && flow === 'continue') {
-        const segBottom = cutBetween(top, inCol.length ? inCol[0].y0 - padOf(inCol[0]) : bottom);
-        if (segBottom - top > 0.01) {
-          const r = trimRect(grid, { x: x0, y: top, w: x1 - x0, h: segBottom - top });
-          if (r && r.h > 0.008) open.rects.push({ page: pageIdx, ...r });
-        }
-      }
-      for (let k = 0; k < inCol.length; k++) {
-        const a = inCol[k];
-        const next = inCol[k + 1];
-        const y0 = Math.max(0, a.y0 - padOf(a));
-        const y1 = cutBetween(y0, next ? next.y0 - padOf(next) : bottom);
-        const raw = { x: Math.min(x0, a.x0 - 0.004), y: y0, w: 0, h: Math.max(0.01, y1 - y0) };
-        raw.w = x1 - raw.x;
-        const r = trimRect(grid, raw) || raw;
-        const item = {
-          page: pageIdx,
-          col: c,
-          number: a.digits,
-          num: a.num,
-          rects: [{ page: pageIdx, ...r }],
-          source: opts.source?.get(pageIdx) || 'text',
-          conf: Math.round(a.conf ?? 100),
+    const zones = zonesOf(L);
+    zones.forEach((zone, z) => {
+      if (zone.afterBand) open = null; // 단원 제목 띠 다음은 새 단원
+      const top = zone.y0;
+      const bottom = zone.y1;
+      for (let c = 0; c < cols.length; c++) {
+        const col = cols[c];
+        const x0 = Math.max(0, col.x0 - 0.006);
+        const x1 = Math.min(1, col.x1 + 0.006);
+        const inCol = chain
+          .filter((a) => a.col === c && a.y0 >= top - 0.01 && (a.y0 < bottom || z === zones.length - 1))
+          .sort((a, b) => a.y0 - b.y0);
+        // 단원·유형 제목 등에서 영역을 끊음 (이 단과 가로로 겹치는 것만)
+        const cuts = (opts.cutters?.get(pageIdx) || [])
+          .filter((k) => k.x1 > col.x0 + 0.005 && k.x0 < col.x1 - 0.005)
+          .map((k) => k.y0)
+          .filter((cy) => cy > top && cy < bottom && !inCol.some((a) => Math.abs(cy - a.y0) < a.h * 1.2));
+        const cutBetween = (ya, yb) => {
+          let v = yb;
+          for (const cy of cuts) if (cy > ya + 0.005 && cy < v) v = cy;
+          return v;
         };
-        items.push(item);
-        open = item;
-        if (y1 < (next ? next.y0 - padOf(next) : bottom) - 1e-6) open = null; // 제목에서 끊겼으면 더 잇지 않음
+
+        // 단 위쪽: 이전 문항이 이어지는 부분
+        if (open && flow === 'continue') {
+          const nominal = inCol.length ? inCol[0].y0 - padOf(inCol[0]) : bottom;
+          const segBottom = cutBetween(top, nominal);
+          if (segBottom - top > 0.01) {
+            const r = trimRect(grid, { x: x0, y: top, w: x1 - x0, h: segBottom - top });
+            if (r && r.h > 0.008) open.rects.push({ page: pageIdx, ...r });
+          }
+          if (segBottom < nominal - 1e-6) open = null; // 제목에서 끊김
+        }
+        for (let k = 0; k < inCol.length; k++) {
+          const a = inCol[k];
+          const next = inCol[k + 1];
+          const y0 = Math.max(top - 0.01, a.y0 - padOf(a));
+          const nominal = next ? next.y0 - padOf(next) : bottom;
+          const y1 = cutBetween(y0, nominal);
+          const raw = { x: Math.min(x0, a.x0 - 0.004), y: y0, w: 0, h: Math.max(0.01, y1 - y0) };
+          raw.w = x1 - raw.x;
+          const r = trimRect(grid, raw) || raw;
+          const item = {
+            page: pageIdx,
+            zone: z,
+            col: c,
+            number: a.digits,
+            num: a.num,
+            prefix: a.prefix || '',
+            rects: [{ page: pageIdx, ...r }],
+            source: opts.source?.get(pageIdx) || 'text',
+            conf: Math.round(a.conf ?? 100),
+          };
+          items.push(item);
+          open = item;
+          if (y1 < nominal - 1e-6) open = null; // 제목에서 끊겼으면 더 잇지 않음
+        }
+        if (flow !== 'continue') open = null;
       }
-      if (!inCol.length && cuts.length) open = null;
-      if (flow !== 'continue') open = null;
-    }
+    });
   }
   return assignIds(items);
 }
@@ -495,7 +771,7 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
 export function assignIds(items) {
   const seen = new Map();
   for (const it of items) {
-    const base = `${it.page}:${it.number}`;
+    const base = `${it.page}:${it.prefix || ''}${it.number}`;
     const n = (seen.get(base) || 0) + 1;
     seen.set(base, n);
     it.id = n === 1 ? base : `${base}#${n}`;
@@ -503,9 +779,11 @@ export function assignIds(items) {
   return items;
 }
 
-/** 문항을 읽는 순서로 정렬(쪽 → 단 → 위치) */
+/** 문항을 읽는 순서로 정렬(쪽 → 구역 → 단 → 위치) */
 export function sortItems(items) {
-  return [...items].sort((a, b) => a.page - b.page || (a.col ?? 0) - (b.col ?? 0) || a.rects[0].y - b.rects[0].y);
+  return [...items].sort(
+    (a, b) => a.page - b.page || (a.zone ?? 0) - (b.zone ?? 0) || (a.col ?? 0) - (b.col ?? 0) || a.rects[0].y - b.rects[0].y,
+  );
 }
 
 /** rect 의 중심이 속한 단 번호 */

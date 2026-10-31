@@ -1,6 +1,6 @@
 // 문서 분석 파이프라인: 렌더링 → 레이아웃 → (텍스트 | OCR) → 번호 선택 → 영역 계산 → (Gemini 보조)
 
-import { analyzeLayout, inkGridFromCanvas, trimRect } from './layout.js';
+import { analyzeLayout, inkGridFromCanvas, trimRect, inkCount } from './layout.js';
 import {
   extractCandidates,
   selectAnchors,
@@ -9,8 +9,10 @@ import {
   assignIds,
   sortItems,
   columnOf,
+  zoneOf,
   guessPageOffset,
   findCutters,
+  looksLikeAnswerTable,
 } from './detect.js';
 import { recognizeWords, recognizeLine } from './ocr.js';
 import { geminiDetect, canvasToBase64Jpeg } from './gemini.js';
@@ -59,7 +61,10 @@ export async function analyzePage(src, index, { ocrLang = 'kor+eng', forceOcr = 
   const tokens = forceOcr ? [] : await src.getTextTokens(index);
   const textChars = tokens.reduce((n, t) => n + t.str.length, 0);
   if (textChars >= 30) {
-    page.candidates = extractCandidates(tokens, layout).candidates;
+    const ex = extractCandidates(tokens, layout);
+    page.candidates = ex.candidates;
+    page.headings = ex.headings;
+    promoteFullWidthHeadings(page);
     for (const t of tokens) {
       const cy = (t.y0 + t.y1) / 2;
       const inMargin = (layout.hasHeader && cy < layout.bodyTop) || (layout.hasFooter && cy > layout.bodyBottom);
@@ -103,6 +108,7 @@ export async function analyzePage(src, index, { ocrLang = 'kor+eng', forceOcr = 
   }
   const ex = extractCandidates(tokensOcr, layout, { ocr: true });
   page.candidates = ex.candidates;
+  page.headings = [];
   page.bodyH = ex.bodyH;
   return page;
 }
@@ -149,6 +155,7 @@ async function fillOcrGaps(src, results, anchors, signature, { ocrLang, numberSt
           r.candidates.push(...found);
           r.candidates.sort((a, b) => a.col - b.col || a.y0 - b.y0);
           const { anchors: again } = selectAnchors([r], { numberStyle, signature, prevLast });
+          // (빠진 번호 재탐색은 대표 번호 체계 기준)
           const next = again.get(r.index) || [];
           if (next.length > chain.length) {
             anchors.set(r.index, next);
@@ -166,6 +173,8 @@ async function fillOcrGaps(src, results, anchors, signature, { ocrLang, numberSt
 async function findNumbersInRegions(src, page, regions, chain, sig, ocrLang) {
   const { grid, layout } = page;
   const hNum = chain.map((c) => c.h).sort((a, b) => a - b)[chain.length >> 1] || 0.015;
+  // 숫자 한 글자 폭(이미 찾은 번호들에서)
+  const perDigit = chain.map((c) => (c.x1 - c.x0) / Math.max(1, c.digits.length)).sort((a, b) => a - b)[chain.length >> 1] || hNum * 0.6;
   let hi = null;
   const found = [];
   for (const reg of regions) {
@@ -174,28 +183,48 @@ async function findNumbersInRegions(src, page, regions, chain, sig, ocrLang) {
     const bx0 = col.x0 + sig.relX - 0.01;
     const bx1 = col.x0 + sig.relX + 0.03;
     for (const band of inkBands(grid, bx0, bx1, reg.y0, reg.y1)) {
+      if (!reg.missing.size) break;
       const bh = band.y1 - band.y0;
       if (bh < hNum * 0.5 || bh > hNum * 2.6) continue;
       if (!hi) hi = await src.renderPage(page.index, OCR_WIDTH);
       // 번호 덩어리만 잘라냄(뒤에 붙은 본문 글자가 섞이면 숫자 인식이 흐트러짐)
       const span = inkSpan(grid, bx0, Math.min(col.x1, bx0 + 0.08), band.y0, band.y1);
       if (!span) continue;
+      const digits = Math.max(...[...reg.missing].map((n) => (sig.padded && sig.digitsLen ? sig.digitsLen : String(n).length)));
       const cx0 = Math.max(0, span.x0 - 0.008);
-      const cx1 = Math.min(1, span.x1 + 0.008);
+      const cx1 = Math.min(1, Math.min(span.x1, span.x0 + perDigit * digits * 1.25) + 0.006);
       const cy0 = Math.max(0, band.y0 - 0.005);
       const cy1 = Math.min(1, band.y1 + 0.005);
       const W = hi.width;
       const H = hi.height;
-      const crop = createCanvas((cx1 - cx0) * W + 20, (cy1 - cy0) * H + 20);
+      // 숫자 높이가 40px 안팎이 되게 키우고(작은 글씨 대응) 여백을 둠
+      const S = Math.min(2.5, Math.max(1, 40 / Math.max(1, bh * H)));
+      const cw = (cx1 - cx0) * W;
+      const ch = (cy1 - cy0) * H;
+      const crop = createCanvas(cw * S + 40, ch * S + 40);
       const ctx = crop.getContext('2d');
       ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, crop.width, crop.height);
-      ctx.drawImage(hi, cx0 * W, cy0 * H, (cx1 - cx0) * W, (cy1 - cy0) * H, 10, 10, (cx1 - cx0) * W, (cy1 - cy0) * H);
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(hi, cx0 * W, cy0 * H, cw, ch, 20, 20, cw * S, ch * S);
       const { text, conf } = await recognizeLine(crop, { lang: ocrLang, whitelist: '0123456789.)' });
-      const m = /^(\d{1,4})/.exec(text.replace(/\s+/g, ' ').split(' ')[0] || '');
+      // 앞에 붙은 점·잡티는 버리고 첫 숫자 덩어리만 (예: ".0006" → 0006)
+      let m = /(\d{1,4})/.exec(text.replace(/\s+/g, ' '));
       if (!m) continue;
-      const num = parseInt(m[1], 10);
+      let num = parseInt(m[1], 10);
+      if (!reg.missing.has(num) && reg.missing.size === 1) {
+        // 빠진 번호가 하나뿐이고, 번호 자리·크기가 맞는 덩어리에서 그 번호의 앞부분이 읽혔다면 그 번호로 봄
+        const want = [...reg.missing][0];
+        const wantStr = sig.padded && sig.digitsLen ? String(want).padStart(sig.digitsLen, '0') : String(want);
+        const widthOk = Math.abs(span.x1 - span.x0 - perDigit * wantStr.length) <= perDigit * wantStr.length * 0.35;
+        const heightOk = bh > hNum * 0.75 && bh < hNum * 1.5;
+        if (widthOk && heightOk && m[1].length >= 2 && wantStr.startsWith(m[1])) {
+          num = want;
+          m = [wantStr, wantStr];
+        }
+      }
       if (!reg.missing.has(num)) continue;
+      if (sig.padded && sig.digitsLen && m[1].length !== sig.digitsLen) continue; // 0001 같은 번호면 자릿수도 맞아야 함
       reg.missing.delete(num);
       found.push({
         num,
@@ -313,11 +342,20 @@ export async function analyzeDocument(src, opts) {
   }
   onProgress?.({ phase: 'scan', done: pages.length, total: pages.length, message: '번호 정리 중' });
 
-  const { anchors, signature } = selectAnchors(results, { numberStyle });
+  // 빠른 정답표 쪽은 번호 인식에서 뺌 (번호가 표 칸마다 나란히 있음)
+  const tablePages = new Set();
+  for (const r of results) {
+    if (looksLikeAnswerTable(r.candidates)) {
+      tablePages.add(r.index);
+      r.candidates = [];
+    }
+  }
+  const { anchors, signature, signatures } = selectAnchors(results, { numberStyle });
   if (ocrPages) await fillOcrGaps(src, results, anchors, signature, { ocrLang, numberStyle, signal, onProgress });
   const flags = flagPages(pages, anchors, layouts);
-  const cutters = findCutters(results, anchors, signature);
-  let items = computeItems(pages, anchors, layouts, grids, { flow, source: sourceMap, cutters });
+  for (const idx of tablePages) flags.set(idx, ['빠른 정답표 같아서 건너뜀']);
+  const cutters = buildCutters(results, anchors, signature);
+  let items = computeItems(pages, anchors, layouts, grids, { flow, source: sourceMap, cutters, stopPages: tablePages });
 
   // ---- Gemini 보조 ----
   const geminiPages = new Set();
@@ -360,7 +398,48 @@ export async function analyzeDocument(src, opts) {
     };
   }
   const pageOffset = guessPageOffset(results.map((r) => ({ index: r.index, numbers: r.footerNumbers })));
-  return { items, pageInfo, signature, pageOffset, ocrPages, geminiErrors, layouts, grids };
+  return { items, pageInfo, signature, signatures, pageOffset, ocrPages, geminiErrors, layouts, grids };
+}
+
+/**
+ * 여러 단 쪽에서, 옆 단들이 비어 있는 제목 줄은 "전체 폭 제목"(단원 제목)으로 보고 구역을 나눕니다.
+ * (예: 2단 해설 중간에 "02 지수함수와 로그함수" 제목이 끼어 있는 쪽)
+ */
+function promoteFullWidthHeadings(page) {
+  const L = page.layout;
+  const cols = L.columns || [];
+  if (cols.length < 2 || !page.headings?.length) return;
+  for (const hd of page.headings) {
+    const others = cols.filter((c) => !(hd.x1 > c.x0 + 0.005 && hd.x0 < c.x1 - 0.005));
+    if (!others.length) continue;
+    const y0 = hd.y0 - 0.004;
+    const hgt = hd.y1 - hd.y0 + 0.008;
+    const empty = others.every((c) => inkCount(page.grid, { x: c.x0, y: y0, w: c.x1 - c.x0, h: hgt }) === 0);
+    if (empty) L.spans = [...(L.spans || []), { y0, y1: y0 + hgt }];
+  }
+  L.spans.sort((a, b) => a.y0 - b.y0);
+}
+
+/**
+ * 문항 영역을 끊는 위치들: 큰 글씨 제목, 여러 단 쪽의 가로 띠(단원 제목 막대), 제목처럼 큰 번호
+ * @returns {Map<number, {x0:number,x1:number,y0:number}[]>}
+ */
+export function buildCutters(results, anchors, signature) {
+  const map = new Map();
+  const add = (idx, c) => {
+    if (!map.has(idx)) map.set(idx, []);
+    map.get(idx).push(c);
+  };
+  for (const [idx, list] of findCutters(results, anchors, signature)) {
+    for (const c of list) add(idx, { x0: c.x0, x1: c.x1, y0: c.y0 - (0.45 * c.h + 0.004) });
+  }
+  for (const r of results) {
+    for (const hd of r.headings || []) add(r.index, { x0: hd.x0, x1: hd.x1, y0: hd.y0 - 0.004 });
+    if ((r.layout?.columns?.length || 1) >= 2) {
+      for (const b of r.layout.spans || []) add(r.index, { x0: 0, x1: 1, y0: b.y0 - 0.002 });
+    }
+  }
+  return map;
 }
 
 /** Gemini 로 한 페이지 인식 → 문항 배열 */
@@ -383,6 +462,7 @@ export async function detectPageWithGemini(src, idx, { role, gemini, grid, layou
     const r = trimRect(grid, expanded) || expanded;
     return {
       page: idx,
+      zone: zoneOf(layout, r.y),
       col: columnOf(layout, r),
       number: f.number,
       num: f.num,
@@ -416,16 +496,21 @@ export function replacePageItems(items, pageIdx, newItems) {
  */
 export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, forceOcr = false } = {}) {
   const page = await analyzePage(src, idx, { ocrLang, forceOcr });
-  const sig = doc.signature;
   // 앞 쪽의 마지막 번호
   const prevItems = (doc.items || []).filter((it) => it.page < idx);
   const prevLast = prevItems.length ? sortItems(prevItems).pop().num : null;
-  const { anchors: sel } = selectAnchors([page], { numberStyle: doc.options?.numberStyle, signature: sig || null, prevLast });
+  if (looksLikeAnswerTable(page.candidates)) page.candidates = [];
+  const { anchors: sel } = selectAnchors([page], {
+    numberStyle: doc.options?.numberStyle,
+    signatures: doc.signatures || (doc.signature ? [doc.signature] : null),
+    prevLast,
+  });
   const chain = sel.get(idx) || [];
   const anchors = new Map([[idx, chain]]);
   const newItems = computeItems([idx], anchors, new Map([[idx, page.layout]]), new Map([[idx, page.grid]]), {
     flow: doc.options?.flow || 'column',
     source: new Map([[idx, page.source]]),
+    cutters: buildCutters([page], anchors, doc.signature),
   });
   return { items: newItems, page };
 }
