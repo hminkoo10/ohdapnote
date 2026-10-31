@@ -12,7 +12,7 @@ name: Release (Windows)
 
 on:
   push:
-    branches: [main, claude/zealous-hamilton-bkobax] # 두 번째는 첫 배포(v0.1.0)용 임시 — 바로 다음 커밋에서 지움
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
