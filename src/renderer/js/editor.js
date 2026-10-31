@@ -381,6 +381,7 @@ export function createEditor(ctx) {
       it.source = 'manual';
     } else {
       d.items = d.items.filter((x) => x !== it);
+      ctx.onItemDeleted?.(st.role, it);
     }
     st.selected = null;
     commit();

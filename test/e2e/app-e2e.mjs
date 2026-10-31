@@ -15,10 +15,12 @@ mkdirSync(OUT, { recursive: true });
 const userData = mkdtempSync(join(tmpdir(), 'ohdap-e2e-'));
 const electronPath = require('electron');
 
+// OHDAP_EXE 를 주면 패키징된 실행 파일로 테스트 (예: dist/linux-unpacked/ohdapnote)
+const packagedExe = process.env.OHDAP_EXE;
 const launch = () =>
   electron.launch({
-    executablePath: electronPath,
-    args: ['--no-sandbox', ROOT],
+    executablePath: packagedExe || electronPath,
+    args: packagedExe ? ['--no-sandbox'] : ['--no-sandbox', ROOT],
     env: { ...process.env, OHDAP_E2E: '1', OHDAP_USER_DATA: userData },
   });
 

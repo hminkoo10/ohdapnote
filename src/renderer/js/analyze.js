@@ -424,7 +424,7 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, forceOcr = f
   const chain = sel.get(idx) || [];
   const anchors = new Map([[idx, chain]]);
   const newItems = computeItems([idx], anchors, new Map([[idx, page.layout]]), new Map([[idx, page.grid]]), {
-    flow: 'column',
+    flow: doc.options?.flow || 'column',
     source: new Map([[idx, page.source]]),
   });
   return { items: newItems, page };

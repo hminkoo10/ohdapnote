@@ -979,6 +979,17 @@ function reviewView() {
       onSelect: (role, id) => {
         if (role === 'problem') state.focus = id;
       },
+      onItemDeleted: (role, item) => {
+        // 지운 문항의 ID 가 다른 문항에 다시 쓰이지 않도록 선택/짝 정보에서 먼저 제거
+        const p = state.project;
+        if (role === 'problem') {
+          p.selected = p.selected.filter((id) => id !== item.id);
+          delete p.answerOverrides[item.id];
+          if (state.focus === item.id) state.focus = null;
+        } else {
+          for (const [k, v] of Object.entries(p.answerOverrides)) if (v === item.id) delete p.answerOverrides[k];
+        }
+      },
       reanalyzePage,
       geminiPage,
     });

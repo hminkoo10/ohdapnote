@@ -1,0 +1,41 @@
+# 태그(v1.2.3)를 푸시하면 윈도우 설치 파일을 빌드해 GitHub Releases 에 올립니다.
+# 설치된 프로그램은 이 Releases 를 보고 자동으로 업데이트합니다.
+name: Release (Windows)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 태그와 package.json 버전 확인
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          v="v$(node -p "require('./package.json').version")"
+          if [ "$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::태그($GITHUB_REF_NAME)와 package.json 버전($v)이 다릅니다. package.json 의 version 을 먼저 올려 주세요."
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - run: npm test
+
+      - name: 설치 파일 빌드 + GitHub Release 업로드
+        run: npx electron-builder --win --x64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
