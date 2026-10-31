@@ -123,7 +123,10 @@ src/renderer/js/
   gemini.js               Gemini 보조 인식
   match.js                문제 ↔ 해설 짝 맞추기 (최장 공통 부분수열)
   exporter.js             pdf-lib 로 PDF 만들기
-scripts/copy-vendor.mjs   pdf.js·Tesseract·pdf-lib 파일을 src/renderer/vendor 로 복사 (npm install 때 자동)
+  icons.js                Lucide 아이콘 (scripts/build-icons.mjs 로 생성)
+src/renderer/styles.css   화면 디자인 (주황 그라데이션 테마, 전환 애니메이션)
+build/icon.svg            앱 아이콘 원본 (scripts/build-app-icon.mjs 로 png·ico 생성)
+scripts/copy-vendor.mjs   pdf.js·Tesseract·pdf-lib·Pretendard 글꼴을 src/renderer/vendor 로 복사 (npm install 때 자동)
 test/                     단위·인식·E2E 테스트
 ```
 

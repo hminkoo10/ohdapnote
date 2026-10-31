@@ -1,3 +1,5 @@
+import { ICONS } from './icons.js';
+
 // 작은 DOM 도우미들 (프레임워크 없이)
 
 /**
@@ -18,7 +20,12 @@ export function h(tag, attrs, ...children) {
     if (v == null || v === false) continue;
     if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'class') el.className += ` ${v}`;
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'style' && typeof v === 'object') {
+      for (const [prop, val] of Object.entries(v)) {
+        if (prop.startsWith('--')) el.style.setProperty(prop, String(val));
+        else el.style[prop] = val;
+      }
+    }
     else if (k === 'dataset') Object.assign(el.dataset, v);
     else if (k in el && typeof v !== 'string') el[k] = v;
     else el.setAttribute(k, v === true ? '' : String(v));
@@ -60,12 +67,19 @@ export function toast(message, { type = 'info', timeout = 3500, actions = [] } =
           ),
         )
       : null,
-    h('button.toast-close', { onclick: () => close(), title: '닫기' }, '×'),
+    h('button.toast-close', { onclick: () => close(), title: '닫기' }, icon('x')),
   );
-  const close = () => el.remove();
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    el.classList.add('leaving');
+    el.addEventListener('animationend', () => el.remove(), { once: true });
+    setTimeout(() => el.remove(), 400);
+  };
   toastRoot.append(el);
   // 너무 많이 쌓이지 않게 오래된 것부터 정리
-  const all = toastRoot.querySelectorAll('.toast');
+  const all = toastRoot.querySelectorAll('.toast:not(.leaving)');
   for (let i = 0; i < all.length - 4; i++) all[i].remove();
   if (timeout) setTimeout(close, timeout);
   return close;
@@ -76,9 +90,15 @@ export function toast(message, { type = 'info', timeout = 3500, actions = [] } =
 // ---------------------------------------------------------------------------
 export function modal({ title, body, buttons = [], width = 460, onClose }) {
   return new Promise((resolve) => {
+    let closed = false;
     const close = (value) => {
-      overlay.remove();
+      if (closed) return;
+      closed = true;
       document.removeEventListener('keydown', onKey, true);
+      overlay.classList.add('closing');
+      const done = () => overlay.remove();
+      overlay.addEventListener('animationend', done, { once: true });
+      setTimeout(done, 300);
       onClose?.(value);
       resolve(value);
     };
@@ -106,7 +126,7 @@ export function modal({ title, body, buttons = [], width = 460, onClose }) {
         ),
       ),
     );
-    const dialog = h('div.modal', { style: { width: `${width}px` } }, h('div.modal-header', h('h3', title), h('button.modal-x', { onclick: () => close(null) }, '×')), h('div.modal-body', body), buttons.length ? footer : null);
+    const dialog = h('div.modal', { style: { width: `${width}px` } }, h('div.modal-header', h('h3', title), h('button.modal-x', { onclick: () => close(null), title: '닫기' }, icon('x'))), h('div.modal-body', body), buttons.length ? footer : null);
     const overlay = h('div.modal-overlay', { onmousedown: (e) => e.target === overlay && close(null) }, dialog);
     document.body.append(overlay);
     document.addEventListener('keydown', onKey, true);
@@ -165,28 +185,38 @@ export function formatDate(ts) {
 }
 
 export function icon(name) {
-  const paths = {
-    back: 'M15 18l-6-6 6-6',
-    gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm7.4-3a7.4 7.4 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7.3 7.3 0 0 0-2-1.2L14.5 2h-4l-.4 2.6a7.3 7.3 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7.4 7.4 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7.3 7.3 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7.3 7.3 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z',
-    plus: 'M12 5v14M5 12h14',
-    file: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6',
-    download: 'M12 3v12m0 0l-5-5m5 5l5-5M4 21h16',
-    trash: 'M3 6h18M8 6V4h8v2m-9 0l1 14h8l1-14',
-    left: 'M15 18l-6-6 6-6',
-    right: 'M9 18l6-6-6-6',
-    scan: 'M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3M7 12h10',
-    sparkle: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z',
-    box: 'M4 4h16v16H4z',
-    warn: 'M12 3l10 18H2zM12 10v5M12 18v.5',
-    check: 'M5 12l5 5 9-11',
-    eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
-    edit: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
-  };
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('class', 'icon');
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', paths[name] || '');
-  svg.append(path);
+  svg.setAttribute('class', `icon icon-${name}`);
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML = ICONS[name] || '';
   return svg;
+}
+
+/** 앱 로고 (build/icon.svg 와 같은 모양) */
+export function logo(cls = 'brand-logo') {
+  const wrap = document.createElement('span');
+  wrap.innerHTML = `<svg class="${cls}" viewBox="0 0 1024 1024" aria-hidden="true"><defs><linearGradient id="lg-bg" x1=".1" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#FFB443"/><stop offset=".5" stop-color="#FF7A1A"/><stop offset="1" stop-color="#EE4B1C"/></linearGradient><linearGradient id="lg-ink" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF8A2A"/><stop offset="1" stop-color="#E8431A"/></linearGradient></defs><path d="M512 56c214 0 300 0 378 78s78 164 78 378 0 300-78 378-164 78-378 78-300 0-378-78S56 726 56 512s0-300 78-378S298 56 512 56z" fill="url(#lg-bg)"/><g transform="rotate(-7 512 540)"><path d="M330 232h262l150 150v378a48 48 0 0 1-48 48H330a48 48 0 0 1-48-48V280a48 48 0 0 1 48-48z" fill="#fff"/><path d="M592 232v102a48 48 0 0 0 48 48h102z" fill="#FFD6B3"/><rect x="350" y="330" width="170" height="30" rx="15" fill="#FFD0A8"/><rect x="350" y="404" width="128" height="30" rx="15" fill="#FFE1C7"/><path d="M384 604l84 84 176-206" fill="none" stroke="url(#lg-ink)" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/></g></svg>`;
+  return wrap.firstChild;
+}
+
+const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * 화면이 바뀌기 전에 나가는 애니메이션을 재생하고 끝나면 resolve.
+ * (브라우저 View Transitions 대신 CSS 클래스로 직접 구현 — 어떤 그래픽 환경에서도 안정적)
+ */
+export function animateOut(el, cls, maxMs = 320) {
+  if (!el || reduceMotion()) return Promise.resolve();
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      resolve();
+    };
+    el.addEventListener('animationend', (e) => e.target === el && finish());
+    setTimeout(finish, maxMs);
+    el.classList.add(cls);
+  });
 }

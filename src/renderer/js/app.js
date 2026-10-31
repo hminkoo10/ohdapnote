@@ -1,6 +1,6 @@
 // 오답노트 화면 컨트롤러
 
-import { h, clear, toast, modal, confirmDialog, promptDialog, debounce, formatDate, icon } from './ui.js';
+import { h, clear, toast, modal, confirmDialog, promptDialog, debounce, formatDate, icon, logo, animateOut } from './ui.js';
 import { openDocSource, projectFileUrl } from './docsource.js';
 import { analyzeDocument, parsePageRange, reanalyzeSinglePage, detectPageWithGemini, replacePageItems } from './analyze.js';
 import { buildPdf, makeBlocks, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS } from './exporter.js';
@@ -48,7 +48,7 @@ const saveNow = async () => {
     setSaveStatus('저장됨');
   } catch (err) {
     setSaveStatus('저장 실패');
-    toast(`저장하지 못했습니다: ${err.message}`, { type: 'error' });
+    toast(`저장하지 못했어요: ${err.message}`, { type: 'error' });
   }
 };
 const saveSoon = debounce(saveNow, 600);
@@ -58,7 +58,9 @@ function markDirty() {
 }
 function setSaveStatus(text) {
   const el = document.querySelector('.save-status');
-  if (el) el.textContent = text;
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('saving', text.endsWith('…'));
 }
 window.addEventListener('beforeunload', () => {
   if (state.project) {
@@ -77,11 +79,14 @@ async function boot() {
     return;
   }
   [state.appInfo, state.settings, state.update] = await Promise.all([api.appInfo(), api.getSettings(), api.getUpdateState()]);
+  // 천천히 움직이는 배경 빛
+  document.body.prepend(h('div.backdrop', h('i'), h('i'), h('i')));
+  document.fonts?.load('600 14px "Pretendard Variable"').catch(() => {});
   api.onUpdateStatus((s) => {
     state.update = s;
     renderUpdateBadge();
     if (s.status === 'downloaded') {
-      toast(`새 버전 ${s.version} 이(가) 준비됐습니다.`, {
+      toast(`새 버전 ${s.version}을(를) 받아 두었어요.`, {
         type: 'success',
         timeout: 0,
         actions: [{ label: '지금 재시작해서 설치', onClick: () => installUpdate() }],
@@ -99,8 +104,12 @@ async function installUpdate() {
   api.installUpdate();
 }
 
-function topbar(left, right) {
-  return h('header.topbar', h('div.topbar-left', left), h('div.topbar-right', right, h('span.update-badge'), h('button.btn.btn-ghost', { onclick: openSettings, title: '설정' }, icon('gear'), ' 설정')));
+function topbar(left) {
+  return h(
+    'header.topbar',
+    h('div.topbar-left', left),
+    h('div.topbar-right', h('span.update-badge'), h('button.btn.btn-glass#settings-btn', { onclick: openSettings, title: '설정' }, icon('gear'), h('span', '설정'))),
+  );
 }
 
 function renderUpdateBadge() {
@@ -108,34 +117,63 @@ function renderUpdateBadge() {
   if (!el) return;
   clear(el);
   const s = state.update || {};
-  if (s.status === 'downloading') el.append(h('span.badge', `업데이트 다운로드 ${s.percent || 0}%`));
-  else if (s.status === 'available') el.append(h('span.badge', `새 버전 ${s.version} 받는 중`));
-  else if (s.status === 'downloaded') el.append(h('button.btn.btn-small.btn-primary', { onclick: installUpdate }, `재시작하여 ${s.version} 설치`));
+  if (s.status === 'downloading') el.append(h('span.badge', icon('download'), `업데이트 받는 중 ${s.percent || 0}%`));
+  else if (s.status === 'available') el.append(h('span.badge', icon('download'), `새 버전 ${s.version}`));
+  else if (s.status === 'downloaded') el.append(h('button.btn.btn-small.btn-dark', { onclick: installUpdate }, icon('refresh'), `재시작하고 ${s.version} 설치`));
 }
 
 // ===========================================================================
 // 홈 (오답노트 목록)
 // ===========================================================================
+const SPINES = [
+  'linear-gradient(180deg, #ffb443, #f2561d)',
+  'linear-gradient(180deg, #2fc0aa, #0f6f66)',
+  'linear-gradient(180deg, #ff8a70, #c2362a)',
+  'linear-gradient(180deg, #6b4a36, #2b1609)',
+  'linear-gradient(180deg, #f6c14b, #d9822b)',
+  'linear-gradient(180deg, #8e9cff, #4b52c8)',
+];
+function spineFor(id) {
+  let hsh = 0;
+  for (const ch of String(id)) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;
+  return SPINES[hsh % SPINES.length];
+}
+
 async function showHome() {
+  const leaving = animateOut(document.querySelector('main.sheet'), 'leave-down');
   await closeProject();
   const projects = await api.listProjects();
-  clear(root);
+  await leaving;
   const list = h(
     'div.project-grid',
     h(
       'button.project-card.new',
-      { onclick: createProject },
+      { onclick: createProject, style: { '--i': 0 } },
       h('div.new-plus', icon('plus')),
-      h('div.pc-title', '새 오답노트 만들기'),
-      h('div.pc-sub', '문제집과 답지 PDF·사진을 올려서 시작'),
+      h('div.pc-title', '새 오답노트'),
+      h('div.pc-sub', '문제집과 답지를 올려서 시작하기'),
     ),
-    projects.map((p) =>
+    projects.map((p, i) =>
       h(
         'div.project-card',
-        { onclick: () => openProject(p.id), tabIndex: 0, onkeydown: (e) => e.key === 'Enter' && openProject(p.id) },
+        {
+          onclick: () => openProject(p.id),
+          tabIndex: 0,
+          onkeydown: (e) => e.key === 'Enter' && openProject(p.id),
+          style: { '--i': Math.min(i + 1, 12), '--spine': spineFor(p.id) },
+        },
         h('div.pc-title', p.name),
-        h('div.pc-files', h('div', '📘 ', p.problemFile || '문제집 없음'), h('div', '📗 ', p.answerFile || '답지 없음')),
-        h('div.pc-stats', `문항 ${p.problemCount}개 · 해설 ${p.answerCount}개 · 선택 ${p.selectedCount}개`),
+        h(
+          'div.pc-files',
+          h('div', icon('book'), h('span', p.problemFile || '문제집 없음')),
+          h('div', icon('bookCheck'), h('span', p.answerFile || '답지 없음')),
+        ),
+        h(
+          'div.pc-stats',
+          h('span.pc-stat', `문항 ${p.problemCount}`),
+          h('span.pc-stat', `해설 ${p.answerCount}`),
+          p.selectedCount ? h('span.pc-stat.hot', `고른 문제 ${p.selectedCount}`) : null,
+        ),
         h('div.pc-date', formatDate(p.updatedAt)),
         h(
           'div.pc-actions',
@@ -145,20 +183,30 @@ async function showHome() {
       ),
     ),
   );
-  root.append(
-    topbar(h('div.brand', h('span.brand-mark', '오'), h('span', '오답노트')), null),
-    h(
-      'main.home',
-      h('div.home-hero', h('h1', '내 오답노트'), h('p.muted', '문제집과 답지를 올리면 문제 번호를 자동으로 찾아 표로 만들어 줍니다. 틀린 번호만 골라 문제·해설 PDF로 내보내세요.')),
-      list,
-      h('p.muted.small.home-foot', `버전 ${state.appInfo.version}`),
-    ),
-  );
-  renderUpdateBadge();
+  {
+    clear(root);
+    root.append(
+      topbar(h('div.brand', logo(), h('span.brand-name', '오답노트'))),
+      h(
+        'main.home',
+        h(
+          'div.home-hero',
+          h(
+            'div',
+            h('h1', h('span', '내 ', h('em', '오답노트')), projects.length ? h('span.hero-count', `${projects.length}권`) : null),
+            h('p', '문제집과 답지를 올리고 틀린 번호만 고르면, 다시 풀 수 있게 PDF로 묶어 드려요.'),
+          ),
+        ),
+        list,
+        h('p.small.home-foot', `버전 ${state.appInfo.version}`),
+      ),
+    );
+    renderUpdateBadge();
+  }
 }
 
 async function createProject() {
-  const name = await promptDialog('오답노트 이름을 입력하세요. (예: 쎈 수학Ⅰ, 수능특강 미적분)', { title: '새 오답노트', placeholder: '오답노트 이름', ok: '만들기' });
+  const name = await promptDialog('어떤 책의 오답노트인가요? (예: 쎈 수학Ⅰ, 수능특강 미적분)', { title: '새 오답노트', placeholder: '오답노트 이름', ok: '만들기' });
   if (name == null) return;
   const project = await api.createProject(name);
   await openProject(project.id);
@@ -203,8 +251,10 @@ async function closeProject() {
 }
 
 async function openProject(id) {
+  const leaving = animateOut(document.querySelector('main.home'), 'leave-up');
   await closeProject();
   const project = await api.getProject(id);
+  await leaving;
   project.docs ||= { problem: null, answer: null };
   project.selected ||= [];
   project.answerOverrides ||= {};
@@ -213,6 +263,7 @@ async function openProject(id) {
   state.tab = 'select';
   state.filter = { onlySelected: false, query: '' };
   state.docsOpen = null;
+  state.anim = { sheet: true };
   renderProject();
   for (const role of ROLES) {
     if (project.docs[role]) await loadSource(role);
@@ -232,7 +283,7 @@ async function loadSource(role) {
     state.sources[role] = src;
     doc.pageCount = src.numPages;
   } catch (err) {
-    toast(`${ROLE_NAME[role]} 파일을 열지 못했습니다: ${err.message}`, { type: 'error', timeout: 8000 });
+    toast(`${ROLE_NAME[role]} 파일을 열지 못했어요: ${err.message}`, { type: 'error', timeout: 8000 });
   }
 }
 
@@ -249,65 +300,133 @@ function renderProject() {
   clear(root);
   const nameInput = h('input.title-input', {
     value: p.name,
+    title: '이름 바꾸기',
     onchange: (e) => {
       p.name = e.target.value.trim() || p.name;
       markDirty();
     },
   });
+  const nSel = p.selected.length;
+  const anim = state.anim || {};
+  state.anim = null;
+  const tab = (key, ic, label, extra) =>
+    h(`button.tab${state.tab === key ? '.active' : ''}`, { onclick: () => switchTab(key), dataset: { tab: key } }, icon(ic), h('span', label), extra);
+  const thumb = h('span.tab-thumb');
   root.append(
-    topbar(
-      h('div.topbar-project', h('button.btn.btn-ghost', { onclick: showHome, title: '목록으로' }, icon('back'), ' 목록'), nameInput, h('span.save-status.muted.small', '')),
-      null,
-    ),
-    docsSection(),
+    topbar(h('div.topbar-project', h('button.btn.btn-glass.btn-round#back-btn', { onclick: showHome, title: '목록으로' }, icon('back')), nameInput, h('span.save-status', ''))),
     h(
-      'nav.tabs',
-      h(`button.tab${state.tab === 'select' ? '.active' : ''}`, { onclick: () => switchTab('select') }, '문항 선택'),
-      h(`button.tab${state.tab === 'review' ? '.active' : ''}`, { onclick: () => switchTab('review') }, '페이지 검토·수정'),
+      `main.sheet${anim.sheet ? '.enter' : ''}`,
+      docsSection(anim.docs),
+      h(
+        'div.tabs-row',
+        h(
+          'nav.tabs',
+          thumb,
+          tab('select', 'pointer', '문항 고르기', nSel ? h('span.tab-count', String(nSel)) : null),
+          tab('review', 'scan', '페이지 검토·수정'),
+        ),
+      ),
+      h(`section.tab-body${anim.tab ? `.enter-${anim.tab}` : ''}`, state.tab === 'select' ? selectView() : reviewView()),
     ),
-    h('section.tab-body', state.tab === 'select' ? selectView() : reviewView()),
   );
+  placeThumb(thumb, anim.thumbFrom);
   renderUpdateBadge();
 }
 
-function docsSection() {
+/** 탭 아래 흰 표시를 활성 탭으로 미끄러지듯 옮김 */
+function placeThumb(thumb, from) {
+  const active = thumb.parentElement?.querySelector('.tab.active');
+  if (!active) return;
+  const to = { x: active.offsetLeft, w: active.offsetWidth };
+  if (from) {
+    thumb.style.transition = 'none';
+    thumb.style.transform = `translateX(${from.x}px)`;
+    thumb.style.width = `${from.w}px`;
+    void thumb.offsetWidth;
+    thumb.style.transition = '';
+  }
+  thumb.style.transform = `translateX(${to.x}px)`;
+  thumb.style.width = `${to.w}px`;
+}
+
+function updateTabCount() {
+  const tabEl = document.querySelector('.tab[data-tab="select"]');
+  if (!tabEl) return;
+  const n = state.project.selected.length;
+  let c = tabEl.querySelector('.tab-count');
+  if (!n) return c?.remove();
+  if (!c) {
+    c = h('span.tab-count');
+    tabEl.append(c);
+  }
+  c.textContent = String(n);
+}
+
+function docsSection(enter) {
   const p = state.project;
   const analyzed = !!p.docs.problem?.analyzedAt;
   const open = state.busy || !analyzed ? true : state.docsOpen ?? false;
+  const toggle = async (v) => {
+    await animateOut(document.querySelector('.docs-bar'), 'leave-fade', 200);
+    state.docsOpen = v;
+    state.anim = { docs: true };
+    renderProject();
+  };
   if (open) {
     return h(
-      'section.docs-bar',
+      `section.docs-bar${enter ? '.enter' : ''}`,
       ROLES.map((role) => docCard(role)),
       analyzePanel(),
-      analyzed && !state.busy
-        ? h('button.btn.btn-ghost.btn-small.docs-toggle', { onclick: () => { state.docsOpen = false; renderProject(); }, title: '자료 칸 접기' }, '▲ 접기')
-        : null,
+      analyzed && !state.busy ? h('button.btn.btn-small.docs-toggle', { onclick: () => toggle(false), title: '파일·분석 칸 접기' }, icon('collapse'), '접기') : null,
     );
   }
   const summary = (role) => {
     const d = p.docs[role];
-    if (!d) return h('span.muted', `${role === 'problem' ? '📘' : '📗'} ${ROLE_NAME[role]} 없음`);
+    const ic = h(`span.doc-icon${role === 'answer' ? '.teal' : ''}`, icon(role === 'problem' ? 'book' : 'bookCheck'));
+    if (!d) return h('span.docs-sum-item.muted', ic, `${ROLE_NAME[role]} 없음`);
     const flagged = Object.values(d.pageInfo || {}).filter((pi) => pi.flags?.length).length;
     return h(
       'span.docs-sum-item',
-      `${role === 'problem' ? '📘' : '📗'} `,
+      ic,
       h('strong', d.originalName),
-      d.analyzedAt ? h('span.ok-text', ` ${d.items.length}개`) : h('span.muted', ' 분석 전'),
-      flagged ? h('span.warn-text', ` · 확인 필요 ${flagged}쪽`) : null,
+      d.analyzedAt ? h('span.ok-text', `${d.items.length}개`) : h('span.muted', '분석 전'),
+      flagged ? h('span.warn-text', icon('warn'), `확인 ${flagged}쪽`) : null,
     );
   };
   return h(
-    'section.docs-bar.collapsed',
+    `section.docs-bar.collapsed${enter ? '.enter' : ''}`,
     summary('problem'),
     summary('answer'),
     h('span.spacer'),
-    h('button.btn.btn-small', { onclick: () => { state.docsOpen = true; renderProject(); } }, '▼ 파일·분석 설정 열기'),
+    h('button.btn.btn-small', { onclick: () => toggle(true) }, icon('expand'), '파일·분석 설정'),
   );
 }
 
-function switchTab(tab) {
-  state.tab = tab;
-  renderProject();
+async function switchTab(tab) {
+  if (state.tab === tab || state.switching) return;
+  const order = ['select', 'review'];
+  const dir = order.indexOf(tab) > order.indexOf(state.tab) ? 'right' : 'left';
+  const thumbEl = document.querySelector('.tab-thumb');
+  const thumbFrom = thumbEl ? { x: thumbEl.offsetLeft + (new DOMMatrix(getComputedStyle(thumbEl).transform).m41 || 0), w: thumbEl.offsetWidth } : null;
+  // 표시가 먼저 움직이고, 내용이 옆으로 빠지며 바뀜
+  if (thumbEl) {
+    const target = document.querySelector(`.tab[data-tab="${tab}"]`);
+    if (target) {
+      thumbEl.style.transform = `translateX(${target.offsetLeft}px)`;
+      thumbEl.style.width = `${target.offsetWidth}px`;
+    }
+  }
+  state.switching = true;
+  try {
+    await animateOut(document.querySelector('.tab-body'), dir === 'right' ? 'leave-left' : 'leave-right', 220);
+    const movedThumb = document.querySelector('.tab-thumb');
+    const from = movedThumb ? { x: new DOMMatrix(getComputedStyle(movedThumb).transform).m41 || thumbFrom?.x || 0, w: movedThumb.offsetWidth } : thumbFrom;
+    state.tab = tab;
+    state.anim = { tab: dir, thumbFrom: from };
+    renderProject();
+  } finally {
+    state.switching = false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -337,18 +456,30 @@ function docCard(role) {
     if (paths.length) await importFiles(role, paths);
   });
 
-  card.append(h('div.doc-head', h('span.doc-role', role === 'problem' ? '📘 문제집' : '📗 답지'), doc ? h('button.btn.btn-ghost.btn-small', { onclick: pick, disabled: !!state.busy }, '파일 바꾸기') : null));
+  card.append(
+    h(
+      'div.doc-head',
+      h('span.doc-title', h(`span.doc-icon${role === 'answer' ? '.teal' : ''}`, icon(role === 'problem' ? 'book' : 'bookCheck')), ROLE_NAME[role]),
+      doc ? h('button.btn.btn-ghost.btn-small', { onclick: pick, disabled: !!state.busy }, icon('refresh'), '파일 바꾸기') : null,
+    ),
+  );
 
   if (!doc) {
     card.append(
-      h('button.drop-zone', { onclick: pick, disabled: !!state.busy }, icon('file'), h('div', `${ROLE_NAME[role]} 파일을 끌어다 놓거나 클릭해서 선택`), h('div.muted.small', 'PDF 또는 사진(JPG·PNG) 여러 장')),
+      h(
+        'button.drop-zone',
+        { onclick: pick, disabled: !!state.busy },
+        h('span.dz-icon', icon('upload')),
+        h('div.dz-title', '파일을 여기로 끌어오거나 눌러서 고르기'),
+        h('div.muted.small', 'PDF 한 개, 또는 사진(JPG·PNG) 여러 장'),
+      ),
     );
     return card;
   }
 
   const items = doc.items || [];
   const flagged = Object.values(doc.pageInfo || {}).filter((pi) => pi.flags?.length).length;
-  card.append(h('div.doc-file', { title: doc.originalName }, doc.originalName), h('div.muted.small', src ? `${src.numPages}쪽` : '불러오는 중…'));
+  card.append(h('div.doc-file', { title: doc.originalName }, h('strong', doc.originalName), h('span.muted.small.num', src ? `${src.numPages}쪽` : '여는 중…')));
 
   const rangeInput = h('input.input.input-small', {
     value: doc.range || '',
@@ -401,10 +532,10 @@ function docCard(role) {
   card.append(
     h(
       'div.doc-options',
-      h('label', '분석 쪽 ', rangeInput),
-      h('label', '번호 모양 ', styleSelect),
-      h('label', { title: '해설이 다음 단이나 다음 쪽으로 넘어가며 이어지는 경우 체크 (답지는 보통 체크)' }, flowCheck, ' 다음 단/쪽으로 이어짐'),
-      h('label', { title: 'PDF 1쪽이 책의 몇 쪽인지 (쪽 번호 표시용)' }, 'PDF 1쪽 = 책 ', offsetInput, '쪽'),
+      h('label', '쪽 범위', rangeInput),
+      h('label', '번호 모양', styleSelect),
+      h('label', { title: 'PDF 1쪽이 책의 몇 쪽인지 (쪽 번호 표시용)' }, 'PDF 1쪽 = 책', offsetInput, '쪽'),
+      h('label.check', { title: '해설이 다음 단이나 다음 쪽으로 넘어가며 이어지는 경우 (답지는 보통 켜 둠)' }, flowCheck, '다음 단·쪽으로 이어짐'),
     ),
   );
 
@@ -412,16 +543,16 @@ function docCard(role) {
   if (busy) {
     const b = state.busy;
     const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
-    status = h('div.doc-status', h('div.progress', h('div.progress-bar', { style: { width: `${pct}%` } })), h('div.small', `${b.label} (${b.done}/${b.total})`), h('button.btn.btn-small', { onclick: () => b.abort.abort() }, '취소'));
+    status = h('div.doc-status', h('div.progress', h('div.progress-bar', { style: { width: `${pct}%` } })), h('div.small.num', `${b.label} (${b.done}/${b.total})`), h('button.btn.btn-small', { onclick: () => b.abort.abort() }, '취소'));
   } else if (doc.analyzedAt) {
     status = h(
       'div.doc-status',
-      h('span.ok-text', icon('check'), ` ${items.length}개 인식`),
-      flagged ? h('button.link.warn-text', { onclick: () => { switchTab('review'); editor?.show(role); } }, ` · 확인 필요 ${flagged}쪽`) : null,
-      h('span.muted.small', ` · ${formatDate(doc.analyzedAt)}`),
+      h('span.ok-text', icon('circleCheck'), `${items.length}개 찾음`),
+      flagged ? h('button.link.warn-text', { onclick: () => { switchTab('review'); getEditor().show(role); } }, icon('warn'), `확인할 쪽 ${flagged}`) : null,
+      h('span.muted.small', formatDate(doc.analyzedAt)),
     );
   } else {
-    status = h('div.doc-status.muted', '아직 분석하지 않았습니다.');
+    status = h('div.doc-status.muted', '아직 분석 전이에요.');
   }
   card.append(status);
   return card;
@@ -447,7 +578,7 @@ async function importFiles(role, paths) {
     await loadSource(role);
     rematch();
     renderProject();
-    toast(`${ROLE_NAME[role]} 파일을 올렸습니다. [분석 시작]을 눌러 주세요.`, { type: 'success' });
+    toast(`${ROLE_NAME[role]}을(를) 올렸어요. 이제 [분석 시작]을 눌러 주세요.`, { type: 'success' });
   } catch (err) {
     toast(err.message, { type: 'error', timeout: 8000 });
   }
@@ -465,7 +596,7 @@ function analyzePanel() {
     'select.input.input-small',
     {
       disabled: !keyOk || !!state.busy,
-      title: keyOk ? 'Gemini AI 보조 인식' : '설정에서 Gemini API 키를 넣으면 사용할 수 있습니다',
+      title: keyOk ? 'Gemini AI 보조 인식' : '설정에서 Gemini API 키를 넣으면 쓸 수 있어요',
       onchange: async (e) => {
         state.settings = await api.setSettings({ geminiMode: e.target.value });
       },
@@ -478,9 +609,9 @@ function analyzePanel() {
   );
   return h(
     'div.analyze-panel',
-    h('button.btn.btn-primary.btn-big', { disabled: !hasAny || !!state.busy, onclick: () => analyzeAll() }, icon('scan'), state.busy ? ' 분석 중…' : ' 분석 시작'),
-    h('label.small', 'Gemini 보조 ', geminiSelect),
-    keyOk ? null : h('button.link.small', { onclick: openSettings }, 'Gemini 키 설정'),
+    h(`button.btn.btn-primary.btn-big${state.busy ? '.busy' : ''}`, { disabled: !hasAny || !!state.busy, onclick: () => analyzeAll() }, icon('scan'), state.busy ? '분석하는 중…' : '분석 시작'),
+    h('label.small', h('span', 'Gemini 보조'), geminiSelect),
+    keyOk ? null : h('button.link.small', { onclick: openSettings }, 'Gemini 키 넣기'),
   );
 }
 
@@ -508,7 +639,7 @@ async function analyzeRole(role) {
     return false;
   }
   if (!pages.length) {
-    toast('분석할 쪽이 없습니다. 쪽 범위를 확인하세요.', { type: 'error' });
+    toast('분석할 쪽이 없어요. 쪽 범위를 확인해 주세요.', { type: 'error' });
     return false;
   }
   const abort = new AbortController();
@@ -563,7 +694,7 @@ async function analyzeRole(role) {
     if (res.geminiErrors?.length) toast(`Gemini 오류: ${res.geminiErrors[0]}${res.geminiErrors.length > 1 ? ` 외 ${res.geminiErrors.length - 1}건` : ''}`, { type: 'error', timeout: 10000 });
     return true;
   } catch (err) {
-    if (err?.name === 'AbortError') toast('분석을 취소했습니다.');
+    if (err?.name === 'AbortError') toast('분석을 멈췄어요.');
     else {
       console.error(err);
       toast(`분석 중 오류: ${err.message}`, { type: 'error', timeout: 10000 });
@@ -587,27 +718,22 @@ function selectView() {
   view.append(left, right);
 
   if (!doc || !doc.items?.length) {
-    left.append(
-      h(
-        'div.empty-state',
-        h('h3', !doc ? '문제집 파일을 올려 주세요' : doc.analyzedAt ? '문제 번호를 찾지 못했습니다' : '분석을 시작해 주세요'),
-        h(
-          'p.muted',
-          !doc
-            ? '위의 문제집 칸에 PDF(또는 사진)를 끌어다 놓으세요. 답지도 함께 올리면 해설까지 자동으로 짝을 맞춰 줍니다.'
-            : doc.analyzedAt
-              ? '"페이지 검토·수정" 탭에서 직접 문항을 그리거나, 번호 모양·쪽 범위를 바꿔 다시 분석해 보세요. Gemini 보조 인식도 도움이 됩니다.'
-              : '[분석 시작]을 누르면 문제 번호를 자동으로 찾아 표로 보여 줍니다.',
-        ),
-      ),
-    );
-    right.append(exportPanel());
-    setTimeout(renderExportSummary, 0);
+    const [title, desc, ic] = !doc
+      ? ['문제집부터 올려 주세요', '위 칸에 PDF나 사진을 끌어다 놓으면 됩니다. 답지도 같이 올리면 해설까지 짝을 맞춰 줘요.', 'upload']
+      : doc.analyzedAt
+        ? ['문제 번호를 찾지 못했어요', '번호 모양이나 쪽 범위를 바꿔 다시 분석하거나, "페이지 검토·수정"에서 직접 문항을 그려 주세요.', 'search']
+        : ['이제 분석을 시작하세요', '[분석 시작]을 누르면 쪽마다 문제 번호를 찾아 표로 보여 줍니다.', 'scan'];
+    left.append(h('div.empty-state', h('div.empty-art', icon(ic)), h('h3', title), h('p.muted', desc)));
+    right.append(h('div.preview-box'), exportPanel());
+    setTimeout(() => {
+      renderPreview();
+      renderExportSummary();
+    }, 0);
     return view;
   }
 
   // ---- 도구줄 ----
-  const quick = h('input.input', { placeholder: '빠른 선택: 예) 12쪽: 3, 5, 7-9   또는   15, 22' });
+  const quick = h('input.input', { placeholder: '빠르게 고르기 — 12쪽: 3, 5, 7-9  또는  15, 22' });
   const applyQuick = () => {
     const text = quick.value.trim();
     if (!text) return;
@@ -618,19 +744,24 @@ function selectView() {
     markDirty();
     quick.value = '';
     refreshSelect();
-    if (ids.length) toast(`${ids.length}개 선택했습니다.`);
+    if (ids.length) toast(`${ids.length}문항을 골랐어요.`);
     if (unknown.length) toast(`찾지 못함: ${unknown.slice(0, 8).join(', ')}`, { type: 'error' });
   };
   quick.addEventListener('keydown', (e) => e.key === 'Enter' && applyQuick());
   left.append(
     h(
       'div.select-toolbar',
-      quick,
-      h('button.btn', { onclick: applyQuick }, '선택'),
-      h('label.check.small', h('input', { type: 'checkbox', checked: state.filter.onlySelected, onchange: (e) => { state.filter.onlySelected = e.target.checked; refreshSelect(); } }), ' 선택한 것만'),
-      h('button.btn.btn-ghost.btn-small', { onclick: async () => { if (p.selected.length && (await confirmDialog('선택을 모두 해제할까요?'))) { p.selected = []; markDirty(); refreshSelect(); } } }, '선택 모두 해제'),
+      h('div.search', icon('search'), quick),
+      h('button.btn', { onclick: applyQuick }, '고르기'),
+      h('label.check.small', h('input', { type: 'checkbox', checked: state.filter.onlySelected, onchange: (e) => { state.filter.onlySelected = e.target.checked; refreshSelect(); } }), '고른 것만'),
+      h('button.btn.btn-ghost.btn-small', { onclick: async () => { if (p.selected.length && (await confirmDialog('고른 문항을 모두 해제할까요?'))) { p.selected = []; markDirty(); refreshSelect(); } } }, '모두 해제'),
     ),
-    h('div.legend.small.muted', h('span.chip.demo', '3'), ' 선택 안 됨  ', h('span.chip.demo.on', '3'), ' 선택됨  ', h('span.chip.demo.noans', '3'), ' 답지 짝 없음   · 쪽 번호를 누르면 그 쪽 문항을 모두 선택/해제'),
+    h(
+      'div.legend.small',
+      h('span', h('span.chip.demo.on', '3'), '고른 문제'),
+      h('span', h('span.chip.demo.noans', '3'), '해설 짝 없음'),
+      h('span', '쪽 번호를 누르면 그 쪽 전체 선택'),
+    ),
   );
   const table = h('div.qtable');
   left.append(table);
@@ -639,6 +770,30 @@ function selectView() {
   function refreshSelect() {
     renderTable();
     renderExportSummary();
+    updateTabCount();
+  }
+
+  // 한 문항 선택/해제 — 표 전체를 다시 그리지 않고 그 버튼만 바꿈
+  function toggleOne(it, page, items) {
+    const s2 = new Set(p.selected);
+    const on = !s2.has(it.id);
+    if (on) s2.add(it.id);
+    else s2.delete(it.id);
+    p.selected = [...s2];
+    markDirty();
+    state.focus = it.id;
+    if (state.filter.onlySelected && !on) {
+      refreshSelect();
+    } else {
+      const chipEl = table.querySelector(`.chip[data-id="${CSS.escape(it.id)}"]`);
+      chipEl?.classList.toggle('on', on);
+      table.querySelectorAll('.chip.focus').forEach((c) => c.classList.remove('focus'));
+      chipEl?.classList.add('focus');
+      table.querySelector(`.qpage[data-page="${page}"]`)?.classList.toggle('on', items.every((x) => s2.has(x.id)));
+      renderExportSummary();
+      updateTabCount();
+    }
+    renderPreview();
   }
 
   function renderTable() {
@@ -647,6 +802,7 @@ function selectView() {
     const sel = new Set(p.selected);
     const hasAnswers = !!p.docs.answer?.items?.length;
     const rows = [];
+    let rowIndex = 0;
     for (const [page, items] of byPage) {
       const shown = state.filter.onlySelected ? items.filter((it) => sel.has(it.id)) : items;
       if (!shown.length) continue;
@@ -655,17 +811,25 @@ function selectView() {
       rows.push(
         h(
           `div.qrow${flagged ? '.flagged' : ''}`,
+          { style: { '--i': Math.min(rowIndex++, 24) } },
           h(
             `button.qpage${allOn ? '.on' : ''}`,
             {
-              title: `${pageLabel(doc, page)} (PDF ${page + 1}쪽) — 클릭: 이 쪽 전체 선택/해제`,
-              onclick: () => {
+              dataset: { page: String(page) },
+              title: `${pageLabel(doc, page)} (PDF ${page + 1}쪽) — 눌러서 이 쪽 전체 선택/해제`,
+              onclick: (e) => {
                 const s2 = new Set(p.selected);
-                if (allOn) items.forEach((it) => s2.delete(it.id));
+                const all = items.every((x) => s2.has(x.id));
+                if (all) items.forEach((it) => s2.delete(it.id));
                 else items.forEach((it) => s2.add(it.id));
                 p.selected = [...s2];
                 markDirty();
-                refreshSelect();
+                if (state.filter.onlySelected) return refreshSelect();
+                // 그 줄만 바꿈 (표 전체를 다시 그리지 않음)
+                e.currentTarget.classList.toggle('on', !all);
+                for (const it of items) table.querySelector(`.chip[data-id="${CSS.escape(it.id)}"]`)?.classList.toggle('on', !all);
+                renderExportSummary();
+                updateTabCount();
               },
             },
             h('span.qpage-num', `${bookPage(doc, page)}`),
@@ -679,17 +843,8 @@ function selectView() {
                 `button.chip${sel.has(it.id) ? '.on' : ''}${hasAnswers && !ans ? '.noans' : ''}${state.focus === it.id ? '.focus' : ''}`,
                 {
                   dataset: { id: it.id },
-                  title: `${pageLabel(doc, it.page)} ${it.number}번${hasAnswers && !ans ? ' (답지 짝 없음)' : ''}`,
-                  onclick: () => {
-                    const s2 = new Set(p.selected);
-                    if (s2.has(it.id)) s2.delete(it.id);
-                    else s2.add(it.id);
-                    p.selected = [...s2];
-                    markDirty();
-                    state.focus = it.id;
-                    refreshSelect();
-                    renderPreview();
-                  },
+                  title: `${pageLabel(doc, it.page)} ${it.number}번${hasAnswers && !ans ? ' (해설 짝 없음)' : ''}`,
+                  onclick: () => toggleOne(it, page, items),
                   onmouseenter: () => schedulePreview(it.id),
                 },
                 it.number,
@@ -700,7 +855,7 @@ function selectView() {
         ),
       );
     }
-    if (!rows.length) table.append(h('p.muted.pad', state.filter.onlySelected ? '선택한 문항이 없습니다.' : '문항이 없습니다.'));
+    if (!rows.length) table.append(h('p.muted.pad', state.filter.onlySelected ? '아직 고른 문항이 없어요.' : '문항이 없어요.'));
     table.append(...rows);
   }
 
@@ -778,11 +933,11 @@ async function renderPreview() {
   if (!box) return;
   const p = state.project;
   const doc = p.docs.problem;
-  const item = state.focus ? findItem(doc, state.focus) : null;
+  const item = state.focus && doc ? findItem(doc, state.focus) : null;
   const token = ++previewToken;
   clear(box);
   if (!item) {
-    box.append(h('div.preview-empty.muted', '번호에 마우스를 올리면 문제와 해설이 여기에 보입니다.'));
+    box.append(h('div.preview-empty', h('span.pe-icon', icon('eye')), h('div', '번호 위에 마우스를 올리면', h('br'), '문제와 해설을 여기서 볼 수 있어요.')));
     return;
   }
   const ansId = state.matches.get(item.id);
@@ -790,15 +945,24 @@ async function renderPreview() {
   const ans = ansId ? findItem(ansDoc, ansId) : null;
   const width = Math.max(320, Math.round((box.clientWidth || 380) * Math.min(2, window.devicePixelRatio || 1)));
 
-  const probImg = h('img.preview-img', { alt: '' });
-  const ansImg = h('img.preview-img', { alt: '' });
+  const imgEl = () => {
+    const img = h('img.preview-img', { alt: '' });
+    img.addEventListener('load', () => {
+      img.classList.add('loaded');
+      img.parentElement?.classList.add('ready');
+    });
+    return img;
+  };
+  const probImg = imgEl();
+  const ansImg = imgEl();
   const selected = p.selected.includes(item.id);
   box.append(
     h(
       'div.preview-head',
+      h('span.tag', '문제'),
       h('strong', `${pageLabel(doc, item.page)} ${item.number}번`),
-      h('span.muted.small', ` PDF ${item.page + 1}쪽`),
-      h('button.btn.btn-small.btn-ghost', { title: '페이지 검토에서 보기', onclick: () => { switchTab('review'); editor.show('problem', item.page, item.id); } }, icon('eye')),
+      h('span.muted.small', `PDF ${item.page + 1}쪽`),
+      h('button.btn.btn-small.btn-ghost.push', { title: '페이지 검토에서 보기', onclick: () => { switchTab('review'); getEditor().show('problem', item.page, item.id); } }, icon('eye')),
       h(`button.btn.btn-small${selected ? '.btn-active' : ''}`, {
         onclick: () => {
           const s2 = new Set(p.selected);
@@ -809,17 +973,20 @@ async function renderPreview() {
           document.querySelector(`.chip[data-id="${CSS.escape(item.id)}"]`)?.classList.toggle('on', s2.has(item.id));
           renderPreview();
           renderExportSummary();
+          updateTabCount();
         },
-      }, selected ? '✓ 선택됨' : '선택'),
+      }, selected ? icon('check') : icon('plus'), selected ? '골랐음' : '고르기'),
     ),
     h('div.preview-scroll', probImg),
   );
   if (ansDoc) {
     // 답지 짝 바꾸기
     const options = sortItems(ansDoc.items || []).filter((a) => a.num === item.num);
+    const has = Object.prototype.hasOwnProperty.call(p.answerOverrides, item.id);
     const sel = h(
       'select.input.input-small',
       {
+        title: '짝이 되는 해설 바꾸기',
         onchange: (e) => {
           p.answerOverrides[item.id] = e.target.value;
           if (e.target.value === '__auto') delete p.answerOverrides[item.id];
@@ -829,13 +996,19 @@ async function renderPreview() {
           renderPreview();
         },
       },
-      h('option', { value: '__auto' }, '자동 매칭'),
-      options.map((a) => h('option', { value: a.id, selected: ans?.id === a.id && Object.prototype.hasOwnProperty.call(p.answerOverrides, item.id) }, `답지 ${pageLabel(ansDoc, a.page)} ${a.number}번`)),
-      h('option', { value: '', selected: Object.prototype.hasOwnProperty.call(p.answerOverrides, item.id) && !p.answerOverrides[item.id] }, '해설 없음'),
+      h('option', { value: '__auto' }, '자동으로 찾기'),
+      options.map((a) => h('option', { value: a.id, selected: has && ans?.id === a.id }, `답지 ${pageLabel(ansDoc, a.page)} ${a.number}번`)),
+      h('option', { value: '', selected: has && !p.answerOverrides[item.id] }, '해설 없음'),
     );
     box.append(
-      h('div.preview-head.ans', h('strong', ans ? `해설: 답지 ${pageLabel(ansDoc, ans.page)} ${ans.number}번` : '해설: 찾지 못함'), sel, ans ? h('button.btn.btn-small.btn-ghost', { title: '답지에서 보기', onclick: () => { switchTab('review'); editor.show('answer', ans.page, ans.id); } }, icon('eye')) : null),
-      ans ? h('div.preview-scroll', ansImg) : h('p.muted.small.pad', '답지에서 같은 번호를 찾지 못했습니다. 위 목록에서 직접 고르거나, 페이지 검토에서 답지 영역을 추가하세요.'),
+      h(
+        'div.preview-head.ans',
+        h('span.tag.teal', '해설'),
+        h('strong', ans ? `답지 ${pageLabel(ansDoc, ans.page)} ${ans.number}번` : '짝을 못 찾음'),
+        h('span.push', sel),
+        ans ? h('button.btn.btn-small.btn-ghost', { title: '답지에서 보기', onclick: () => { switchTab('review'); getEditor().show('answer', ans.page, ans.id); } }, icon('eye')) : null,
+      ),
+      ans ? h('div.preview-scroll', ansImg) : h('p.muted.small.pad', '답지에서 같은 번호를 찾지 못했어요. 위 목록에서 직접 고르거나, 페이지 검토에서 답지 영역을 그려 주세요.'),
     );
   }
   const [pu, au] = await Promise.all([itemImage('problem', item, width), ans ? itemImage('answer', ans, width) : null]);
@@ -854,51 +1027,58 @@ function exportPanel() {
     o[k] = v;
     markDirty();
   };
-  const radio = (name, value, label, current, onChange) =>
-    h('label.radio', h('input', { type: 'radio', name, value, checked: current === value, onchange: () => onChange(value) }), ` ${label}`);
+  const seg = (name, current, options, onChange) =>
+    h(
+      'div.seg',
+      options.map(([value, label]) =>
+        h('label', h('input', { type: 'radio', name, value, checked: String(current) === String(value), onchange: () => onChange(value) }), h('span', label)),
+      ),
+    );
   const hasAnswer = !!p.docs.answer?.items?.length;
+  const needAns = hasAnswer ? '' : '답지를 올리고 분석하면 쓸 수 있어요';
   return h(
     'div.export-panel',
-    h('h3', '내보내기'),
+    h('div.export-head', h('h3', 'PDF로 내보내기'), h('div.sel-count')),
     h('div.export-summary'),
     h(
       'div.export-options',
-      h('div.opt-row', h('span.opt-label', '배치'), radio('cols', '1', '1단', String(o.columns), (v) => set('columns', +v)), radio('cols', '2', '2단', String(o.columns), (v) => set('columns', +v))),
-      h(
-        'div.opt-row',
-        h('span.opt-label', '풀이 여백'),
-        h('select.input.input-small', { onchange: (e) => set('space', e.target.value) }, Object.entries(SPACE_OPTIONS).map(([k, v]) => h('option', { value: k, selected: o.space === k }, v.label))),
-      ),
-      h('div.opt-row', h('span.opt-label', '문제+해설'), radio('order', 'append', '문제 모두 → 해설 모두', o.bothOrder, (v) => set('bothOrder', v)), radio('order', 'interleave', '문제·해설 번갈아', o.bothOrder, (v) => set('bothOrder', v))),
+      h('div.opt-row', h('span.opt-label', '배치'), seg('cols', o.columns, [[1, '1단'], [2, '2단']], (v) => set('columns', +v))),
+      h('div.opt-row', h('span.opt-label', '풀이 여백'), seg('space', o.space, Object.entries(SPACE_OPTIONS).map(([k, v]) => [k, v.short]), (v) => set('space', v))),
+      h('div.opt-row', h('span.opt-label', '해설 위치'), seg('order', o.bothOrder, [['append', '뒤에 모아서'], ['interleave', '문제 바로 뒤']], (v) => set('bothOrder', v))),
       h(
         'div.opt-row',
         h('span.opt-label', '표시'),
-        h('label.check', h('input', { type: 'checkbox', checked: o.labels, onchange: (e) => set('labels', e.target.checked) }), ' 쪽·번호 표시'),
-        h('label.check', h('input', { type: 'checkbox', checked: o.renumber, onchange: (e) => set('renumber', e.target.checked) }), ' 1, 2, 3… 새 번호'),
+        h('label.check', h('input', { type: 'checkbox', checked: o.labels, onchange: (e) => set('labels', e.target.checked) }), '쪽·번호'),
+        h('label.check', h('input', { type: 'checkbox', checked: o.renumber, onchange: (e) => set('renumber', e.target.checked) }), '새 번호 매기기'),
       ),
     ),
     h(
       'div.export-buttons',
-      h('button.btn.btn-primary', { onclick: () => doExport('problems') }, icon('download'), ' 문제 PDF'),
-      h('button.btn.btn-primary', { onclick: () => doExport('answers'), disabled: !hasAnswer, title: hasAnswer ? '' : '답지를 올리고 분석해야 합니다' }, icon('download'), ' 답지 PDF'),
-      h('button.btn.btn-primary', { onclick: () => doExport('both'), disabled: !hasAnswer, title: hasAnswer ? '' : '답지를 올리고 분석해야 합니다' }, icon('download'), ' 문제+답지 PDF'),
+      h('button.btn.btn-primary', { onclick: () => doExport('problems') }, icon('download'), '문제'),
+      h('button.btn.btn-primary', { onclick: () => doExport('answers'), disabled: !hasAnswer, title: needAns }, icon('download'), '답지'),
+      h('button.btn.btn-primary', { onclick: () => doExport('both'), disabled: !hasAnswer, title: needAns }, icon('download'), '문제+답지'),
     ),
   );
 }
 
 function renderExportSummary() {
   const el = document.querySelector('.export-summary');
+  const countEl = document.querySelector('.export-head .sel-count');
   if (!el) return;
   clear(el);
   const items = selectedItems(state.project);
   const doc = state.project.docs.problem;
+  if (countEl) {
+    clear(countEl);
+    if (items.length) countEl.append(h('strong', String(items.length)), '문항');
+  }
   if (!items.length) {
-    el.append(h('p.muted.small', '내보낼 문항을 표에서 골라 주세요.'));
+    el.append(h('p.empty-hint', '왼쪽 표에서 틀린 번호를 골라 주세요.'));
     return;
   }
   const noAns = state.project.docs.answer?.items?.length ? items.filter((it) => !state.matches.get(it.id)).length : 0;
+  if (noAns) el.append(h('p.warn-text.small', icon('warn'), `해설 짝이 없는 문항 ${noAns}개`));
   el.append(
-    h('div.sel-count', h('strong', `${items.length}개`), ' 선택됨', noAns ? h('span.warn-text.small', ` (해설 없음 ${noAns}개)`) : null),
     h(
       'div.sel-list',
       items.map((it) =>
@@ -907,15 +1087,16 @@ function renderExportSummary() {
           { onclick: () => { state.focus = it.id; renderPreview(); }, title: '미리보기' },
           `${pageLabel(doc, it.page)} ${it.number}번`,
           h('button.sel-x', {
-            title: '선택 해제',
+            title: '빼기',
             onclick: (e) => {
               e.stopPropagation();
               state.project.selected = state.project.selected.filter((x) => x !== it.id);
               markDirty();
               document.querySelector(`.chip[data-id="${CSS.escape(it.id)}"]`)?.classList.remove('on');
               renderExportSummary();
+              updateTabCount();
             },
-          }, '×'),
+          }, icon('x')),
         ),
       ),
     ),
@@ -926,7 +1107,7 @@ async function doExport(mode) {
   const p = state.project;
   const items = selectedItems(p);
   if (!items.length) {
-    toast('먼저 표에서 문항을 선택하세요.', { type: 'error' });
+    toast('먼저 표에서 문항을 골라 주세요.', { type: 'error' });
     return;
   }
   const entries = items.map((it) => {
@@ -946,7 +1127,7 @@ async function doExport(mode) {
     const safeName = p.name.replace(/[\\/:*?"<>|]/g, '_');
     const res = await api.savePdf(`${safeName}_오답_${modeName}_${ymd}.pdf`, bytes);
     if (res.canceled) return;
-    toast(`저장했습니다: ${res.path}`, {
+    toast(`저장했어요 — ${res.path}`, {
       type: 'success',
       timeout: 10000,
       actions: [
@@ -957,14 +1138,14 @@ async function doExport(mode) {
   } catch (err) {
     closeToast();
     console.error(err);
-    toast(`PDF를 만들지 못했습니다: ${err.message}`, { type: 'error', timeout: 10000 });
+    toast(`PDF를 만들지 못했어요: ${err.message}`, { type: 'error', timeout: 10000 });
   }
 }
 
 // ===========================================================================
 // 페이지 검토 화면
 // ===========================================================================
-function reviewView() {
+function getEditor() {
   if (!editor) {
     editor = createEditor({
       project: () => state.project,
@@ -994,10 +1175,15 @@ function reviewView() {
       geminiPage,
     });
   }
+  return editor;
+}
+
+function reviewView() {
+  const editor = getEditor();
   const wrap = h('div.review-view', editor.el);
   const p = state.project;
   if (!p.docs.problem && !p.docs.answer) {
-    return h('div.empty-state', h('h3', '먼저 문제집이나 답지 파일을 올려 주세요.'));
+    return h('div.empty-state', h('div.empty-art', icon('files')), h('h3', '먼저 파일을 올려 주세요'), h('p.muted', '문제집이나 답지를 올리고 분석하면 여기서 쪽마다 인식 결과를 확인하고 고칠 수 있어요.'));
   }
   const role = p.docs[editor.role] ? editor.role : p.docs.problem ? 'problem' : 'answer';
   requestAnimationFrame(() => editor.show(role, editor.page));
@@ -1022,7 +1208,7 @@ async function reanalyzePage(role, page) {
     markDirty();
     editor.refresh();
     close();
-    toast(`${items.length}개 찾았습니다.`);
+    toast(`${items.length}개 찾았어요.`);
   } catch (err) {
     close();
     toast(`다시 인식 실패: ${err.message}`, { type: 'error' });
@@ -1036,7 +1222,7 @@ async function geminiPage(role, page) {
   const s = state.settings;
   if (!doc || !src) return;
   if (!s.geminiApiKey) {
-    toast('설정에서 Gemini API 키를 먼저 입력하세요.', { type: 'error', actions: [{ label: '설정 열기', onClick: openSettings }] });
+    toast('설정에서 Gemini API 키를 먼저 넣어 주세요.', { type: 'error', actions: [{ label: '설정 열기', onClick: openSettings }] });
     return;
   }
   const close = toast(`Gemini 로 ${pageLabel(doc, page)} 인식 중…`, { timeout: 0 });
@@ -1044,7 +1230,7 @@ async function geminiPage(role, page) {
     const found = await detectPageWithGemini(src, page, { role, gemini: { model: s.geminiModel, rpm: s.geminiRpm } });
     close();
     if (!found.length) {
-      toast('Gemini 가 이 쪽에서 문항을 찾지 못했습니다.');
+      toast('Gemini도 이 쪽에서 문항을 찾지 못했어요.');
       return;
     }
     doc.items = replacePageItems(doc.items, page, found);
@@ -1055,7 +1241,7 @@ async function geminiPage(role, page) {
     previewCache.clear();
     markDirty();
     editor.refresh();
-    toast(`Gemini: ${found.length}개 찾았습니다.`, { type: 'success' });
+    toast(`Gemini가 ${found.length}개를 찾았어요.`, { type: 'success' });
   } catch (err) {
     close();
     toast(err.message, { type: 'error', timeout: 10000 });
@@ -1094,7 +1280,7 @@ async function openSettings() {
 
   const body = h(
     'div.settings',
-    h('h4', 'Gemini AI 보조 인식 (선택)'),
+    h('h4', icon('sparkle'), 'Gemini 보조 인식 (선택)'),
     h(
       'p.small.muted',
       '무료로 쓸 수 있는 Google AI Studio API 키를 넣으면, 자동 인식이 애매한 쪽을 AI로 다시 인식할 수 있습니다. ',
@@ -1121,20 +1307,20 @@ async function openSettings() {
     ),
     modelMsg,
     h('label.field', h('span', '분당 요청 수'), h('div.field-row', rpmInput, h('span.small.muted', '무료 한도를 넘지 않게 천천히 보냅니다'))),
-    h('h4', '문자 인식(OCR)'),
+    h('h4', icon('scan'), '스캔본 글자 인식 (OCR)'),
     h('label.field', h('span', '언어'), ocrSelect),
-    h('h4', '프로그램'),
+    h('h4', icon('gear'), '프로그램'),
     h('div.field-row', h('span', `버전 ${state.appInfo.version}`), h('button.btn.btn-small', {
       onclick: async () => {
         if (!state.appInfo.isPackaged) {
-          updateMsg.textContent = '설치된 프로그램에서만 업데이트를 확인할 수 있습니다.';
+          updateMsg.textContent = '설치한 프로그램에서만 업데이트를 확인할 수 있어요.';
           return;
         }
         updateMsg.textContent = '확인 중…';
         showUpdate(await api.checkForUpdates());
       },
     }, '업데이트 확인'), updateMsg),
-    h('div.field-row', h('button.btn.btn-small', { onclick: () => api.openDataDir() }, '데이터 폴더 열기'), h('span.small.muted', '오답노트 파일과 분석 결과가 저장되는 곳')),
+    h('div.field-row', h('button.btn.btn-small', { onclick: () => api.openDataDir() }, icon('folder'), '데이터 폴더 열기'), h('span.small.muted', '올린 파일과 분석 결과가 저장되는 곳')),
   );
   const r = await modal({
     title: '설정',
@@ -1163,5 +1349,5 @@ async function openSettings() {
 
 boot().catch((err) => {
   console.error(err);
-  root.append(h('div.fatal', `시작 중 오류가 발생했습니다: ${err.message}`));
+  root.append(h('div.fatal', `시작하다가 문제가 생겼어요: ${err.message}`));
 });

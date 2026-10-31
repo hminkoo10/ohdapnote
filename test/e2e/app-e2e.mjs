@@ -43,6 +43,7 @@ await win.setViewportSize?.({ width: 1440, height: 920 }).catch(() => {});
 try {
   step('홈 화면');
   await win.waitForSelector('.project-card.new', { timeout: 20000 });
+  await win.waitForTimeout(900);
   await win.screenshot({ path: join(OUT, 'app-1-home.png') });
 
   step('새 오답노트');
@@ -59,6 +60,7 @@ try {
   await stubOpen([join(FIX, 'answer-unit.pdf')]);
   await win.click('.doc-card[data-role="answer"] .drop-zone');
   await win.waitForSelector('.doc-card[data-role="answer"] .doc-file');
+  await win.waitForTimeout(600);
   await win.screenshot({ path: join(OUT, 'app-2-uploaded.png') });
 
   step('분석');
@@ -83,6 +85,7 @@ try {
   console.log('    selected:', selCount);
   if (selCount !== 4) throw new Error(`선택 수가 다릅니다: ${selCount}`);
   await win.waitForSelector('.preview-img[src^="data:"]', { timeout: 15000 });
+  await win.waitForTimeout(700);
   await win.screenshot({ path: join(OUT, 'app-3-select.png') });
 
   step('PDF 내보내기 3종');
@@ -91,7 +94,7 @@ try {
     rmSync(out, { force: true });
     await app.evaluate(({ dialog }, p) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: p }); }, out);
     await win.click(`.export-buttons .btn >> nth=${idx}`);
-    await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('저장했습니다')), null, { timeout: 60000 });
+    await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('저장했어요')), null, { timeout: 60000 });
     await win.$$eval('.toast', (els) => els.forEach((e) => e.remove()));
     if (!existsSync(out) || statSync(out).size < 1000) throw new Error(`${name} PDF 생성 실패`);
     console.log(`    ${name}: ${statSync(out).size} bytes`);
@@ -100,7 +103,7 @@ try {
   step('페이지 검토: 상자 선택 → 번호 고치기 → 새 상자 그리기');
   await win.click('.tabs .tab >> nth=1');
   await win.waitForSelector('.page-overlay .box', { timeout: 20000 });
-  await win.waitForTimeout(500);
+  await win.waitForTimeout(1000);
   await win.screenshot({ path: join(OUT, 'app-4-review.png') });
   await win.locator('.page-overlay .box').first().click();
   await win.fill('.input-num', '99');
@@ -120,13 +123,14 @@ try {
   await win.screenshot({ path: join(OUT, 'app-5-edited.png') });
 
   step('설정 창');
-  await win.click('.topbar-right .btn-ghost');
+  await win.click('#settings-btn');
   await win.waitForSelector('.modal .settings');
+  await win.waitForTimeout(500);
   await win.screenshot({ path: join(OUT, 'app-6-settings.png') });
   await win.click('.modal-footer .btn >> nth=0');
 
   step('사진(JPG 3장) 문제집 → OCR 인식');
-  await win.click('.topbar-project .btn-ghost');
+  await win.click('#back-btn');
   await win.waitForSelector('.project-card.new');
   await win.click('.project-card.new');
   await win.fill('.modal input', '사진 문제집');
@@ -146,21 +150,27 @@ try {
   await win.locator('.qtable .chip').nth(12).click();
   await app.evaluate(({ dialog }, p) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: p }); }, outImg);
   await win.click('.export-buttons .btn >> nth=0');
-  await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('저장했습니다')), null, { timeout: 60000 });
+  await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('저장했어요')), null, { timeout: 60000 });
   console.log(`    photos export: ${statSync(outImg).size} bytes`);
 
   step('재실행 후 저장 내용 확인');
-  await win.click('.topbar-project .btn-ghost');
+  await win.click('#back-btn');
   await win.waitForSelector('.project-card:not(.new)');
   await app.close();
   app = await launch();
   win = await app.firstWindow();
   await win.waitForSelector('.project-card:not(.new)', { timeout: 20000 });
+  await win.waitForTimeout(1500);
+  await win.screenshot({ path: join(OUT, 'app-8-home-list.png') });
   const stats = await win.$$eval('.project-card:not(.new) .pc-stats', (els) => els.map((e) => e.textContent));
   console.log('   ', stats);
-  if (!stats.some((t) => t.includes('선택 4개'))) throw new Error('선택 내용이 저장되지 않았습니다: ' + stats);
+  if (!stats.some((t) => t.includes('고른 문제 4'))) throw new Error('선택 내용이 저장되지 않았습니다: ' + stats);
   await win.locator('.project-card:not(.new)', { hasText: '테스트 수학' }).click();
   await win.waitForSelector('.qtable .chip.on', { timeout: 30000 });
+  await win.click('.docs-bar.collapsed .btn');
+  await win.waitForSelector('.docs-bar:not(.collapsed) .doc-card');
+  await win.waitForTimeout(700);
+  await win.screenshot({ path: join(OUT, 'app-9-docs-open.png') });
   console.log('✅ E2E 통과');
 } catch (err) {
   console.error('❌ E2E 실패:', err);

@@ -45,7 +45,7 @@ export function createEditor(ctx) {
         'div.seg-toggle',
         ['problem', 'answer'].map((role) =>
           h(
-            `button${st.role === role ? '.active' : ''}`,
+            `button${st.role === role ? '.active' : ''}${role === 'answer' ? '.teal' : ''}`,
             { disabled: !p?.docs?.[role], onclick: () => show(role, firstPage(role)) },
             ROLE_NAME[role],
           ),
@@ -55,7 +55,7 @@ export function createEditor(ctx) {
     const d = doc();
     const s = src();
     if (!d || !s) {
-      side.append(h('p.muted.small', '파일이 없습니다.'));
+      side.append(h('p.muted.small', '파일이 없어요.'));
       return;
     }
     const flaggedCount = Object.values(d.pageInfo || {}).filter((pi) => pi.flags?.length).length;
@@ -152,17 +152,17 @@ export function createEditor(ctx) {
         h('span.tb-pagelabel', `${pageLabel(d, st.page)}`),
       ),
       h('div.tb-group',
-        h(`button.btn.btn-small${st.mode === 'draw' ? '.btn-active' : ''}`, { onclick: () => setMode(st.mode === 'draw' ? 'select' : 'draw'), title: '빈 곳을 드래그해서 새 문항 영역을 그립니다' }, icon('plus'), ' 문항 추가'),
-        h(`button.btn.btn-small${st.mode === 'addRect' ? '.btn-active' : ''}`, { onclick: () => setMode(st.mode === 'addRect' ? 'select' : 'addRect'), disabled: !it, title: '선택한 문항에 영역을 하나 더 그립니다 (다음 단·쪽으로 이어지는 부분)' }, icon('box'), ' 영역 추가'),
-        h('button.btn.btn-small', { onclick: deleteSelected, disabled: !it, title: '선택한 영역 삭제 (Delete)' }, icon('trash'), ' 삭제'),
-        h('label.tb-num', '번호 ', numInput),
+        h(`button.btn.btn-small${st.mode === 'draw' ? '.btn-active' : ''}`, { onclick: () => setMode(st.mode === 'draw' ? 'select' : 'draw'), title: '빈 곳을 드래그해서 새 문항 영역을 그립니다' }, icon('plus'), '문항 추가'),
+        h(`button.btn.btn-small${st.mode === 'addRect' ? '.btn-active' : ''}`, { onclick: () => setMode(st.mode === 'addRect' ? 'select' : 'addRect'), disabled: !it, title: '선택한 문항에 영역을 하나 더 그립니다 (다음 단·쪽으로 이어지는 부분)' }, icon('box'), '영역 추가'),
+        h('button.btn.btn-small', { onclick: deleteSelected, disabled: !it, title: '선택한 영역 삭제 (Delete)' }, icon('trash'), '삭제'),
+        h('label.tb-num', '번호', numInput),
       ),
       h('div.tb-group.tb-right',
-        h('button.btn.btn-small', { onclick: () => ctx.reanalyzePage(st.role, st.page), title: '이 쪽만 다시 자동 인식합니다 (이 쪽에서 직접 고친 내용은 사라집니다)' }, icon('scan'), ' 다시 인식'),
-        h('button.btn.btn-small', { onclick: () => ctx.geminiPage(st.role, st.page), title: 'Gemini AI 로 이 쪽을 인식합니다 (설정에서 API 키 필요)' }, icon('sparkle'), ' Gemini 인식'),
-        h('button.btn.btn-icon', { title: '축소', onclick: () => setZoom(st.zoom / 1.2) }, '−'),
-        h('span.muted.small', `${Math.round(st.zoom * 100)}%`),
-        h('button.btn.btn-icon', { title: '확대', onclick: () => setZoom(st.zoom * 1.2) }, '+'),
+        h('button.btn.btn-small', { onclick: () => ctx.reanalyzePage(st.role, st.page), title: '이 쪽만 다시 자동 인식합니다 (이 쪽에서 직접 고친 내용은 사라집니다)' }, icon('refresh'), '다시 인식'),
+        h('button.btn.btn-small', { onclick: () => ctx.geminiPage(st.role, st.page), title: 'Gemini 로 이 쪽을 인식합니다 (설정에서 API 키 필요)' }, icon('sparkle'), 'Gemini'),
+        h('button.btn.btn-icon.btn-ghost', { title: '축소', onclick: () => setZoom(st.zoom / 1.2) }, icon('zoomOut')),
+        h('span.muted.small.tb-zoom', `${Math.round(st.zoom * 100)}%`),
+        h('button.btn.btn-icon.btn-ghost', { title: '확대', onclick: () => setZoom(st.zoom * 1.2) }, icon('zoomIn')),
       ),
     );
   }
@@ -173,15 +173,15 @@ export function createEditor(ctx) {
     if (!d) return;
     const info = d.pageInfo?.[st.page];
     const parts = [];
-    if (!info?.analyzed) parts.push(h('span', '이 쪽은 아직 분석하지 않았습니다.'));
+    if (!info?.analyzed) parts.push(h('span', '이 쪽은 아직 분석 전이에요.'));
     else {
       const src = { text: 'PDF 글자', ocr: 'OCR(스캔 인식)', gemini: 'Gemini', manual: '직접 편집' }[info.source] || info.source;
       parts.push(h('span.muted', `인식 방법: ${src}`));
-      if (info.flags?.length) parts.push(h('span.warn-text', icon('warn'), ` 확인 필요: ${info.flags.join(', ')}`));
+      if (info.flags?.length) parts.push(h('span.warn-text', icon('warn'), `확인 필요: ${info.flags.join(', ')}`));
     }
     const modeHint = {
-      select: '상자를 클릭해 선택하고, 끌어서 옮기거나 모서리로 크기를 바꿀 수 있습니다.',
-      draw: '빈 곳을 드래그해서 새 문항 영역을 그리세요. 그린 뒤 번호를 입력하세요.',
+      select: '상자를 눌러 고르고, 끌어서 옮기거나 모서리로 크기를 바꿀 수 있어요.',
+      draw: '빈 곳을 드래그해서 새 문항 영역을 그리고, 번호를 입력해 주세요.',
       addRect: '선택한 문항에 이어지는 영역을 드래그해서 그리세요. (다른 쪽으로 넘어가도 됩니다)',
     }[st.mode];
     parts.push(h('span.muted', modeHint));
@@ -189,7 +189,7 @@ export function createEditor(ctx) {
   }
 
   // ------------------------------------------------------------------
-  async function renderCanvas() {
+  async function renderCanvas(dir = null) {
     const s = src();
     if (!s) return;
     const token = ++st.renderToken;
@@ -209,6 +209,14 @@ export function createEditor(ctx) {
     canvas.getContext('2d').drawImage(rendered, 0, 0);
     canvas.style.width = `${cssW}px`;
     canvas.style.height = `${cssH}px`;
+    if (dir) {
+      wrap.classList.remove('enter-next', 'enter-prev');
+      void wrap.offsetWidth; // 애니메이션 다시 시작
+      wrap.classList.add(dir === 'prev' ? 'enter-prev' : 'enter-next');
+      overlay.classList.add('fresh');
+      clearTimeout(st.freshTimer);
+      st.freshTimer = setTimeout(() => overlay.classList.remove('fresh'), 900);
+    }
   }
 
   function renderOverlay() {
@@ -226,7 +234,7 @@ export function createEditor(ctx) {
           `div.box${isSel ? '.selected' : ''}${cont ? '.cont' : ''}${it.source === 'manual' ? '.manual' : ''}`,
           {
             dataset: { id: it.id, ri: String(ri) },
-            style: { left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h), '--hue': String((k * 47) % 360) },
+            style: { left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h), '--hue': String(HUES[k % HUES.length]), '--i': String(Math.min(k, 20)) },
           },
           h('span.box-label', `${it.number}${cont ? ' (이어짐)' : ''}${it.page !== st.page ? ` · ${pageLabel(d, it.page)}` : ''}`),
         );
@@ -239,6 +247,8 @@ export function createEditor(ctx) {
   }
 
   const pct = (v) => `${(v * 100).toFixed(3)}%`;
+  // 따뜻한 계열 위주로 번갈아 쓰는 상자 색
+  const HUES = [22, 196, 340, 38, 172, 8, 262];
 
   // ------------------------------------------------------------------
   // 마우스 조작
@@ -478,11 +488,12 @@ export function createEditor(ctx) {
     }
     const newPage = clamp(page ?? st.page, 0, s.numPages - 1);
     const pageChanged = newPage !== st.page || roleChanged;
+    const dir = newPage < st.page ? 'prev' : 'next';
     st.page = newPage;
     if (itemId) st.selected = { id: itemId, rect: 0 };
     else if (pageChanged && st.mode !== 'addRect') st.selected = null;
     refresh();
-    if (pageChanged || !canvas.width) renderCanvas();
+    if (pageChanged || !canvas.width) renderCanvas(dir);
   }
 
   return {
@@ -491,7 +502,7 @@ export function createEditor(ctx) {
     refresh,
     redraw: () => {
       refresh();
-      renderCanvas();
+      renderCanvas('next');
     },
     get role() {
       return st.role;

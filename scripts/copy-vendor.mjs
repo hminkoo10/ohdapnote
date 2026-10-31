@@ -17,6 +17,7 @@ rmSync(out(), { recursive: true, force: true });
 mkdirSync(out('pdfjs'), { recursive: true });
 mkdirSync(out('tesseract', 'core'), { recursive: true });
 mkdirSync(out('tesseract', 'lang'), { recursive: true });
+mkdirSync(out('fonts'), { recursive: true });
 
 const copies = [
   [nm('pdfjs-dist', 'build', 'pdf.min.mjs'), out('pdfjs', 'pdf.min.mjs')],
@@ -26,6 +27,8 @@ const copies = [
   [nm('pdfjs-dist', 'wasm'), out('pdfjs', 'wasm')],
   [nm('pdfjs-dist', 'iccs'), out('pdfjs', 'iccs')],
   [nm('pdf-lib', 'dist', 'pdf-lib.esm.min.js'), out('pdf-lib.esm.min.js')],
+  [nm('pretendard', 'dist', 'web', 'variable', 'woff2', 'PretendardVariable.woff2'), out('fonts', 'PretendardVariable.woff2')],
+  [nm('pretendard', 'dist', 'LICENSE.txt'), out('fonts', 'LICENSE-Pretendard.txt')],
   [nm('tesseract.js', 'dist', 'tesseract.esm.min.js'), out('tesseract', 'tesseract.esm.min.js')],
   [nm('tesseract.js', 'dist', 'worker.min.js'), out('tesseract', 'worker.min.js')],
   [nm('@tesseract.js-data', 'eng', '4.0.0_best_int', 'eng.traineddata.gz'), out('tesseract', 'lang', 'eng.traineddata.gz')],

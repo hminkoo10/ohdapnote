@@ -11,13 +11,13 @@ const COL_GAP = 22;
 const BLOCK_GAP = 16;
 const SEG_GAP = 4;
 const RASTER_DPI = 200;
-const FONT_STACK = `'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Noto Sans CJK KR', 'WenQuanYi Zen Hei', sans-serif`;
+const FONT_STACK = `'Pretendard Variable', Pretendard, 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Noto Sans CJK KR', 'WenQuanYi Zen Hei', sans-serif`;
 
 export const SPACE_OPTIONS = {
-  none: { label: '없음', pt: 0 },
-  small: { label: '조금 (약 3cm)', pt: 85 },
-  large: { label: '많이 (약 8cm)', pt: 227 },
-  page: { label: '한 쪽에 한 문제', pt: 0, pageBreak: true },
+  none: { label: '없음', short: '없음', pt: 0 },
+  small: { label: '조금 (약 3cm)', short: '3cm', pt: 85 },
+  large: { label: '많이 (약 8cm)', short: '8cm', pt: 227 },
+  page: { label: '한 쪽에 한 문제', short: '한 쪽에 하나', pt: 0, pageBreak: true },
 };
 
 export const DEFAULT_EXPORT_OPTIONS = {
@@ -208,7 +208,7 @@ async function buildPdfInner({ blocks, sources, options, title, onProgress, forc
     }
     if (block.kind === 'section') {
       if (y > 0 || col > 0) newPage();
-      const t = textImage(block.text, { size: 15, bold: true, color: '#1a237e' });
+      const t = textImage(block.text, { size: 15, bold: true, color: '#c2410c' });
       const img = await out.embedPng(await canvasToBytes(t.canvas));
       const yTop = A4.h - MARGIN.top - y;
       page.drawImage(img, { x: MARGIN.left, y: yTop - t.hPt, width: t.wPt, height: t.hPt });
@@ -222,7 +222,7 @@ async function buildPdfInner({ blocks, sources, options, title, onProgress, forc
       const t = textImage(block.label, {
         size: 9,
         bold: true,
-        color: block.kind === 'answer' ? '#ad1457' : '#1a3c8f',
+        color: block.kind === 'answer' ? '#0f766e' : '#c2410c',
         maxWidthPt: colW,
       });
       label = { ...t, img: await out.embedPng(await canvasToBytes(t.canvas)) };
