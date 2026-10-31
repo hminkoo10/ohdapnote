@@ -144,16 +144,27 @@ export function missingNumbers(doc, { maxGap = 30 } = {}) {
     byPrefix.get(key).push(it);
   }
   for (const [key, list] of byPrefix) {
+    const reported = new Map(); // 번호 → 이미 빠졌다고 알린 쪽 (같은 번호를 두 번 알리지 않게)
     for (let i = 1; i < list.length; i++) {
       const prev = list[i - 1];
       const it = list[i];
       if (!(it.num > prev.num + 1) || it.num - prev.num - 1 > maxGap) continue;
       const page = it.page;
       if (doc.pageInfo?.[page]?.ok || doc.pageInfo?.[prev.page]?.ok) continue;
-      // 가까운 곳(앞뒤 maxGap 문항)에 이미 있는 번호는 빠진 게 아님 (번호 하나만 잘못 읽은 경우)
-      const near = new Set(list.slice(Math.max(0, i - maxGap), i + maxGap).map((x) => x.num));
+      // 가까운 곳(앞뒤 쪽, 앞뒤 maxGap 문항)에 이미 있는 번호는 빠진 게 아님 (번호 하나만 잘못 읽은 경우)
+      // 단원이 바뀌어 1번부터 다시 시작하는 먼 쪽의 번호는 세지 않음
+      const near = new Set(
+        list
+          .slice(Math.max(0, i - maxGap), i + maxGap)
+          .filter((x) => x.page >= prev.page - 1 && x.page <= it.page + 1)
+          .map((x) => x.num),
+      );
       const miss = [];
-      for (let n = prev.num + 1; n < it.num; n++) if (!near.has(n)) miss.push(n);
+      for (let n = prev.num + 1; n < it.num; n++) {
+        if (near.has(n) || Math.abs((reported.get(n) ?? -99) - page) <= 1) continue;
+        reported.set(n, page);
+        miss.push(n);
+      }
       if (!miss.length) continue;
       if (!out.has(page)) out.set(page, []);
       for (const n of miss) {

@@ -62,3 +62,12 @@ test('missingNumbers: 번호 하나만 잘못 읽은 경우(1, 9, 3, 4 …)는 9
   const m = missingNumbers(doc);
   assert.deepEqual([...m.values()].flat().map((x) => x.num), [2]);
 });
+
+test('missingNumbers: 다음 단원(멀리 떨어진 쪽)의 같은 번호 때문에 빠진 번호를 놓치지 않음', () => {
+  const doc = { items: [item(0, 1, 0.1), item(0, 9, 0.2), ...[3, 4, 5, 6, 7, 8].map((n) => item(0, n, n / 10)), item(1, 9), item(1, 10, 0.3), item(4, 1, 0.1), item(4, 2, 0.2), item(4, 3, 0.3)], pageInfo: {} };
+  assert.deepEqual([...missingNumbers(doc).values()].flat().map((x) => x.num), [2]);
+  // 진짜로 여러 개가 빠졌으면 한 번씩만 알림
+  const doc2 = { items: [item(0, 1, 0.1), item(0, 2, 0.2), item(0, 6, 0.3), item(1, 3), item(1, 7, 0.3)], pageInfo: {} };
+  const nums = [...missingNumbers(doc2).values()].flat().map((x) => x.num);
+  assert.equal(new Set(nums).size, nums.length);
+});
