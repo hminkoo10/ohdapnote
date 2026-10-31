@@ -20,9 +20,11 @@ jobs:
       - run: npm test
 
   # 설치 파일이 잘 만들어지는지 확인하고, 시험용 설치 파일을 Artifacts 로 올립니다(릴리스는 하지 않음).
+  # main 은 Release 워크플로가 빌드·배포하므로 여기서는 건너뜀
   build-windows:
     runs-on: windows-latest
     needs: test
+    if: github.ref != 'refs/heads/main'
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
