@@ -23,6 +23,9 @@ if (process.env.OHDAP_USER_DATA) {
   app.setPath('userData', process.env.OHDAP_USER_DATA);
 }
 
+// 작업이 끝났다는 윈도우 알림이 설치한 바로가기(appId)와 같은 앱으로 뜨게
+if (process.platform === 'win32') app.setAppUserModelId('io.github.hminkoo10.ohdapnote');
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'app',

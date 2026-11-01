@@ -3,7 +3,7 @@
 import { h, clear, toast, confirmDialog, debounce, formatDate, icon, animateOut } from './ui.js';
 import { analyzeDocument, parsePageRange, reanalyzeSinglePage, replacePageItems } from './analyze.js';
 import { ROLES, ROLE_NAME, newDoc, pageLabel, bookPage, computeMatches, normalizeDoc, findItem, flaggedPages, missingNumbers, missingCount } from './store.js';
-import { api, state, nav, leaveHooks, makeSaver, getSource, getSources, dropSources, clearPreviewCache, renderPreview, renderQTable, runGeminiPages, geminiReady } from './shared.js';
+import { api, state, nav, leaveHooks, makeSaver, getSource, getSources, dropSources, clearPreviewCache, renderPreview, renderQTable, runGeminiPages, geminiReady, jobs, findJob, startJob, holdBook, holdSource, liveBook } from './shared.js';
 import { topbar, renderUpdateBadge } from './chrome.js';
 import { createEditor } from './editor.js';
 import { placeSegThumb } from './home.js';
@@ -17,7 +17,6 @@ const bs = {
   tab: 'result', // result | review
   role: 'problem', // 인식 결과에서 보는 쪽
   focus: null,
-  busy: null, // {role, label, done, total, abort}
   pendingRenames: {},
   pendingRemoved: [],
 };
@@ -30,6 +29,38 @@ window.addEventListener('beforeunload', () => {
     api.saveBookSync(bs.book);
   }
 });
+
+// ---------------------------------------------------------------------------
+// 뒤에서 도는 작업 (분석은 화면을 떠나도 계속 — shared.js 의 startJob)
+// ---------------------------------------------------------------------------
+const analysisKey = (id, role) => `analyze:${id}:${role}`;
+/** 이 책에서 도는 분석 (한 책에 하나만) */
+const analysisJob = (b = bs.book) => (b ? findJob(analysisKey(b.id, 'problem')) || findJob(analysisKey(b.id, 'answer')) : null);
+/** 이 책에 도는 작업(분석·Gemini)이 있으면 파일 바꾸기·분석을 막음 */
+const bookBusy = (b = bs.book) => !!b && [...jobs.values()].some((j) => j.bookId === b.id);
+/** 지금 이 책 화면인지 */
+const onBook = (b) => state.view === 'book' && !!b && bs.book === b;
+
+/** 작업 결과 저장: 그 책 화면이면 화면과 같이, 떠났으면 그 책만 (지금 열린 다른 화면은 건드리지 않음) */
+async function saveJobBook(b) {
+  if (bs.book === b) {
+    rematch();
+    await saver.flush();
+    return;
+  }
+  b.updatedAt = Date.now();
+  await api.saveBook(b).catch((err) => toast(`${b.name}: 저장하지 못했어요: ${err.message}`, { type: 'error', timeout: 8000 }));
+}
+
+/** 작업이 바꾼 문항 ID 를 오답노트에도 (그 책 화면이면 평소처럼 모아서) */
+function noteRenamesFor(b, renames, removed = []) {
+  if (bs.book === b) return noteRenames(renames, removed);
+  if (!Object.keys(renames || {}).length && !removed.length) return;
+  const run = () => api.renameBookItems(b.id, renames || {}, removed).catch((err) => console.error(err));
+  // 오답노트 화면이 열려 있으면 그 화면이 나가면서 저장할 때 덮어쓰지 않게, 나간 뒤에
+  if (state.view === 'note') leaveHooks.add(run);
+  else run();
+}
 
 function markDirty() {
   saver.dirty();
@@ -56,18 +87,19 @@ function rematch() {
 }
 
 export async function openBook(id, { tab, role, page, itemId } = {}) {
-  const book = await api.getBook(id);
+  // 뒤에서 작업 중인 책이면 그 작업이 들고 있는 책을 그대로 씀 (저장된 예전 것을 열어 서로 덮어쓰지 않게)
+  const book = liveBook(id) || (await api.getBook(id));
   book.docs ||= { problem: null, answer: null };
   book.answerOverrides ||= {};
   bs.book = book;
   bs.tab = tab || 'result';
   bs.role = role || (book.docs.problem ? 'problem' : book.docs.answer ? 'answer' : 'problem');
   bs.focus = null;
-  bs.busy = null;
   saver.set(book);
   state.view = 'book';
   leaveHooks.add(async () => {
-    bs.busy?.abort?.abort();
+    const job = analysisJob(book);
+    if (job && !job.cancelled) toast(`${ROLE_NAME[job.role]} 분석은 뒤에서 계속해요. 위쪽 막대에서 진행 상황을 볼 수 있어요.`);
     saver.cancel();
     await saver.flush();
     flushRenamesSoon.cancel();
@@ -145,7 +177,9 @@ function docCard(role, i) {
   const b = bs.book;
   const doc = b.docs[role];
   const src = bs.sources[role];
-  const busy = bs.busy && bs.busy.role === role;
+  const job = analysisJob();
+  const busy = job?.role === role;
+  const locked = bookBusy();
   const card = h(`div.doc-card${doc ? '' : '.empty'}${role === 'answer' ? '.teal' : ''}`, { dataset: { role }, style: { '--i': i } });
 
   const pick = async () => {
@@ -169,7 +203,7 @@ function docCard(role, i) {
       'div.doc-head',
       h('span.doc-icon', icon(role === 'problem' ? 'book' : 'bookCheck')),
       h('div.doc-titles', h('div.doc-title', ROLE_NAME[role]), doc ? h('div.doc-file', { title: doc.originalName }, doc.originalName, h('span.muted', src ? ` · ${src.numPages}쪽` : ' · 여는 중…')) : h('div.doc-file.muted', '아직 파일이 없어요')),
-      doc ? h('button.btn.btn-ghost.btn-small', { onclick: pick, disabled: !!bs.busy }, icon('refresh'), '파일 바꾸기') : null,
+      doc ? h('button.btn.btn-ghost.btn-small', { onclick: pick, disabled: locked }, icon('refresh'), '파일 바꾸기') : null,
     ),
   );
 
@@ -177,7 +211,7 @@ function docCard(role, i) {
     card.append(
       h(
         'button.drop-zone',
-        { onclick: pick, disabled: !!bs.busy },
+        { onclick: pick, disabled: locked },
         h('span.dz-icon', icon('upload')),
         h('div.dz-title', '파일을 끌어오거나 눌러서 고르기'),
         h('div.muted.small', 'PDF 한 개, 또는 사진(JPG·PNG) 여러 장'),
@@ -248,12 +282,17 @@ function docCard(role, i) {
   const missing = role === 'problem' ? missingCount(doc) : 0;
   let foot;
   if (busy) {
-    const bb = bs.busy;
-    const pct = bb.total ? Math.round((bb.done / bb.total) * 100) : 0;
+    const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
     foot = h(
       'div.doc-foot.busy',
-      h('div.doc-progress', h('div.progress', h('div.progress-bar', { style: { width: `${pct}%` } })), h('div.small.num.progress-label', `${bb.label} (${bb.done}/${bb.total})`)),
-      h('button.btn.btn-small', { onclick: () => bb.abort.abort() }, icon('stop'), '멈추기'),
+      h('div.doc-progress', h('div.progress', h('div.progress-bar', { style: { width: `${pct}%` } })), h('div.small.num.progress-label', `${job.label} (${job.done}/${job.total})`)),
+      h('button.btn.btn-small', { onclick: () => job.cancel() }, icon('stop'), '멈추기'),
+      h(
+        'button.btn.btn-small.btn-primary.bg-btn',
+        { onclick: () => nav.home({ tab: 'books' }), title: '분석은 계속하고 책장으로 나가요. 다른 책이나 오답노트를 보는 동안 위쪽 막대에서 진행 상황을 볼 수 있어요.' },
+        icon('collapse'),
+        '백그라운드에서 계속',
+      ),
     );
   } else {
     foot = h(
@@ -269,7 +308,7 @@ function docCard(role, i) {
         : h('div.doc-summary.muted', '아직 분석 전이에요.'),
       h(
         `button.btn${doc.analyzedAt ? '' : '.btn-primary'}`,
-        { onclick: () => analyzeRole(role), disabled: !!bs.busy || !src },
+        { onclick: () => analyzeRole(role), disabled: locked || !src },
         icon('scan'),
         doc.analyzedAt ? '다시 분석' : `${ROLE_NAME[role]} 분석`,
       ),
@@ -287,6 +326,10 @@ function showResult(role) {
 
 async function importFiles(role, paths) {
   const b = bs.book;
+  if (bookBusy(b)) {
+    toast('이 책의 작업이 끝난 뒤에 파일을 바꿔 주세요.');
+    return;
+  }
   const old = b.docs[role];
   if (old?.items?.length && !(await confirmDialog(`${ROLE_NAME[role]} 파일을 바꾸면 기존 분석 결과가 지워집니다. 계속할까요?`, { ok: '바꾸기', danger: true }))) return;
   const pdfs = paths.filter((x) => /\.pdf$/i.test(x));
@@ -317,6 +360,13 @@ async function analyzeRole(role) {
   const doc = b.docs[role];
   const src = bs.sources[role];
   if (!doc || !src) return;
+  const running = analysisJob(b) || [...jobs.values()].find((j) => j.bookId === b.id);
+  if (running) {
+    // 이 책에서 도는 작업이 있으면 새로 시작하지 않고 그것을 보여 줌 (분석은 이 카드, Gemini 는 그 창)
+    if (running === analysisJob(b)) render();
+    else running.open();
+    return;
+  }
   if (doc.edited && !(await confirmDialog(`${ROLE_NAME[role]}에서 직접 고친 내용이 있습니다. 다시 분석하면 사라집니다. 계속할까요?`, { ok: '다시 분석', danger: true }))) return;
   let pages;
   try {
@@ -329,19 +379,33 @@ async function analyzeRole(role) {
     toast('분석할 쪽이 없어요. 쪽 범위를 확인해 주세요.', { type: 'error' });
     return;
   }
+  // 화면을 떠나도 계속 돌고(위쪽 막대에 표시), 결과는 이 책(b)에만 씀
   const abort = new AbortController();
-  bs.busy = { role, label: '준비 중', done: 0, total: pages.length, abort };
+  const job = startJob({
+    key: analysisKey(b.id, role),
+    title: `${b.name} · ${ROLE_NAME[role]} 분석`,
+    bookId: b.id,
+    role,
+    abort,
+    here: () => onBook(b),
+    open: () => nav.book(b.id, { role }),
+    label: '준비 중',
+    total: pages.length,
+  });
+  const releaseBook = holdBook(b);
+  const releaseSrc = holdSource(b, role);
   render();
   const t0 = Date.now();
   const updateProgress = debounce(() => {
-    const el = document.querySelector(`.doc-card[data-role="${role}"] .doc-foot`);
-    if (!el || !bs.busy) return;
-    const bb = bs.busy;
-    const pct = bb.total ? Math.round((bb.done / bb.total) * 100) : 0;
+    if (!onBook(b)) return; // 다른 화면(다른 책)에 쓰지 않게
+    const el = document.querySelector(`.doc-card[data-role="${role}"] .doc-foot.busy`);
+    if (!el) return;
+    const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
     el.querySelector('.progress-bar')?.style.setProperty('width', `${pct}%`);
     const t = el.querySelector('.progress-label');
-    if (t) t.textContent = `${bb.label} (${bb.done}/${bb.total})`;
+    if (t) t.textContent = `${job.label} (${job.done}/${job.total})`;
   }, 50);
+  const openAction = [{ label: '책 열기', onClick: () => nav.book(b.id, { role }) }];
   try {
     const before = (doc.items || []).map((it) => it.id);
     const res = await analyzeDocument(src, {
@@ -352,7 +416,7 @@ async function analyzeRole(role) {
       ocrLang: state.settings.ocrLang,
       signal: abort.signal,
       onProgress: ({ done, total, message }) => {
-        Object.assign(bs.busy, { done, total, label: message });
+        job.progress({ done, total, label: message });
         updateProgress();
       },
     });
@@ -366,27 +430,32 @@ async function analyzeRole(role) {
     const ids = new Set(doc.items.map((it) => it.id));
     if (role === 'problem') {
       for (const k of Object.keys(b.answerOverrides)) if (!ids.has(k)) delete b.answerOverrides[k];
-      noteRenames({}, before.filter((id) => !ids.has(id)));
+      noteRenamesFor(b, {}, before.filter((id) => !ids.has(id)));
     } else {
       for (const [k, v] of Object.entries(b.answerOverrides)) if (v && !ids.has(v)) delete b.answerOverrides[k];
     }
     clearPreviewCache();
-    rematch();
-    await saver.flush();
+    await saveJobBook(b);
     const sec = Math.round((Date.now() - t0) / 1000);
     const flagged = flaggedPages(doc).length;
     const miss = role === 'problem' ? missingCount(doc) : 0;
-    toast(`${ROLE_NAME[role]}: ${doc.items.length}개 인식 (${sec}초${res.ocrPages ? `, OCR ${res.ocrPages}쪽` : ''})${flagged ? ` · 확인할 쪽 ${flagged}` : ''}${miss ? ` · 빠진 번호 ${miss}` : ''}`, { type: 'success', timeout: 6000 });
-    bs.role = role;
+    const msg = `${ROLE_NAME[role]}: ${doc.items.length}개 인식 (${sec}초${res.ocrPages ? `, OCR ${res.ocrPages}쪽` : ''})${flagged ? ` · 확인할 쪽 ${flagged}` : ''}${miss ? ` · 빠진 번호 ${miss}` : ''}`;
+    if (!job.finish({ message: `${b.name} · ${msg}`, actions: openAction })) toast(msg, { type: 'success', timeout: 6000 });
+    if (onBook(b)) bs.role = role;
   } catch (err) {
-    if (err?.name === 'AbortError') toast('분석을 멈췄어요.');
-    else {
+    if (err?.name === 'AbortError') {
+      job.finish();
+      toast('분석을 멈췄어요.');
+    } else {
       console.error(err);
-      toast(`분석 중 오류: ${err.message}`, { type: 'error', timeout: 10000 });
+      const msg = `분석 중 오류: ${err.message}`;
+      if (!job.finish({ message: `${b.name} · ${ROLE_NAME[role]} ${msg}`, type: 'error', actions: openAction })) toast(msg, { type: 'error', timeout: 10000 });
     }
   } finally {
-    bs.busy = null;
-    render();
+    job.finish();
+    releaseSrc();
+    releaseBook();
+    if (onBook(b)) render();
   }
 }
 
@@ -569,15 +638,18 @@ async function dismissPages(role, pages) {
 }
 
 async function sendToGemini(role, pages) {
-  await runGeminiPages(bs.book, role, pages, {
-    onDone: (changed, renames) => {
-      if (role === 'problem') noteRenames(renames);
+  const b = bs.book;
+  // 진행 창을 닫고(백그라운드에서 계속) 다른 화면으로 가도 결과는 이 책(b)에 저장
+  await runGeminiPages(b, role, pages, {
+    onDone: async (changed, renames) => {
+      if (role === 'problem') noteRenamesFor(b, renames);
       clearPreviewCache();
-      rematch();
-      markDirty();
+      await saveJobBook(b);
     },
+    open: () => nav.book(b.id, { role }),
+    isOpen: () => onBook(b),
   });
-  render();
+  if (onBook(b)) render();
 }
 
 // ===========================================================================

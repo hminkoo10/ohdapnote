@@ -1,23 +1,44 @@
-// 위쪽 막대, 업데이트 표시, 설정 창
+// 위쪽 막대, 뒤에서 도는 작업·업데이트 표시, 설정 창
 
 import { h, clear, toast, modal, icon } from './ui.js';
-import { api, state, nav, runLeaveHooks } from './shared.js';
+import { api, state, nav, runLeaveHooks, jobs, jobListeners, findJob, confirmStopJobs } from './shared.js';
 
 export const updateListeners = new Set();
 const fmtMB = (b) => (b ? `${(b / 1048576).toFixed(1)}MB` : '');
 
 export function topbar(left, right = null) {
+  const jobBadge = h('span.job-badge');
+  renderJobBadge(jobBadge);
   return h(
     'header.topbar',
     h('div.topbar-left', left),
     h(
       'div.topbar-right',
       right,
+      jobBadge,
       h('span.update-badge'),
       h('button.btn.btn-ghost#settings-btn', { onclick: () => openSettings(), title: '설정' }, icon('gear'), h('span', '설정')),
     ),
   );
 }
+
+/** 뒤에서 도는 작업 (누르면 진행 창이나 그 책 화면을 다시 열기 — 멈추기도 거기서) */
+export function renderJobBadge(el = document.querySelector('.job-badge')) {
+  if (!el) return;
+  const shown = [...jobs.values()].filter((j) => j.background);
+  for (const chip of [...el.children]) if (!shown.some((j) => j.key === chip.dataset.key)) chip.remove();
+  for (const job of shown) {
+    let chip = [...el.children].find((c) => c.dataset.key === job.key);
+    if (!chip) {
+      chip = h('button.job-chip', { dataset: { key: job.key }, onclick: () => findJob(job.key)?.open() }, h('span.job-spin'), h('span.job-name'), h('span.job-pct.num'));
+      el.append(chip);
+    }
+    chip.querySelector('.job-name').textContent = job.title;
+    chip.querySelector('.job-pct').textContent = job.total ? `${Math.round((job.done / job.total) * 100)}%` : '';
+    chip.title = `${job.title}${job.label ? ` — ${job.label}` : ''}\n눌러서 진행 상황 보기 (멈출 수도 있어요)`;
+  }
+}
+jobListeners.add(() => renderJobBadge());
 
 export function renderUpdateBadge() {
   const el = document.querySelector('.update-badge');
@@ -30,6 +51,7 @@ export function renderUpdateBadge() {
 }
 
 export async function installUpdate() {
+  if (!(await confirmStopJobs('멈추고 다시 시작'))) return;
   await runLeaveHooks();
   api.installUpdate();
 }
