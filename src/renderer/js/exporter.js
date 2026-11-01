@@ -431,23 +431,17 @@ export function makeBlocks(mode, entries, options, pageLabel) {
   const blocks = [];
   const num = (i) => (opts.renumber ? `${i + 1}.` : '');
   const where = (e) => (opts.labels ? [e.book, `${pageLabel('problem', e.problem, e)} ${itemName(e.problem)}`].filter(Boolean).join(' ') : '');
-  let lastStem = null;
-  const problemBlock = (e, i) => {
-    // 같은 공통 지문을 쓰는 문항이 이어지면 지문은 처음 한 번만
-    const stemKey = e.problem.stem?.length ? `${e.book || ''}|${JSON.stringify(e.problem.stem)}` : null;
-    const stem = stemKey && stemKey !== lastStem ? e.problem.stem : null;
-    lastStem = stemKey;
-    return {
-      kind: 'problem',
-      role: 'problem',
-      item: e.problem,
-      src: e.src?.problem,
-      stem,
-      addSpace: mode === 'problems' || mode === 'both-end',
-      num: num(i),
-      source: where(e),
-    };
-  };
+  const problemBlock = (e, i) => ({
+    kind: 'problem',
+    role: 'problem',
+    item: e.problem,
+    src: e.src?.problem,
+    // 공통 지문은 그 지문을 쓰는 문항마다 실음 (바로 앞 문항과 지문이 같아도 — 문항만 따로 풀 수 있게)
+    stem: e.problem.stem?.length ? e.problem.stem : null,
+    addSpace: mode === 'problems' || mode === 'both-end',
+    num: num(i),
+    source: where(e),
+  });
   const answerBlock = (e, i) => {
     const base = { num: num(i), source: opts.labels ? `해설 · ${where(e)}` : '해설' };
     return e.answer

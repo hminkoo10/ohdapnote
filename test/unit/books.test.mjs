@@ -47,12 +47,11 @@ test('오답노트 선택: 책별로 저장하고 사라진 문항은 빠짐', (
   assert.deepEqual(selectedItems(book, ['1:3', '0:1', '9:9']).map((it) => it.id), ['0:1', '1:3']);
 });
 
-test('makeBlocks: 같은 공통 지문은 처음 문항에만, 책이 여럿이면 출처에 책 이름', () => {
+test('makeBlocks: 같은 공통 지문이 이어져도 문항마다 지문을 실음, 책이 여럿이면 출처에 책 이름', () => {
   const stem = [{ page: 0, x: 0.1, y: 0.05, w: 0.3, h: 0.05 }];
   const e = (n, book = '') => ({ book, problem: item(0, n, 0.1 * n, { stem, stemLabel: '1~3' }), answer: null });
   const blocks = makeBlocks('problems', [e(1, '쎈'), e(2, '쎈'), e(3, '쎈')], { labels: true, renumber: true }, (r, it) => `p.${it.page + 1}`);
-  assert.equal(blocks[0].stem, stem);
-  assert.equal(blocks[1].stem, null);
+  assert.deepEqual(blocks.map((b) => b.stem), [stem, stem, stem]);
   assert.equal(blocks[0].num, '1.');
   assert.equal(blocks[0].source, '쎈 p.1 1번');
 });
