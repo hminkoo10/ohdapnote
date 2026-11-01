@@ -4,6 +4,7 @@ import { h, clear, toast, modal, confirmDialog, icon, animateOut, countUp } from
 import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS } from './exporter.js';
 import { buildHwpx, renderStack, cropImage, blockSegs } from './hwpx.js';
 import { geminiTranscribe, geminiTranscribeBatch, canvasToBase64Jpeg } from './gemini.js';
+import { transcribeParts } from './pdfmath.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOptions, aiLabel, aiModelText, jobDialog, findJob, holdSource } from './shared.js';
 import { topbar, renderUpdateBadge } from './chrome.js';
@@ -545,8 +546,8 @@ function formatHint() {
 function setFormatHint(el) {
   el.hidden = ns.note?.exportOptions.format !== 'hwpx';
   el.textContent = geminiReady()
-    ? `문제·해설을 글자와 수식으로 옮겨 한글 수식 편집기로 고칠 수 있어요 (${aiLabel()} 사용)`
-    : 'AI 를 설정하지 않으면 문항이 그림으로 들어가요 (설정에서 AI 키 입력)';
+    ? `문제·해설을 글자와 수식으로 옮겨 한글 수식 편집기로 고칠 수 있어요 (디지털 PDF 는 PDF 글자 그대로, 나머지는 ${aiLabel()} 사용)`
+    : '디지털 PDF(EBS 교재 등)는 글자와 수식으로 옮겨요. 스캔본은 AI 를 설정하지 않으면 그림으로 들어가요 (설정에서 AI 키 입력)';
 }
 
 export function renderFormatHint() {
@@ -735,7 +736,7 @@ async function doExport(mode) {
 }
 
 // ===========================================================================
-// 한글 문서(HWPX): AI 로 문항을 글자·수식으로 옮겨 넣음 (AI 설정이 없거나 못 옮긴 문항은 그림으로)
+// 한글 문서(HWPX): 문항을 글자·수식으로 옮겨 넣음 — 디지털 PDF 는 PDF 글자로, 나머지는 AI 로 (못 옮긴 문항은 그림으로)
 // ===========================================================================
 const TRANSCRIBE_WIDTH = 1500; // AI 에 보내는 그림 폭(px)
 const MAX_TRANSCRIPTS = 3000; // 책 하나에 저장해 두는 개수
@@ -780,7 +781,32 @@ function transcriptKey(block) {
 }
 
 /**
- * 1) 새로 옮길 문항을 먼저 옮겨 저장: 문항 여러 개를 한 요청에 묶고(설정 aiBatch), 요청 여러 개를 동시에(aiConcurrency)
+ * 수식 글꼴로 만든 디지털 PDF 는 AI 없이 쪽의 글자·선을 그대로 읽어 옮김. 못 하면 null
+ * 그림 상자(box)는 renderStack 으로 쌓은 그림 기준 (같은 폭·같은 틈)
+ */
+async function pdfTranscribe(segs) {
+  const scale = TRANSCRIBE_WIDTH / Math.max(...segs.map((s) => s.wPt));
+  const W = Math.max(...segs.map((s) => s.wPt * scale));
+  const H = segs.reduce((sum, s) => sum + s.hPt * scale, 0) + 12 * (segs.length - 1);
+  const parts = [];
+  let y = 0;
+  for (const s of segs) {
+    const layer = await s.src.getMathLayer?.(s.rect.page);
+    if (!layer) return null;
+    parts.push({ layer, rect: s.rect, place: { x: 0, y: y / H, w: (s.wPt * scale) / W, h: (s.hPt * scale) / H } });
+    y += s.hPt * scale + 12;
+  }
+  try {
+    return transcribeParts(parts);
+  } catch (err) {
+    console.warn('PDF 글자로 옮기지 못함', err);
+    return null;
+  }
+}
+
+/**
+ * 0) 디지털 PDF 문항은 PDF 글자로 바로 옮김 (AI 를 쓰지 않음)
+ * 1) 나머지 중 새로 옮길 문항을 먼저 AI 로 옮겨 저장: 문항 여러 개를 한 요청에 묶고(설정 aiBatch), 요청 여러 개를 동시에(aiConcurrency)
  * 2) buildHwpx 는 문항마다 transcribe 를 부르는데, 미리 옮겨 둔 결과를 그대로 씀
  */
 async function exportHwpx(blocks, entries, opts, info, jobKey) {
@@ -788,7 +814,12 @@ async function exportHwpx(blocks, entries, opts, info, jobKey) {
   for (const e of entries) for (const src of [e.src?.problem, e.src?.answer]) if (src) bookOf.set(src, e.bookId);
   // buildHwpx 가 글자로 옮기려는 문항 (그릴 영역이 있는 문제·해설)
   const work = blocks.filter((b) => (b.kind === 'problem' || b.kind === 'answer') && b.item && bookOf.has(b.src) && blockSegs(b).length);
-  const useAi = geminiReady() && work.length > 0;
+  const fromPdf = new Map(); // 문항 → PDF 글자로 옮긴 결과
+  for (const b of work) {
+    const list = await pdfTranscribe(blockSegs(b));
+    if (list) fromPdf.set(b, list);
+  }
+  const useAi = geminiReady() && work.some((b) => !fromPdf.has(b));
   const { batch: batchSize, ...ai } = aiOptions();
   const abort = new AbortController();
   const storeOf = (block) => transcripts.get(bookOf.get(block.src));
@@ -866,10 +897,6 @@ async function exportHwpx(blocks, entries, opts, info, jobKey) {
 
   const transcribe = async (block, segs) => {
     if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
-    const store = storeOf(block);
-    if (!store) return null;
-    const key = transcriptKey(block);
-    const row = ui?.row(block);
     let stack = null;
     const getStack = async () => (stack ||= await renderStack(segs, TRANSCRIBE_WIDTH));
     // 그림(그래프·도형)은 바로 잘라 두고 큰 canvas 는 버림
@@ -885,6 +912,11 @@ async function exportHwpx(blocks, entries, opts, info, jobKey) {
         },
       };
     };
+    if (fromPdf.has(block)) return finish(fromPdf.get(block));
+    const store = useAi && storeOf(block);
+    if (!store) return null;
+    const key = transcriptKey(block);
+    const row = ui?.row(block);
     const cached = store.items[key];
     if (cached?.blocks?.length) return finish(cached.blocks);
     if (failed.has(block)) return null;
@@ -923,17 +955,17 @@ async function exportHwpx(blocks, entries, opts, info, jobKey) {
   try {
     if (useAi) {
       for (const bid of new Set(work.map((b) => bookOf.get(b.src)))) await loadTranscripts(bid);
-      const pending = work.filter((b) => !storeOf(b).items[transcriptKey(b)]?.blocks?.length);
+      const pending = work.filter((b) => !fromPdf.has(b) && !storeOf(b).items[transcriptKey(b)]?.blocks?.length);
       if (pending.length) {
         ui = transcribeDialog(work, pending.length, abort, { key: jobKey, jobTitle: `${info.student ? `${info.student} · ` : ''}한글 문서 (문항 ${work.length}개)` });
         // 뒤에서 도는 동안 다른 책을 열어도 이 원본들은 닫히지 않게
         for (const e of entries) for (const role of ['problem', 'answer']) releases.push(holdSource(e.bookObj, role));
-        for (const b of work) if (!pending.includes(b)) ui.row(b).set('ok', '저장해 둔 결과');
+        for (const b of work) if (!pending.includes(b)) ui.row(b).set('ok', fromPdf.has(b) ? 'PDF 글자로 옮김' : '저장해 둔 결과');
         await prefetch(pending);
         ui.status('한글 문서를 만드는 중…');
       }
     }
-    const bytes = await buildHwpx({ blocks, options: opts, title: info.title, info, transcribe: useAi ? transcribe : null });
+    const bytes = await buildHwpx({ blocks, options: opts, title: info.title, info, transcribe: useAi || fromPdf.size ? transcribe : null });
     bytes.job = ui; // 옮기기 창을 띄웠으면 부른 쪽이 finish() — 앞에 보이면 창을 닫고, 뒤로 보내 두었으면 [저장하기] 알림
     return bytes;
   } catch (err) {

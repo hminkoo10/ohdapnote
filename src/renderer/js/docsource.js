@@ -2,6 +2,7 @@
 // 모든 좌표는 페이지 크기에 대한 비율(0~1, y 는 위→아래)로 다룹니다.
 
 import * as pdfjsLib from '../vendor/pdfjs/pdf.min.mjs';
+import { readPageLayer } from './pdfmath.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdfjs/pdf.worker.min.mjs', import.meta.url).href;
 
@@ -13,6 +14,7 @@ const PDF_OPTIONS = {
   iccUrl: new URL('../vendor/pdfjs/iccs/', import.meta.url).href,
   isEvalSupported: false,
   enableXfa: false,
+  fontExtraProperties: true, // 글꼴 이름(수식 글꼴 EH… 구분)을 읽으려고
 };
 
 /** 이미지 페이지의 가상 폭(pt). A4 폭에 맞춰 크기를 정규화합니다. */
@@ -54,6 +56,7 @@ export class DocSource {
     this._pdfDocs = new Map();
     this._images = new Map();
     this._pageCache = new Map();
+    this._mathLayers = new Map();
     this._tasks = [];
     this._hiddenStreak = new Map(); // 파일별: 연달아 "숨은 OCR 글자뿐"이었던 쪽 수
   }
@@ -266,6 +269,18 @@ export class DocSource {
     return hidden > 0 && shown === 0;
   }
 
+  /** 쪽의 글자(글꼴·위치)·선·도형 — PDF 글자로 수식까지 옮기기용. 이미지 쪽이거나 못 읽으면 null */
+  async getMathLayer(i) {
+    const p = this.pages[i];
+    if (!p || p.kind !== 'pdf') return null;
+    if (!this._mathLayers.has(i)) {
+      this._mathLayers.set(i, this.getPdfPage(i).then((page) => readPageLayer(page, pdfjsLib)).catch(() => null));
+      // 메모리를 위해 최근 쪽 몇 개만 유지
+      if (this._mathLayers.size > 16) this._mathLayers.delete(this._mathLayers.keys().next().value);
+    }
+    return this._mathLayers.get(i);
+  }
+
   /** 내보내기용: 원본 파일 바이트 */
   async getFileBytes(fileIndex) {
     return fetchBytes(this.urlFor(this.files[fileIndex].name));
@@ -274,6 +289,7 @@ export class DocSource {
   async destroy() {
     for (const page of this._pageCache.values()) page.cleanup();
     this._pageCache.clear();
+    this._mathLayers.clear();
     for (const task of this._tasks) await task.destroy?.();
     this._tasks = [];
     this._pdfDocs.clear();
