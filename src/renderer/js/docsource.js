@@ -240,9 +240,10 @@ export class DocSource {
 
   async _checkHiddenText(i) {
     const page = await this.getPdfPage(i);
-    let ops;
+    // 방금 그린 쪽이면 pdf.js 가 그릴 때 받아 둔 명령 목록을 그대로 씀 (다시 받으면 도형이 많은 쪽은 0.3초쯤 걸림)
+    let ops = [...(page._intentStates?.values() || [])].find((s) => s.operatorList?.lastChunk)?.operatorList;
     try {
-      ops = await page.getOperatorList();
+      ops ||= await page.getOperatorList();
     } catch {
       return false;
     }
