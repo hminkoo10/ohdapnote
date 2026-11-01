@@ -6,7 +6,7 @@
 //  3) 페이지마다 번호가 1씩 증가하는 가장 그럴듯한 사슬을 동적계획법으로 선택
 //  4) 번호 위치와 단 정보로 문항 영역(사각형들)을 계산
 
-import { trimRect } from './layout.js';
+import { trimRect, cutAbove } from './layout.js';
 
 /** @typedef {{str:string,x0:number,y0:number,x1:number,y1:number,conf?:number}} Token */
 
@@ -147,6 +147,10 @@ export function parseNumberWord(str) {
 /** 번호 앞에 붙는 말머리 (같은 줄, 바로 뒤에 번호) */
 export const PREFIXES = ['예제', '유제', '필수예제', '대표예제', '기본예제', '발전예제', '확인문제', '확인체크', '개념확인', '필수유형', '대표문제'];
 const HANGUL = /[가-힣]/g;
+/** 수식 줄의 시작(숫자 뒤 연산·비교 기호). 빼기(−)는 문제 첫머리의 음수일 수 있어서 넣지 않음 */
+const OPERATOR_START = /^[=+×÷<>≤≥≠±∓·]/;
+/** 숫자 뒤에 띄어 쓴 조사·어미 — 문제 첫머리로는 오지 않음 (앞 줄에서 넘어온 수식·문장의 끝) */
+const PARTICLES = new Set(['이므로', '이고', '이다', '이며', '이면', '이라', '이라고', '이라면', '에서', '에서의', '일', '을', '를', '은', '는', '의', '와', '과', '로', '으로', '에', '이상', '이하', '미만', '초과', '만큼', '보다', '이므', '임을', '인', '이지만', '이어야', '이어서']);
 
 /**
  * 한 페이지의 번호 후보 추출
@@ -280,7 +284,11 @@ export function extractCandidates(tokens, layout, opts = {}) {
         last = L.words[j];
         const m = RANGE_RE.exec(text);
         if (m && +m[2] > +m[1] && +m[2] - +m[1] <= 40) {
-          if (!hasLeftNeighbor(w)) {
+          // 공통 지문 머리는 괄호로 싸여 있거나 단 왼쪽 끝에서 시작함
+          // (선택지 "④ ∛−27" 을 OCR 이 "3−27" 로 읽은 것 같은 줄 가운데 수식은 아님)
+          const bracketed = /^[[(【〔]/.test(m[0]) || /[\])】〕]$/.test(m[0]);
+          const atLineStart = w.x0 - cols[colOf((w.x0 + w.x1) / 2)].x0 < 0.06;
+          if ((bracketed || atLineStart) && !hasLeftNeighbor(w)) {
             const cy = (w.y0 + w.y1) / 2;
             if (!(layout?.hasHeader && cy < bodyTop) && !(layout?.hasFooter && cy > bodyBottom)) {
               ranges.push({ a: +m[1], b: +m[2], x0: w.x0, x1: last.x1, y0: Math.min(w.y0, last.y0), y1: Math.max(w.y1, last.y1), col: colOf((w.x0 + w.x1) / 2) });
@@ -294,6 +302,8 @@ export function extractCandidates(tokens, layout, opts = {}) {
   const inRangeHeader = (w) => ranges.some((r) => w.y0 < r.y1 && w.y1 > r.y0 && w.x0 >= r.x0 - 0.001 && w.x1 <= r.x1 + 0.001);
 
   const candidates = [];
+  // 번호 없이 말머리만 있는 줄 맨 앞 이름표("유제" 띠 등): 그 아래부터 새 묶음이라 앞 문항 영역을 여기서 끊음
+  const sectionLabels = [];
   for (const w of words) {
     if (headingWords.has(w) || inRangeHeader(w)) continue;
     let str = opts.ocr ? normalizeOcrWord(w.str) : w.str;
@@ -306,6 +316,11 @@ export function extractCandidates(tokens, layout, opts = {}) {
       str = glued[2] + glued[3];
     } else if (PREFIXES.includes(str)) {
       const nw = nextWord(w);
+      if (!nw || !/^[[(]?\d/.test(normalizeOcrWord(nw.str))) {
+        const cy = (w.y0 + w.y1) / 2;
+        const inBody = !(layout?.hasHeader && cy < bodyTop) && !(layout?.hasFooter && cy > bodyBottom);
+        if (inBody && !hasLeftNeighbor(w)) sectionLabels.push({ x0: w.x0, x1: w.x1, y0: w.y0, y1: w.y1, col: colOf((w.x0 + w.x1) / 2) });
+      }
       if (!nw) continue;
       prefix = str;
       numWord = nw;
@@ -313,6 +328,12 @@ export function extractCandidates(tokens, layout, opts = {}) {
     }
     const parsed = parseNumberWord(str);
     if (!parsed) continue;
+    // 바로 뒤에 =, +, × 같은 연산 기호가 오면 줄 맨 앞의 수식("1 + 2 + 3 = 6", "8 = 2³")이고,
+    // 조사·어미("8 이므로", "16 이다")가 오면 앞 줄에서 넘어온 문장 끝이라 번호가 아님
+    if (!prefix && parsed.style === 'plain') {
+      const after = (nextWord(numWord)?.str || '').replace(/[.,)]+$/, '');
+      if (OPERATOR_START.test(after) || PARTICLES.has(after)) continue;
+    }
     const cy = (w.y0 + w.y1) / 2;
     // 머리말/꼬리말(쪽번호) 제외
     if (layout?.hasHeader && cy < bodyTop) continue;
@@ -337,7 +358,35 @@ export function extractCandidates(tokens, layout, opts = {}) {
     });
   }
   candidates.sort(byReadingOrder);
-  return { candidates: dropAnswerRows(candidates), bodyH, lineCount: lines.length, headings, ranges };
+  const { kept, boxes } = dropAnswerRows(candidates);
+  return { candidates: kept, bodyH, lineCount: lines.length, headings, ranges, answerBoxes: boxes, sectionLabels };
+}
+
+/**
+ * 1단 쪽에서 문제 오른쪽에 놓인 그래프·⑤ 선택지 때문에 생긴 빈 세로 띠를 단 구분으로 잘못 본 경우 1단으로 되돌립니다.
+ * (그대로 두면 문항 영역이 그 띠에서 잘려 오른쪽의 그림·선택지·문장 끝이 빠짐)
+ * 두 단의 폭이 크게 다르고(좁은 쪽이 넓은 쪽의 60% 미만), 단 사이 세로선이 없고,
+ * 넓은 단에만 줄 맨 앞 번호가 있고 좁은 단의 왼쪽 끝에는 그와 닮은 번호가 없을 때.
+ * @param {{layout:object, candidates:object[]}} page  layout 을 고침
+ * @returns {boolean} 단을 바꿨는지 (바꿨으면 후보를 다시 뽑아야 함)
+ */
+export function mergeFigureColumns(page) {
+  const L = page.layout;
+  if (L.columns?.length !== 2 || L.inferred != null || L.gutters?.some((g) => g.rule)) return false;
+  const [a, b] = L.columns;
+  const wa = a.x1 - a.x0;
+  const wb = b.x1 - b.x0;
+  if (Math.min(wa, wb) >= 0.6 * Math.max(wa, wb)) return false;
+  const narrow = wa < wb ? 0 : 1;
+  const starts = page.candidates.filter((c) => c.col === 1 - narrow && c.relX < 0.06);
+  if (!starts.length) return false;
+  // 좁은 단 왼쪽 끝에 넓은 단 번호와 닮은(같은 글꼴, 비슷한 크기) 번호가 있으면 진짜 단
+  const alike = (c) => starts.some((s) => (!s.font || !c.font || s.font === c.font) && hOf(c) > 0.8 * hOf(s) && hOf(c) < 1.25 * hOf(s));
+  if (page.candidates.some((c) => c.col === narrow && c.relX < 0.03 && alike(c))) return false;
+  L.columns = [{ x0: Math.min(a.x0, b.x0), x1: Math.max(a.x1, b.x1) }];
+  L.gutters = [];
+  L.merged = true;
+  return true;
 }
 
 /** 한 줄(왼쪽→오른쪽) 안에서 1씩 늘어나며 이어지는 가장 긴 번호들 (정답표 한 줄: 1 ② 2 ② 3 ① 4 24 …) */
@@ -373,10 +422,13 @@ function rowsOf(cands) {
 function dropAnswerRows(cands) {
   const rows = rowsOf(cands);
   const drop = new Set();
+  const boxes = [];
   rows.forEach((row, i) => {
+    const continued = row.some((c) => drop.has(c)); // 앞 줄에서 이어진 줄 (상자는 이미 기록함)
     let run = longestRun(row, 0.09);
     if (run.length < 4) run = longestRun(row, 0.075);
     if (run.length < 3) return;
+    const group = [...row];
     row.forEach((c) => drop.add(c));
     let last = run[run.length - 1];
     let prev = row;
@@ -385,11 +437,22 @@ function dropAnswerRows(cands) {
       if (next[0].col !== row[0].col || next[0].y0 - prev[0].y0 > 3 * hOf(prev[0])) break;
       if (!next.some((c) => c.num === last.num + 1)) break;
       next.forEach((c) => drop.add(c));
+      group.push(...next);
       for (const c of next) if (c.num === last.num + 1) last = c;
       prev = next;
     }
+    // 정답 상자 자리 (문항 영역을 여기서 끊으려고)
+    if (!continued) boxes.push({
+      col: row[0].col,
+      x0: Math.min(...group.map((c) => c.x0)),
+      x1: Math.max(...group.map((c) => c.x1 ?? c.x0)),
+      y0: Math.min(...group.map((c) => c.y0)),
+      y1: Math.max(...group.map((c) => c.y0 + hOf(c))),
+      h: median(group.map(hOf)),
+      relX: Math.min(...group.map((c) => c.relX ?? 0)),
+    });
   });
-  return drop.size ? cands.filter((c) => !drop.has(c)) : cands;
+  return { kept: drop.size ? cands.filter((c) => !drop.has(c)) : cands, boxes };
 }
 
 /**
@@ -492,7 +555,14 @@ function priorWithStyle(cands, i, sig) {
   s += c.padded === sig.padded || (sig.padded && fullWidth(c) && c.digits.length === sig.digitsLen) ? 0.4 : -3.5;
   if (sig.padded && sig.digitsLen && c.digits.length !== sig.digitsLen) s -= 2.5;
   if ((c.prefix || '') !== (sig.prefix || '')) s -= 3;
-  if (sig.hRatio > 0) {
+  if (!c.ocr && sig.sizes?.length) {
+    // 글자 레이어의 글꼴 크기는 정확함: 이 체계 번호들의 어느 크기와도 8% 넘게 다르면 다른 요소(줄 맨 앞 수식, 소제목 등).
+    // 15% 넘게 다르면(개념 쪽 소제목 "3" 등) 번호가 1 이어지더라도 고르지 않음
+    const d = Math.min(...sig.sizes.map((v) => Math.abs(c.h / v - 1)));
+    if (d <= 0.04) s += 0.6;
+    else if (d > 0.15) s -= 7;
+    else if (d > 0.08) s -= 2.5;
+  } else if (sig.hRatio > 0) {
     const r = c.hRatio / sig.hRatio;
     if (c.ocr) {
       if (r > 0.85 && r < 1.2) s += 0.3;
@@ -543,11 +613,27 @@ export function chooseChain(cands, prevLast, priorFn) {
   return chain.filter((c) => prior[cands.indexOf(c)] > -2.5);
 }
 
+/**
+ * 글자 레이어 번호들의 글꼴 크기 무리 (한 체계 안에 크기가 다른 번호가 섞일 수 있음: 수능특강 유제 / Level).
+ * 4% 안쪽으로 붙은 값끼리 묶고, 전체의 15% 이상인 무리의 가운데 값만
+ */
+function sizeClusters(chosen) {
+  const hs = chosen.filter((c) => !c.ocr && c.h > 0).map((c) => c.h).sort((a, b) => a - b);
+  const groups = [];
+  for (const v of hs) {
+    const g = groups[groups.length - 1];
+    if (g && v <= g[g.length - 1] * 1.04) g.push(v);
+    else groups.push([v]);
+  }
+  return groups.filter((g) => g.length >= Math.max(2, 0.15 * hs.length)).map(median);
+}
+
 function learnSignature(chosen) {
   if (chosen.length < 3) return null;
   const fonts = chosen.map((c) => c.font).filter(Boolean);
   const fm = mode(fonts);
   return {
+    sizes: sizeClusters(chosen),
     relX: median(chosen.map((c) => c.relX)),
     style: mode(chosen.map((c) => c.style)).value,
     padded: mode(chosen.map((c) => c.padded)).value,
@@ -913,8 +999,12 @@ export function flagPages(order, anchors, layouts) {
     if (!chain.length) {
       const L = layouts.get(idx);
       const prevHas = k > 0 && (anchors.get(order[k - 1]) || []).length > 0;
-      const nextHas = k + 1 < order.length && (anchors.get(order[k + 1]) || []).length > 0;
-      if (L && !L.blank && L.inkRatio > 0.02 && prevHas && nextHas) reasons.push('번호를 찾지 못함');
+      const next = k + 1 < order.length ? anchors.get(order[k + 1]) || [] : [];
+      // 다음 쪽 번호가 체계마다 앞 쪽에서 1씩 그대로 이어지면 빠진 번호가 없음 (개념 설명 쪽 등)
+      const firstByKey = new Map();
+      for (const c of next) if (!firstByKey.has(schemeKey(c))) firstByKey.set(schemeKey(c), c.num);
+      const continues = firstByKey.size > 0 && [...firstByKey].every(([key, n]) => lastByKey.get(key) === n - 1);
+      if (L && !L.blank && L.inkRatio > 0.02 && prevHas && next.length && !continues) reasons.push('번호를 찾지 못함');
     } else {
       // 번호 체계별로 연속성 확인 (유제 1,2 와 Level 01,02 처럼 섞여 있을 수 있음)
       const byKey = new Map();
@@ -1009,16 +1099,22 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
   const items = [];
   const stems = [];
   let open = null;
-  const padOf = (a) => 0.45 * a.h + 0.004;
+  let prevCols = null;
   for (const pageIdx of order) {
     const L = layouts.get(pageIdx);
     const grid = grids.get(pageIdx);
     const chain = anchors.get(pageIdx) || [];
     if (!L || !grid || opts.stopPages?.has(pageIdx)) {
       open = null;
+      prevCols = null;
       continue;
     }
     const cols = L.columns?.length ? L.columns : [{ x0: 0, x1: 1 }];
+    // 번호가 하나도 없고 단 폭도 앞 쪽과 다른 쪽(책 끝 메모·광고 쪽 등)으로는 앞 해설이 이어지지 않음
+    // (마지막 쪽에 왼쪽 단만 차 있는 해설 끝은 단 폭이 같아서 이어짐)
+    const widthOf = (c) => c.x1 - c.x0;
+    if (!chain.length && prevCols && !cols.every((c) => prevCols.some((p) => Math.abs(widthOf(c) - widthOf(p)) <= 0.25 * widthOf(p)))) open = null;
+    prevCols = cols;
     const zones = zonesOf(L);
     zones.forEach((zone, z) => {
       if (zone.afterBand) open = null; // 단원 제목 띠 다음은 새 단원
@@ -1039,19 +1135,33 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
         // 공통 지문 머리 ([0100~0120]) — 그 아래 첫 문항 전까지가 공통 지문
         const rangesHere = (opts.ranges?.get(pageIdx) || []).filter((r) => r.col === c && r.y0 >= top - 0.01 && r.y0 < bottom);
         // 단원·유형 제목 등에서 영역을 끊음 (이 단과 가로로 겹치는 것만)
+        // 구역 아래 끝의 가로 띠는 구역 경계일 뿐이라, 이어지는 해설을 거기서 닫지 않음 (다음 단 위쪽으로 이어짐)
         const cuts = (opts.cutters?.get(pageIdx) || [])
           .filter((k) => k.x1 > col.x0 + 0.005 && k.x0 < col.x1 - 0.005)
           .map((k) => k.y0)
-          .filter((cy) => cy > top && cy < bottom && !inCol.some((a) => Math.abs(cy - a.y0) < a.h * 1.2));
+          .filter((cy) => cy > top && cy < bottom - 0.006 && !inCol.some((a) => Math.abs(cy - a.y0) < a.h * 1.2));
         const cutBetween = (ya, yb) => {
           let v = yb;
           for (const cy of cuts) if (cy > ya + 0.005 && cy < v) v = cy;
           return v;
         };
+        // 번호 위에서 끊을 자리 (글줄을 가로지르지 않게, 번호 위에 붙은 문항 코드는 그 문항으로)
+        const cutAt = new Map();
+        const cutOf = (a) => {
+          if (!cutAt.has(a)) cutAt.set(a, cutAbove(grid, a, x0, x1, top - 0.01, { minX: a.x1 ?? a.x0 }));
+          return cutAt.get(a);
+        };
 
+        // 단 맨 위가 단원 제목·정답 상자 같은 새 묶음의 시작이면 앞 해설은 여기까지
+        if (open && flow === 'continue') {
+          const startsNew = (opts.cutters?.get(pageIdx) || []).some(
+            (k) => k.kind !== 'span' && k.x1 > col.x0 + 0.005 && k.x0 < col.x1 - 0.005 && k.y0 >= top - 0.02 && k.y0 <= top + 0.006,
+          );
+          if (startsNew) open = null;
+        }
         // 단 위쪽: 이전 문항이 이어지는 부분
         if (open && flow === 'continue') {
-          const nominal = inCol.length ? inCol[0].y0 - padOf(inCol[0]) : bottom;
+          const nominal = inCol.length ? cutOf(inCol[0]) : bottom;
           const segBottom = cutBetween(top, nominal);
           if (segBottom - top > 0.01) {
             const r = trimRect(grid, { x: x0, y: top, w: x1 - x0, h: segBottom - top });
@@ -1062,18 +1172,18 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
         for (const rg of rangesHere) {
           const nextA = inCol.find((a) => a.y0 > rg.y1);
           const y0 = rg.y0 - 0.006;
-          const y1 = nextA ? nextA.y0 - padOf(nextA) : bottom;
+          const y1 = nextA ? cutOf(nextA) : bottom;
           const r = trimRect(grid, { x: x0, y: y0, w: x1 - x0, h: Math.max(0.01, y1 - y0) });
           if (r) stems.push({ a: rg.a, b: rg.b, y: rg.y0, page: pageIdx, z, c, rect: { page: pageIdx, ...r } });
         }
         for (let ri = 0; ri < rows.length; ri++) {
           const row = rows[ri];
           const nextRow = rows[ri + 1];
-          const nominal = nextRow ? Math.min(...nextRow.map((b) => b.y0 - padOf(b))) : bottom;
+          const nominal = nextRow ? Math.min(...nextRow.map(cutOf)) : bottom;
           for (let k = 0; k < row.length; k++) {
             const a = row[k];
             const right = row[k + 1];
-            const y0 = Math.max(top - 0.01, a.y0 - padOf(a));
+            const y0 = Math.max(top - 0.01, cutOf(a));
             const y1 = cutBetween(y0, nominal);
             const rx0 = k === 0 ? Math.min(x0, a.x0 - 0.004) : a.x0 - 0.004;
             const rx1 = right ? right.x0 - 0.004 : x1;

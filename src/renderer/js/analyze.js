@@ -1,7 +1,7 @@
 // 문서 분석 파이프라인: 렌더링 → 레이아웃 → (텍스트 | OCR) → 번호 선택 → 영역 계산
 // (Gemini 는 사용자가 고른 쪽만 따로: detectPageWithGemini)
 
-import { analyzeLayout, inkGridFromCanvas, trimRect, inkCount, findLabelBlocks } from './layout.js';
+import { analyzeLayout, inkGridFromCanvas, trimRect, inkCount, findLabelBlocks, cutAbove, snapUpToGap } from './layout.js';
 import {
   extractCandidates,
   selectAnchors,
@@ -19,6 +19,7 @@ import {
   dropStrayRuns,
   byReadingOrder,
   schemeKey,
+  mergeFigureColumns,
 } from './detect.js';
 import { recognizeWords, recognizeLine, OCR_WORKERS } from './ocr.js';
 import { geminiDetect, canvasToBase64Jpeg } from './gemini.js';
@@ -89,7 +90,7 @@ function splitAt(page, mx) {
 
 function inferColumnsFromCandidates(page, splitHint = null) {
   const L = page.layout;
-  if (L.columns.length !== 1) return false;
+  if (L.columns.length !== 1 || L.merged) return false;
   const col = L.columns[0];
   const width = col.x1 - col.x0;
   if (width < 0.55) return false;
@@ -134,10 +135,12 @@ async function readPage(src, index, { forceOcr = false, ocrFallback = true, deep
     page.candidates = ex.candidates;
     page.headings = ex.headings;
     page.ranges = ex.ranges;
+    page.answerBoxes = ex.answerBoxes;
+    page.sectionLabels = ex.sectionLabels;
   };
   if (textChars >= 30) {
     runText();
-    if (inferColumnsFromCandidates(page, splitHint)) runText();
+    if (inferColumnsFromCandidates(page, splitHint) || mergeFigureColumns(page)) runText();
     promoteFullWidthHeadings(page);
     for (const t of tokens) {
       const cy = (t.y0 + t.y1) / 2;
@@ -201,22 +204,31 @@ function extractOcr(page) {
     const cy = (c.y0 + c.y1) / 2;
     return !c.prefix && hangul.some((t) => cx > t.x0 && cx < t.x1 && cy > t.y0 && cy < t.y1 && !t.str.startsWith(c.digits));
   };
+  const boxes = [];
+  const labels = [];
+  const near = (p, q) => Math.abs(p.y0 - q.y0) < 0.01 && Math.abs(p.x0 - q.x0) < 0.03;
   for (const toks of page.ocrPasses) {
     const ex = extractCandidates(toks, page.layout, { ocr: true });
     page.bodyH ||= ex.bodyH;
     for (const c of ex.candidates) if (!onHangul(c) && !cands.some((d) => samePlace(c, d))) cands.push(c);
     for (const r of ex.ranges) if (!ranges.some((q) => q.a === r.a && q.b === r.b && Math.abs(q.y0 - r.y0) < 0.01)) ranges.push(r);
+    for (const b of ex.answerBoxes) if (!boxes.some((q) => near(q, b))) boxes.push(b);
+    for (const l of ex.sectionLabels) if (!labels.some((q) => near(q, l))) labels.push(l);
   }
   const text = page.textCands || [];
   page.source = text.length ? 'text' : 'ocr';
   page.candidates = [...text, ...cands.filter((o) => !text.some((t) => samePlace(t, o)))].sort(byReadingOrder);
-  if (!text.length) page.ranges = ranges;
+  if (!text.length) {
+    page.ranges = ranges;
+    page.answerBoxes = boxes;
+    page.sectionLabels = labels;
+  }
 }
 
 /** OCR 결과를 쪽에 반영 (단 구분을 번호 위치로 보정) */
 function applyOcr(page, splitHint = null) {
   extractOcr(page);
-  if (inferColumnsFromCandidates(page, splitHint)) extractOcr(page);
+  if (inferColumnsFromCandidates(page, splitHint) || mergeFigureColumns(page)) extractOcr(page);
   const L = page.layout;
   if (page.source === 'ocr' && !page.footerNumbers.length) {
     for (const t of page.ocrPasses[0] || []) {
@@ -768,6 +780,14 @@ export async function analyzeDocument(src, opts) {
   const cutters = buildCutters(results, anchors, signature);
   const ranges = new Map(results.filter((r) => r.ranges?.length).map((r) => [r.index, r.ranges]));
   let items = computeItems(pages, anchors, layouts, grids, { flow, source: sourceMap, cutters, stopPages: tablePages, ranges });
+  // 앞 쪽 해설이 통째로 이어지는 쪽(긴 해설의 가운데 쪽)은 번호가 없는 게 맞음
+  if (flow === 'continue') {
+    const continued = new Set(items.flatMap((it) => it.rects.filter((r) => r.page !== it.page).map((r) => r.page)));
+    for (const idx of continued) {
+      const f = flags.get(idx);
+      if (f?.length === 1 && f[0] === '번호를 찾지 못함') flags.delete(idx);
+    }
+  }
 
   items = assignIds(sortItems(items));
   const pageInfo = {};
@@ -845,8 +865,20 @@ export function buildCutters(results, anchors, signature) {
     for (const c of list) add(idx, { x0: c.x0, x1: c.x1, y0: c.y0 - (0.45 * c.h + 0.004) });
   }
   for (const r of results) {
-    for (const hd of r.headings || []) add(r.index, { x0: hd.x0, x1: hd.x1, y0: hd.y0 - 0.004 });
+    // 제목 위 장식(동그라미 번호, 띠)에 걸리지 않게 그 위 빈 줄로
+    const snap = (x0, x1, y) => (r.grid ? snapUpToGap(r.grid, x0, x1, y) : y);
+    for (const hd of r.headings || []) add(r.index, { x0: hd.x0, x1: hd.x1, y0: snap(hd.x0 - 0.01, hd.x1 + 0.01, hd.y0 - 0.004) });
     for (const rg of r.ranges || []) add(r.index, { x0: rg.x0, x1: rg.x1, y0: rg.y0 - 0.006 });
+    // 번호 없는 말머리 이름표("유제" 띠): 다음 묶음의 시작
+    for (const lb of r.sectionLabels || []) add(r.index, { x0: lb.x0, x1: lb.x1, y0: snap(lb.x0 - 0.01, lb.x1 + 0.01, lb.y0 - 0.004) });
+    // 해설 중간의 작은 정답 상자("Level 1 기초 연습 / 1 ③ 2 ③ …"): 앞 해설에 딸려 오지 않게 상자 머리 위에서 끊음
+    // (단 왼쪽 끝에서 시작하는 줄만 — 그래프 눈금 "1 2 3" 같은 건 아님)
+    for (const bx of r.answerBoxes || []) {
+      if (bx.relX > 0.08) continue;
+      const col = r.layout?.columns?.[bx.col] || { x0: bx.x0, x1: bx.x1 };
+      const y = r.grid ? cutAbove(r.grid, { y0: bx.y0, h: bx.h }, col.x0 - 0.006, col.x1 + 0.006, r.layout?.bodyTop ?? 0, { maxW: 1, maxH: 3, maxGap: 2 }) : bx.y0 - 0.006;
+      add(r.index, { x0: bx.x0, x1: bx.x1, y0: y });
+    }
     // 이름표 중 문항 번호가 들어 있지 않은 것 ("0094 대표 문제" 는 문항 머리, "유형 15" 는 제목)
     const chain = anchors.get(r.index) || [];
     for (const lb of r.labels || []) {
@@ -854,7 +886,7 @@ export function buildCutters(results, anchors, signature) {
       if (!own) add(r.index, { x0: lb.x0, x1: lb.x1, y0: lb.cutY - 0.002 });
     }
     if ((r.layout?.columns?.length || 1) >= 2) {
-      for (const b of r.layout.spans || []) add(r.index, { x0: 0, x1: 1, y0: b.y0 - 0.002 });
+      for (const b of r.layout.spans || []) add(r.index, { x0: 0, x1: 1, y0: b.y0 - 0.002, kind: 'span' });
     }
   }
   return map;
