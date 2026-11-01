@@ -31,8 +31,8 @@ const busyHere = () => win.$('.doc-card[data-role="problem"] .doc-foot.busy');
 const fakeGemini = (ms) =>
   app.evaluate(({ ipcMain }, wait) => {
     globalThis.__gem = 0;
-    ipcMain.removeHandler('gemini:generate');
-    ipcMain.handle('gemini:generate', async () => {
+    ipcMain.removeHandler('ai:generate');
+    ipcMain.handle('ai:generate', async () => {
       globalThis.__gem++;
       await new Promise((r) => setTimeout(r, wait));
       const boxes = [
@@ -146,24 +146,24 @@ try {
   await win.waitForSelector('.editor-toolbar');
   await win.waitForTimeout(500);
   const bgBtn = '.gem-modal .modal-footer .btn:has-text("백그라운드에서 계속")';
-  await win.click('.editor-toolbar .btn >> text=Gemini');
+  await win.click('.editor-toolbar .btn >> text="AI"');
   await win.waitForSelector(bgBtn);
   await win.click(bgBtn);
   await win.waitForSelector('.gem-modal', { state: 'detached' });
-  await win.waitForSelector('.job-chip:has-text("Gemini")', { timeout: 3000 });
-  await win.click('.editor-toolbar .btn >> text=Gemini');
+  await win.waitForSelector('.job-chip:has-text("· AI")', { timeout: 3000 });
+  await win.click('.editor-toolbar .btn >> text="AI"');
   await win.waitForSelector(bgBtn);
   const dialogs = await win.$$eval('.gem-modal', (els) => els.length);
   if (dialogs !== 1) throw new Error(`Gemini 창이 ${dialogs}개 떴습니다`);
   await win.click(bgBtn);
   await win.waitForSelector('.gem-modal', { state: 'detached' });
-  await win.click('.job-chip:has-text("Gemini")');
+  await win.click('.job-chip:has-text("· AI")');
   await win.waitForSelector(bgBtn);
   await shot('5-gemini-reopened');
   await win.click(bgBtn);
   await win.click('#back-btn');
   await win.waitForSelector('.book-card');
-  const gemToast = win.locator('.toast', { hasText: 'Gemini 인식 끝' });
+  const gemToast = win.locator('.toast', { hasText: 'AI 인식 끝' });
   await gemToast.waitFor({ timeout: 30000 });
   console.log('    ', await gemToast.locator('.toast-msg').textContent());
   const calls = await app.evaluate(() => globalThis.__gem);
@@ -180,7 +180,7 @@ try {
   await win.click('.tabs-row .seg-tab[data-tab="review"]');
   await win.waitForSelector('.editor-toolbar');
   await win.waitForTimeout(500);
-  await win.click('.editor-toolbar .btn >> text=Gemini');
+  await win.click('.editor-toolbar .btn >> text="AI"');
   await win.click(bgBtn);
   await win.waitForSelector('.gem-modal', { state: 'detached' });
   await closeWindow();
@@ -190,7 +190,7 @@ try {
   await win.click(`${ask} .modal-footer .btn:has-text("취소")`);
   await win.waitForSelector(ask, { state: 'detached' });
   await win.waitForTimeout(500);
-  if (!(await win.$('.job-chip:has-text("Gemini")'))) throw new Error('끄기를 취소했는데 작업이 사라졌습니다');
+  if (!(await win.$('.job-chip:has-text("· AI")'))) throw new Error('끄기를 취소했는데 작업이 사라졌습니다');
   await closeWindow();
   await win.waitForSelector(ask, { timeout: 5000 });
   const gone = new Promise((r) => app.process().once('exit', r));
