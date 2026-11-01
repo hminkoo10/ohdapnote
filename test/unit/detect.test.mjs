@@ -251,6 +251,14 @@ test('dropStrayRuns: 소개 쪽 견본 번호·만화 쪽·부록 표의 동떨�
   ]);
   assert.equal(dropStrayRuns([0, 1, 2, 3, 4], book, '|0'), 4);
   assert.deepEqual([...book.values()].map((ch) => ch.length), [0, 8, 3, 0, 6]);
+  // 스캔본(OCR)도: 소개 쪽 견본 그림 속 작은 "0001 0003 0004 0005" 는 1부터라도 뺌
+  const scan = (num, h) => ({ ...mk(num), h, ocr: true });
+  const scanned = new Map([
+    [1, [1, 3, 4, 5].map((n) => scan(n, 0.0042))],
+    [8, Array.from({ length: 37 }, (_, i) => scan(i + 1, 0.011))],
+  ]);
+  assert.equal(dropStrayRuns([1, 8], scanned, '|4'), 4);
+  assert.deepEqual([...scanned.values()].map((ch) => ch.length), [0, 37]);
 });
 
 test('extractCandidates: 해설 단원 첫머리 작은 정답 상자(1 ② 2 ② 3 ① 4 24 … / 7 ① 8 ③)의 번호는 후보에서 뺌', () => {
