@@ -18,9 +18,19 @@ const BODY_H = PAGE.h - MARGIN.top - MARGIN.header - MARGIN.bottom - MARGIN.foot
 const COL_GAP = 22 * PT;
 const RASTER_DPI = 200;
 const BASE_UNIT = 1000; // 수식 글자 크기 10pt
-const FONT = '맑은 고딕';
+// 글꼴: 0 본문(바탕체 — 인쇄한 시험지처럼), 1 번호·제목·표(돋움체). 둘 다 한글에 딸려 오는 글꼴
+const FONTS = ['함초롬바탕', '함초롬돋움'];
+const SERIF = 0;
+const SANS = 1;
 const EQ_FONT = 'HancomEQN';
 const CHOICE_MARKS = '①②③④⑤⑥⑦⑧⑨⑩';
+// 색: 강조색 하나(남색)와 회색들
+const ACCENT = '#1F4E8C';
+const ACCENT_SOFT = '#EEF3FA';
+const INK = '#111111';
+const GRAY = '#8A8F98';
+const HANG = 2300; // 문항 번호 자리(내어쓰기) 폭
+const PROBLEM_GAP = 1600; // 문항 사이
 
 const NS =
   'xmlns:ha="http://www.hancom.co.kr/hwpml/2011/app" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph" xmlns:hp10="http://www.hancom.co.kr/hwpml/2016/paragraph" xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hc="http://www.hancom.co.kr/hwpml/2011/core" xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head" xmlns:hhs="http://www.hancom.co.kr/hwpml/2011/history" xmlns:hm="http://www.hancom.co.kr/hwpml/2011/master-page" xmlns:hpf="http://www.hancom.co.kr/schema/2011/hpf" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf/" xmlns:ooxmlchart="http://www.hancom.co.kr/hwpml/2016/ooxmlchart" xmlns:hwpunitchar="http://www.hancom.co.kr/hwpml/2016/HwpUnitChar" xmlns:epub="http://www.idpf.org/2007/ops" xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"';
@@ -45,8 +55,9 @@ const LANGS = ['HANGUL', 'LATIN', 'HANJA', 'JAPANESE', 'OTHER', 'SYMBOL', 'USER'
 const LANG_ATTR = ['hangul', 'latin', 'hanja', 'japanese', 'other', 'symbol', 'user'];
 const perLang = (v) => LANG_ATTR.map((k) => `${k}="${v}"`).join(' ');
 
-const CHAR_DEFAULT = { size: 1000, bold: false, color: '#000000' };
-const PARA_DEFAULT = { align: 'JUSTIFY', line: 160, prev: 0, next: 0, left: 0, indent: 0, keep: 0, tab: 0, fill: 2 };
+const CHAR_DEFAULT = { size: 1000, bold: false, color: '#000000', font: SERIF };
+// pad: 문단 테두리와 글 사이 [왼, 오른, 위, 아래]
+const PARA_DEFAULT = { align: 'JUSTIFY', line: 160, prev: 0, next: 0, left: 0, indent: 0, keep: 0, tab: 0, fill: 2, pad: [0, 0, 0, 0] };
 const NO_LINE = ['NONE', '0.1 mm', '#000000'];
 
 function makeHead() {
@@ -96,7 +107,7 @@ function fillXml(spec, id) {
 function charXml(spec, id) {
   return (
     `<hh:charPr id="${id}" height="${spec.size}" textColor="${spec.color}" shadeColor="none" useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="2">` +
-    `<hh:fontRef ${perLang(0)}/><hh:ratio ${perLang(100)}/><hh:spacing ${perLang(0)}/><hh:relSz ${perLang(100)}/><hh:offset ${perLang(0)}/>` +
+    `<hh:fontRef ${perLang(spec.font)}/><hh:ratio ${perLang(100)}/><hh:spacing ${perLang(0)}/><hh:relSz ${perLang(100)}/><hh:offset ${perLang(0)}/>` +
     (spec.bold ? '<hh:bold/>' : '') +
     '<hh:underline type="NONE" shape="SOLID" color="#000000"/><hh:strikeout shape="NONE" color="#000000"/><hh:outline type="NONE"/>' +
     '<hh:shadow type="NONE" color="#C0C0C0" offsetX="10" offsetY="10"/></hh:charPr>'
@@ -115,7 +126,7 @@ function paraXml(spec, id) {
     `<hh:breakSetting breakLatinWord="KEEP_WORD" breakNonLatinWord="KEEP_WORD" widowOrphan="0" keepWithNext="${spec.keep}" keepLines="0" pageBreakBefore="0" lineWrap="BREAK"/>` +
     '<hh:autoSpacing eAsianEng="0" eAsianNum="0"/>' +
     `<hp:switch><hp:case hp:required-namespace="${UNIT_NS}">${margin(1)}</hp:case><hp:default>${margin(2)}</hp:default></hp:switch>` +
-    `<hh:border borderFillIDRef="${spec.fill}" offsetLeft="0" offsetRight="0" offsetTop="0" offsetBottom="0" connect="0" ignoreMargin="0"/></hh:paraPr>`
+    `<hh:border borderFillIDRef="${spec.fill}" offsetLeft="${spec.pad[0]}" offsetRight="${spec.pad[1]}" offsetTop="${spec.pad[2]}" offsetBottom="${spec.pad[3]}" connect="0" ignoreMargin="0"/></hh:paraPr>`
   );
 }
 
@@ -136,7 +147,10 @@ const NUMBER_FORMATS = [
 
 function headerXml(head, pageNumChar) {
   const { fill, char, para, tab } = head.lists;
-  const font = `<hh:font id="0" face="${FONT}" type="TTF" isEmbedded="0"><hh:typeInfo familyType="FCAT_GOTHIC" weight="5" proportion="3" contrast="2" strokeVariation="0" armStyle="0" letterform="2" midline="0" xHeight="4"/></hh:font>`;
+  const font = FONTS.map(
+    (face, id) =>
+      `<hh:font id="${id}" face="${face}" type="TTF" isEmbedded="0"><hh:typeInfo familyType="FCAT_GOTHIC" weight="6" proportion="4" contrast="0" strokeVariation="1" armStyle="1" letterform="1" midline="1" xHeight="1"/></hh:font>`,
+  ).join('');
   const numbering = NUMBER_FORMATS.map(([fmt, text], i) => {
     const attrs = `start="1" level="${i + 1}" align="LEFT" useInstWidth="1" autoIndent="1" widthAdjust="0" textOffsetType="PERCENT" textOffset="50" numFormat="${fmt}" charPrIDRef="4294967295" checkable="${i === 6 || i === 7 || i === 9 ? 1 : 0}"`;
     return text ? `<hh:paraHead ${attrs}>${text}</hh:paraHead>` : `<hh:paraHead ${attrs}/>`;
@@ -144,7 +158,7 @@ function headerXml(head, pageNumChar) {
   return (
     `${XML_HEAD}<hh:head ${NS} version="1.5" secCnt="1">` +
     '<hh:beginNum page="1" footnote="1" endnote="1" pic="1" tbl="1" equation="1"/><hh:refList>' +
-    `<hh:fontfaces itemCnt="${LANGS.length}">${LANGS.map((l) => `<hh:fontface lang="${l}" fontCnt="1">${font}</hh:fontface>`).join('')}</hh:fontfaces>` +
+    `<hh:fontfaces itemCnt="${LANGS.length}">${LANGS.map((l) => `<hh:fontface lang="${l}" fontCnt="${FONTS.length}">${font}</hh:fontface>`).join('')}</hh:fontfaces>` +
     `<hh:borderFills itemCnt="${fill.length}">${fill.map((s, i) => fillXml(s, i + 1)).join('')}</hh:borderFills>` +
     `<hh:charProperties itemCnt="${char.length}">${char.map(charXml).join('')}</hh:charProperties>` +
     `<hh:tabProperties itemCnt="${tab.length}">${tab.map(tabXml).join('')}</hh:tabProperties>` +
@@ -163,7 +177,8 @@ function headerXml(head, pageNumChar) {
 // ---------------------------------------------------------------------------
 // section0.xml 조각
 // ---------------------------------------------------------------------------
-function secPrXml() {
+/** @param {boolean} hideFirstHeader 첫 쪽에는 머리말을 안 보임 (첫 쪽은 시험지 머리가 있으므로) */
+function secPrXml(hideFirstHeader) {
   const note = (len, place) =>
     `<hp:autoNumFormat type="DIGIT" userChar="" prefixChar="" suffixChar=")" supscript="0"/><hp:noteLine length="${len}" type="SOLID" width="0.12 mm" color="#000000"/>` +
     `<hp:noteSpacing betweenNotes="${place === 'EACH_COLUMN' ? 283 : 0}" belowLine="567" aboveLine="850"/><hp:numbering type="CONTINUOUS" newNum="1"/><hp:placement place="${place}" beneathText="0"/>`;
@@ -172,7 +187,7 @@ function secPrXml() {
   return (
     '<hp:secPr id="" textDirection="HORIZONTAL" spaceColumns="1134" tabStop="8000" tabStopVal="4000" tabStopUnit="HWPUNIT" outlineShapeIDRef="1" memoShapeIDRef="0" textVerticalWidthHead="0" masterPageCnt="0">' +
     '<hp:grid lineGrid="0" charGrid="0" wonggojiFormat="0"/><hp:startNum pageStartsOn="BOTH" page="0" pic="0" tbl="0" equation="0"/>' +
-    '<hp:visibility hideFirstHeader="0" hideFirstFooter="0" hideFirstMasterPage="0" border="SHOW_ALL" fill="SHOW_ALL" hideFirstPageNum="0" hideFirstEmptyLine="0" showLineNumber="0"/>' +
+    `<hp:visibility hideFirstHeader="${hideFirstHeader ? 1 : 0}" hideFirstFooter="0" hideFirstMasterPage="0" border="SHOW_ALL" fill="SHOW_ALL" hideFirstPageNum="0" hideFirstEmptyLine="0" showLineNumber="0"/>` +
     '<hp:lineNumberShape restartType="0" countBy="0" distance="0" startNumber="0"/>' +
     `<hp:pagePr landscape="WIDELY" width="${PAGE.w}" height="${PAGE.h}" gutterType="LEFT_ONLY">` +
     `<hp:margin header="${MARGIN.header}" footer="${MARGIN.footer}" gutter="0" left="${MARGIN.left}" right="${MARGIN.right}" top="${MARGIN.top}" bottom="${MARGIN.bottom}"/></hp:pagePr>` +
@@ -187,6 +202,15 @@ function colPrXml(cols) {
 }
 
 const PAGE_NUM_XML = '<hp:ctrl><hp:pageNum pos="BOTTOM_CENTER" formatType="DIGIT" sideChar="-"/></hp:ctrl>';
+
+/** 머리말(둘째 쪽부터): paraXml 은 hp:p 들 */
+function headerCtrlXml(paraXml) {
+  return (
+    '<hp:ctrl><hp:header id="1" applyPageType="BOTH">' +
+    `<hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP" linkListIDRef="0" linkListNextIDRef="0" textWidth="${CONTENT_W}" textHeight="${MARGIN.header}" hasTextRef="0" hasNumRef="0">` +
+    `${paraXml}</hp:subList></hp:header></hp:ctrl>`
+  );
+}
 
 const POS_INLINE =
   '<hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>';
@@ -282,6 +306,31 @@ export function splitMath(text) {
   }
   pushText();
   return out;
+}
+
+// 공통 지문 머리의 범위 표시: [0030~0037], [30~37], ［0030～0037］, 【0030∼0037】, $[0030 \sim 0037]$ …
+const STEM_LABEL_RE = (() => {
+  const sp = '\\s*\\$?\\s*';
+  const open = '[\\[［【〔〖⟦]';
+  const close = '[\\]］】〕〗⟧]';
+  const tilde = '(?:[~～∼〜〰\\-－–—]|\\\\(?:sim|thicksim|textasciitilde)|\\\\text\\{\\s*~\\s*\\})';
+  return new RegExp(`^${sp}${open}${sp}\\d{1,5}${sp}${tilde}${sp}\\d{1,5}${sp}(?:번)?${sp}${close}${sp}`);
+})();
+
+/** 글 맨 앞의 공통 지문 범위 표시("[0030~0037]")를 뗌. 같이 떼어진 $ 가 홀수면 수식 짝이 맞게 하나 되돌림 */
+export function stripStemLabel(text) {
+  const s = String(text ?? '');
+  const m = STEM_LABEL_RE.exec(s);
+  if (!m) return s;
+  const rest = s.slice(m[0].length);
+  return (m[0].split('$').length - 1) % 2 ? `$${rest}` : rest;
+}
+
+/** 공통 지문 아래 문항 글 앞에 다시 적힌 문항 번호("0032 …")를 뗌 (세 자리 이상으로 찍힌 번호만) */
+function stripItemNumber(text, number) {
+  const n = String(number ?? '').trim();
+  if (!/^\d{3,}$/.test(n)) return text;
+  return text.replace(new RegExp(`^\\s*${n}(?:\\s*[.)]\\s*|\\s+)`), '');
 }
 
 /** 글자 폭 대충 (HWPUNIT, 10pt 기준) */
@@ -489,42 +538,47 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
     onProgress?.(++done, work.length);
   }
 
-  // ---- 2) 모양 ----
+  // ---- 2) 모양: 강조색 하나(남색) + 회색, 본문은 바탕체, 번호·제목·표는 돋움체 ----
   const head = makeHead();
+  const sans = (spec) => head.char({ font: SANS, ...spec });
   const C = {
     body: head.char({}),
-    num: head.char({ size: 1100, bold: true, color: '#111111' }),
-    numAns: head.char({ size: 1100, bold: true, color: '#0F5F58' }),
-    source: head.char({ size: 800, color: '#8A8F98' }),
-    note: head.char({ size: 900, color: '#888888' }),
-    academy: head.char({ size: 900, bold: true, color: '#555555' }),
-    date: head.char({ size: 900, color: '#777777' }),
-    title: head.char({ size: 2100, bold: true, color: '#111111' }),
-    subtitle: head.char({ size: 950, color: '#666666' }),
-    cellHead: head.char({ size: 850, bold: true, color: '#333333' }),
-    cellValue: head.char({ size: 900, color: '#111111' }),
-    section: head.char({ size: 1400, bold: true, color: '#111111' }),
+    num: sans({ size: 1150, bold: true, color: ACCENT }),
+    source: sans({ size: 800, color: GRAY }),
+    note: sans({ size: 900, color: GRAY }),
+    academy: sans({ size: 900, bold: true, color: ACCENT }),
+    date: sans({ size: 900, color: GRAY }),
+    title: sans({ size: 2000, bold: true, color: INK }),
+    subtitle: sans({ size: 950, color: '#5B6170' }),
+    cellHead: sans({ size: 850, bold: true, color: ACCENT }),
+    cellValue: sans({ size: 900, color: INK }),
+    section: sans({ size: 1300, bold: true, color: ACCENT }),
+    running: sans({ size: 800, color: GRAY }),
+    runningName: sans({ size: 800, bold: true, color: '#5B6170' }),
     tiny: head.char({ size: 300 }),
-    pageNum: head.char({ size: 900, color: '#595959' }),
+    pageNum: sans({ size: 900, color: '#595959' }),
   };
-  const gray = '#8C8C8C';
+  const solid = (width, color) => ['SOLID', width, color];
+  const cellLine = solid('0.12 mm', '#A9B4C4');
+  const allSides = (l) => ({ left: l, right: l, top: l, bottom: l });
   const F = {
-    rule: head.fill({ top: ['SOLID', '0.6 mm', '#1A1A1A'], bottom: ['SOLID', '0.12 mm', '#1A1A1A'] }),
-    sectionLine: head.fill({ bottom: ['SOLID', '0.4 mm', '#1A1A1A'] }),
+    rule: head.fill({ top: solid('0.7 mm', ACCENT), bottom: solid('0.12 mm', ACCENT) }),
+    section: head.fill({ left: solid('1.0 mm', ACCENT), face: ACCENT_SOFT }),
+    running: head.fill({ bottom: solid('0.12 mm', '#B4B4B4') }),
     stemLine: head.fill({ bottom: ['DASH', '0.12 mm', '#BFBFBF'] }),
-    cellHead: head.fill({ left: ['SOLID', '0.12 mm', gray], right: ['SOLID', '0.12 mm', gray], top: ['SOLID', '0.12 mm', gray], bottom: ['SOLID', '0.12 mm', gray], face: '#F2F2F2' }),
-    cell: head.fill({ left: ['SOLID', '0.12 mm', gray], right: ['SOLID', '0.12 mm', gray], top: ['SOLID', '0.12 mm', gray], bottom: ['SOLID', '0.12 mm', gray] }),
+    cellHead: head.fill({ ...allSides(cellLine), face: ACCENT_SOFT }),
+    cell: head.fill(allSides(cellLine)),
   };
   const PP = {
-    title: head.para({ align: 'CENTER', line: 130 }),
-    subtitle: head.para({ align: 'CENTER', line: 130, prev: 100 }),
+    title: head.para({ align: 'CENTER', line: 130, prev: 150 }),
+    subtitle: head.para({ align: 'CENTER', line: 130, prev: 150 }),
     rule: head.para({ align: 'LEFT', line: 100, prev: 500, next: 700, fill: F.rule }),
-    table: head.para({ align: 'CENTER', line: 100, next: 1200 }),
+    table: head.para({ align: 'CENTER', line: 100, next: 1400 }),
     cell: head.para({ align: 'CENTER', line: 100 }),
-    label: head.para({ align: 'LEFT', line: 130, prev: 1200, next: 250, keep: 1 }),
-    section: head.para({ align: 'LEFT', line: 130, next: 1000, fill: F.sectionLine }),
-    note: head.para({ align: 'LEFT', line: 150 }),
+    section: head.para({ align: 'LEFT', line: 130, next: 1000, fill: F.section, pad: [700, 0, 250, 250] }),
+    source: head.para({ align: 'RIGHT', line: 120, next: 0 }),
   };
+  /** 문항 안 문단: 번호 자리(hang)만큼 들여 씀. last 가 아니면 다음 문단과 같은 쪽에 */
   const content = (spec = {}, last = false) => head.para({ align: 'JUSTIFY', line: 160, next: 300, keep: last ? 0 : 1, ...spec });
 
   // ---- 3) 문단 ----
@@ -546,18 +600,31 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
   let needCols = cols > 1; // 본문 첫 문단에서 다단 시작
   let pendingBreak = false;
   let atTop = true; // 쪽 나누기 직후(아직 내용 없음)
+  const text = (s) => `<hp:t>${esc(s)}</hp:t>`;
+  const tab = (w, type) => `<hp:t><hp:tab width="${Math.max(100, Math.round(w))}" leader="0" type="${type === 'RIGHT' ? 2 : 1}"/></hp:t>`;
+  const runsXml = (runs) => runs.map((r) => (r.xml ? `<hp:run charPrIDRef="${r.cp}">${r.xml}</hp:run>` : `<hp:run charPrIDRef="${r.cp}"/>`)).join('');
+
+  // 둘째 쪽부터 머리말: 왼쪽 "학원 · 제목", 오른쪽 학생 이름, 아래 가는 선 (PDF 와 같음)
+  const runningXml = () => {
+    const left = [exam.academy, exam.title].filter(Boolean).join('  ·  ');
+    const runs = [{ cp: C.running, xml: text(left) }];
+    if (exam.student) runs.push({ cp: C.runningName, xml: tab(CONTENT_W - textWidth(left, 800) - textWidth(exam.student, 800), 'RIGHT') + text(exam.student) });
+    const pp = head.para({ align: 'LEFT', line: 130, fill: F.running, pad: [0, 0, 0, 150], tab: head.tab([{ pos: CONTENT_W, type: 'RIGHT' }]) });
+    return `<hp:p id="0" paraPrIDRef="${pp}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">${runsXml(runs)}</hp:p>`;
+  };
+
   /** runs: {cp, xml}[] (xml 은 hp:run 안쪽) */
   const addPara = (pp, runs = [], { body = true } = {}) => {
     let pre = '';
     if (first) {
-      pre = `<hp:run charPrIDRef="0">${secPrXml()}${colPrXml(1)}${PAGE_NUM_XML}</hp:run>`;
+      pre = `<hp:run charPrIDRef="0">${secPrXml(true)}${colPrXml(1)}${PAGE_NUM_XML}</hp:run><hp:run charPrIDRef="0">${headerCtrlXml(runningXml())}</hp:run>`;
       first = false;
     }
     if (body && needCols) {
       pre += `<hp:run charPrIDRef="0">${colPrXml(cols)}</hp:run>`;
       needCols = false;
     }
-    const inner = runs.length ? runs.map((r) => (r.xml ? `<hp:run charPrIDRef="${r.cp}">${r.xml}</hp:run>` : `<hp:run charPrIDRef="${r.cp}"/>`)).join('') : pre ? '' : '<hp:run charPrIDRef="0"/>';
+    const inner = runs.length ? runsXml(runs) : pre ? '' : '<hp:run charPrIDRef="0"/>';
     const brk = pendingBreak && !atTop ? 1 : 0;
     pendingBreak = false;
     atTop = false;
@@ -566,10 +633,8 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
   const breakPage = () => {
     pendingBreak = true;
   };
-  const text = (s) => `<hp:t>${esc(s)}</hp:t>`;
-  const tab = (w, type) => `<hp:t><hp:tab width="${Math.max(100, Math.round(w))}" leader="0" type="${type === 'RIGHT' ? 2 : 1}"/></hp:t>`;
 
-  // ---- 시험지 머리 (첫 쪽) ----
+  // ---- 시험지 머리 (첫 쪽): 학원 · 날짜 / 큰 제목 / 부제 / 두 줄 선 / 학원·선생님·학생·점수 칸 ----
   if (exam.academy || exam.date) {
     const tabs = head.tab([{ pos: CONTENT_W, type: 'RIGHT' }]);
     const runs = [];
@@ -592,7 +657,7 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
       { text: k, cp: C.cellHead, fill: F.cellHead, width: headW },
       { text: v || '', cp: C.cellValue, fill: F.cell, width: group - headW },
     ]);
-    addPara(PP.table, [{ cp: C.body, xml: `${tableXml(cells, 21 * PT, ids, { cellPara: PP.cell, tableFill: F.cell })}<hp:t/>` }], { body: false });
+    addPara(PP.table, [{ cp: C.body, xml: `${tableXml(cells, 22 * PT, ids, { cellPara: PP.cell, tableFill: F.cell })}<hp:t/>` }], { body: false });
   }
   preview.push(exam.title, exam.subtitle || '', '');
   atTop = true;
@@ -631,14 +696,18 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
     return items;
   };
 
-  /** 보기 ①~⑤: 한 줄에 다 들어가면 한 줄, 아니면 3개씩, 그래도 길면 하나씩 */
-  const choiceItems = (list) => {
+  /**
+   * 보기 ①~⑤를 칸에 맞춰: 다섯 개가 한 줄에 들어가면 한 줄, 아니면 3+2, 그래도 길면 하나씩
+   * 문단은 번호 자리(indent)만큼 들여 쓰고, 탭 위치는 단 왼쪽 끝에서 재므로 그만큼 더함
+   */
+  const choiceItems = (list, indent) => {
+    const width = colW - indent;
     const items = list.map((s, i) => [{ type: 'text', v: `${CHOICE_MARKS[i] || `(${i + 1})`} ` }, ...splitMath(String(s ?? '').replace(/^\s*(?:[①-⑩]|\(\s*\d+\s*\))\s*/, ''))]);
     const widths = items.map(richWidth);
     const n = items.length;
-    const perLine = [n, Math.ceil(n / 2), 1].find((k) => widths.every((w) => w <= colW / k - 500)) || 1;
-    const slot = Math.floor(colW / perLine);
-    const tabs = perLine > 1 ? head.tab(Array.from({ length: perLine - 1 }, (_, i) => ({ pos: slot * (i + 1), type: 'LEFT' }))) : 0;
+    const perLine = [n, Math.ceil(n / 2), 1].find((k) => widths.every((w) => w <= width / k - 600)) || 1;
+    const slot = Math.floor(width / perLine);
+    const tabs = perLine > 1 ? head.tab(Array.from({ length: perLine - 1 }, (_, i) => ({ pos: indent + slot * (i + 1), type: 'LEFT' }))) : 0;
     const out = [];
     for (let r = 0; r < n; r += perLine) {
       let xml = '';
@@ -656,16 +725,14 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
     return out;
   };
 
-  /** 그림을 단 폭에 맞춘 크기(HWPUNIT) */
-  const fitPic = (wPt, hPt, scale) => {
-    let w = Math.max(1, Math.round(wPt * PT * scale));
-    let h = Math.max(1, Math.round(hPt * PT * scale));
-    if (w > colW) {
-      h = Math.round((h * colW) / w);
-      w = colW;
-    }
-    return [w, h];
+  /** 그림 크기(HWPUNIT): 원래 인쇄 크기, 단 폭과 maxW·maxH 를 넘지 않게 */
+  const fitPic = (wPt, hPt, scale, maxW = colW, maxH = BODY_H) => {
+    const k = Math.min(1, maxW / Math.max(1, wPt * PT * scale), maxH / Math.max(1, hPt * PT * scale));
+    return [Math.max(1, Math.round(wPt * PT * scale * k)), Math.max(1, Math.round(hPt * PT * scale * k))];
   };
+  // 글 사이의 도형·그래프: 단 폭의 3/4(1단이면 절반), 높이 7cm 까지
+  const FIG_W = Math.round(colW * (cols > 1 ? 0.75 : 0.5));
+  const FIG_H = mm(70);
 
   for (const block of blocks) {
     if (block.kind === 'pagebreak') {
@@ -679,62 +746,81 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
       atTop = false;
       continue;
     }
-    // 라벨: 굵은 새 번호 + 회색 출처
-    if (block.num || block.source) {
-      const runs = [];
-      if (block.num) runs.push({ cp: block.kind === 'answer' ? C.numAns : C.num, xml: text(block.num) });
-      if (block.source) runs.push({ cp: C.source, xml: text(`${block.num ? '  ' : ''}${block.source}`) });
-      addPara(PP.label, runs);
-      preview.push([block.num, block.source].filter(Boolean).join(' '));
-    }
     const prep = prepared.get(block);
-    if (!prep) {
-      if (block.text) addPara(PP.note, [{ cp: C.note, xml: text(block.text) }]);
-      continue;
-    }
-    // 이 블록의 문단들: {pp(spec), runs}
+    // 번호가 있으면 첫 문단 앞에 내어 씀(번호 자리 hang), 출처는 문항 끝에 오른쪽으로 작게
+    const hang = block.num ? HANG : 0;
+    const numRun = block.num ? { cp: C.num, xml: text(block.num) + tab(HANG - textWidth(block.num, 1150), 'LEFT') } : null;
+    const sourceRun = block.source ? { cp: C.source, xml: text(block.source) } : null;
+    preview.push([block.num, block.source].filter(Boolean).join(' '));
+
+    // 이 블록의 문단들: {spec, runs, lead(첫 줄에 번호를 붙일 수 있는 글 문단)}
     const list = [];
-    if (prep.t) {
+    if (!prep) {
+      if (block.text) list.push({ spec: { align: 'LEFT' }, runs: [{ cp: C.note, xml: text(block.text) }], lead: true });
+    } else if (prep.t) {
       const maxW = Math.max(...prep.segs.map((s) => s.wPt));
       const scale = Math.min(1, colW / (maxW * PT));
+      let firstPara = true;
       for (const b of prep.t.blocks) {
         if (b.type === 'para') {
-          for (const it of paraItems(b.text)) {
-            list.push({ spec: it.kind === 'display' ? { align: 'CENTER' } : {}, runs: [{ cp: C.body, xml: richXml(it.segs) }] });
+          // 공통 지문의 "[0030~0037]" 과, 지문 아래에 다시 적힌 문항 번호는 뗌
+          let value = firstPara && block.kind === 'problem' ? stripStemLabel(b.text) : b.text;
+          if (block.stem) value = stripItemNumber(value, block.item.number);
+          firstPara = false;
+          for (const it of paraItems(value)) {
+            list.push({ spec: it.kind === 'display' ? { align: 'CENTER' } : {}, runs: [{ cp: C.body, xml: richXml(it.segs) }], lead: it.kind !== 'display' });
             preview.push(it.segs.map((sg) => sg.v).join(''));
           }
         } else if (b.type === 'math' && b.latex) {
           list.push({ spec: { align: 'CENTER' }, runs: [{ cp: C.body, xml: richXml([{ type: 'math', v: b.latex }]) }] });
         } else if (b.type === 'choices' && b.items?.length) {
-          for (const row of choiceItems(b.items)) list.push({ spec: { align: 'LEFT', tab: row.tab }, runs: [{ cp: C.body, xml: row.xml }] });
+          for (const row of choiceItems(b.items, hang)) list.push({ spec: { align: 'LEFT', tab: row.tab }, runs: [{ cp: C.body, xml: row.xml }] });
           preview.push(b.items.map((s, i) => `${CHOICE_MARKS[i] || ''} ${s}`).join('  '));
         } else if (b.type === 'figure' && b.box && prep.t.crop) {
           try {
             const img = await prep.t.crop(b.box);
-            const [w, h] = fitPic(b.box.w * maxW, (b.box.w * maxW * img.pxH) / img.pxW, scale);
-            list.push({ spec: { align: 'CENTER', line: 100 }, runs: [picRun(img, w, h)] });
+            const [w, h] = fitPic(b.box.w * maxW, (b.box.w * maxW * img.pxH) / img.pxW, scale, Math.min(FIG_W, colW - hang), FIG_H);
+            list.push({ spec: { align: 'CENTER', line: 100, prev: 200, next: 400 }, runs: [picRun(img, w, h)] });
           } catch (err) {
             console.warn('그림 자르기 실패', err);
           }
         }
       }
+      if (list.length) stats.text++;
     }
-    stats[list.length ? 'text' : 'picture']++;
-    if (!list.length) {
+    if (prep && !list.length) {
       // 그림으로: 단 폭에 맞추고, 한 쪽보다 길면 줄임
+      stats.picture++;
       const maxW = Math.max(...prep.segs.map((s) => s.wPt));
-      let scale = Math.min(1, colW / (maxW * PT));
+      let scale = Math.min(1, (colW - hang) / (maxW * PT));
       const totalH = prep.segs.reduce((s, sg) => s + sg.hPt * PT * scale, 0);
-      if (totalH > BODY_H * 0.92) scale *= (BODY_H * 0.92) / totalH;
+      if (totalH > BODY_H * 0.9) scale *= (BODY_H * 0.9) / totalH;
       for (const [i, seg] of prep.segs.entries()) {
         const img = await renderSeg(seg);
-        const [w, h] = fitPic(seg.wPt, seg.hPt, scale);
+        const [w, h] = fitPic(seg.wPt, seg.hPt, scale, colW - hang);
         const stemEnd = seg.rect.stem && prep.segs[i + 1] && !prep.segs[i + 1].rect.stem;
         list.push({ spec: { align: 'LEFT', line: 100, next: 200, fill: stemEnd ? F.stemLine : 2 }, runs: [picRun(img, w, h)] });
       }
       preview.push('[그림]');
     }
-    list.forEach((p, i) => addPara(content(p.spec, i === list.length - 1), p.runs));
+
+    // 번호: 첫 문단이 글이면 그 앞에 내어 쓰고, 아니면(그림·가운데 수식) 번호만 한 줄
+    if (numRun) {
+      if (list[0]?.lead) list[0].runs.unshift(numRun);
+      else list.unshift({ spec: { align: 'LEFT', line: 130 }, runs: [numRun], lead: true });
+    }
+    if (sourceRun) {
+      if (block.num) list.push({ pp: PP.source, runs: [sourceRun] });
+      else list.unshift({ spec: { align: 'LEFT', line: 130, next: 200 }, runs: [sourceRun] }); // 번호 없이 출처만: 위에 꼬리표처럼
+    }
+    list.forEach((p, i) => {
+      const lead = i === 0;
+      const tabs = lead && numRun ? head.tab([{ pos: HANG, type: 'LEFT' }]) : p.spec?.tab || 0;
+      const pp =
+        p.pp ??
+        content({ left: hang, ...p.spec, ...(lead ? { prev: PROBLEM_GAP } : {}), ...(lead && numRun ? { left: 0, indent: -HANG } : {}), tab: tabs }, i === list.length - 1);
+      addPara(pp, p.runs);
+    });
 
     if (block.kind === 'problem' && block.addSpace) {
       if (space.pageBreak) breakPage();

@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import zlib from 'node:zlib';
-import { buildHwpx, splitMath, crc32 } from '../../src/renderer/js/hwpx.js';
+import { buildHwpx, splitMath, crc32, stripStemLabel } from '../../src/renderer/js/hwpx.js';
+import { convertLatex } from '../../src/renderer/js/hwpeq.js';
 import { makeBlocks } from '../../src/renderer/js/exporter.js';
 
 // ---------------------------------------------------------------------------
@@ -212,7 +213,7 @@ test('hwpx: header 의 개수(itemCnt)와 모든 IDRef 가 맞음', async () => 
   }
   assert.deepEqual(all(head, 'hh:fontface').map((f) => f.attrs.lang), ['HANGUL', 'LATIN', 'HANJA', 'JAPANESE', 'OTHER', 'SYMBOL', 'USER']);
   for (const f of all(head, 'hh:fontface')) assert.equal(Number(f.attrs.fontCnt), f.children.length);
-  assert.equal(all(head, 'hh:font')[0].attrs.face, '맑은 고딕');
+  assert.deepEqual(all(head, 'hh:fontface')[0].children.map((f) => f.attrs.face), ['함초롬바탕', '함초롬돋움']);
 
   const refs = {
     charPrIDRef: ids('hh:charPr'),
@@ -370,4 +371,150 @@ test('splitMath: 글 속 수식과 따로 줄 수식', () => {
     { type: 'text', v: ' 와 ' },
     { type: 'math', v: 'b', display: true },
   ]);
+});
+
+test('stripStemLabel: 공통 지문 앞의 범위 표시만 뗌', () => {
+  const cases = [
+    ['[0030~0037] 다음 식을 간단히 하시오.', '다음 식을 간단히 하시오.'],
+    ['[30~37] 다음', '다음'],
+    ['［0030～0037］다음', '다음'],
+    ['【0030∼0037】 다음', '다음'],
+    ['〔0030 〜 0037〕 다음', '다음'],
+    ['[0030-0037] 다음', '다음'],
+    ['[0030~0037번] 다음', '다음'],
+    ['$[0030 \\sim 0037]$ 다음', '다음'],
+    ['[0030$\\sim$0037] 다음', '다음'],
+    ['[0030~0037] $a>0$ 일 때', '$a>0$ 일 때'], // 같이 떼어진 $ 는 되돌림
+    ['$[0030 \\sim 0037]$', ''],
+  ];
+  for (const [input, want] of cases) assert.equal(stripStemLabel(input), want, input);
+  for (const keep of ['[보기] 다음', '[3점] 다음', '다음 [0030~0037] 에서', '[1, 2] 에서', '$[1, 3]$ 에서 정의된', '0030 다음']) {
+    assert.equal(stripStemLabel(keep), keep);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 공통 지문: 이어지는 문항마다 지문을 싣고, 범위 표시와 다시 적힌 문항 번호는 뗌
+// ---------------------------------------------------------------------------
+test('hwpx: 공통 지문 — 문항마다 싣고 "[0030~0037]" 과 다시 적힌 번호는 뗌', async () => {
+  const STEM = [{ page: 0, x: 0.08, y: 0.02, w: 0.4, h: 0.04 }];
+  const list = ['0030', '0032', '0033'].map((n, i) => ({ bookId: 'b1', book: '', problem: { ...item(`s${n}`, n, 0, 0.1 + i * 0.1), stem: STEM }, answer: null, src: { problem: src, answer: src } }));
+  const T = {
+    s0030: [{ type: 'para', text: '[0030~0037] 다음 식을 간단히 하시오. (단, $a>0$, $b>0$)' }, { type: 'math', latex: '2^{3}' }],
+    s0032: [{ type: 'para', text: '［0030～0037］다음 식을 간단히 하시오. (단, $a>0$, $b>0$)' }, { type: 'para', text: '0032 $\\sqrt{a}$' }],
+    s0033: [{ type: 'para', text: '$[30 \\sim 37]$ 다음 식을 간단히 하시오. (단, $a>0$, $b>0$)' }, { type: 'para', text: '$b^{2}$' }],
+  };
+  const stemSegs = [];
+  const opts = { columns: 2, space: 'none', labels: true, renumber: true };
+  const bytes = await buildHwpx({
+    blocks: makeBlocks('problems', list, opts, label),
+    options: opts,
+    title: '지문',
+    info: {},
+    transcribe: async (block, segs) => {
+      stemSegs.push(segs.filter((s) => s.rect.stem).length);
+      return { blocks: T[block.item.id] };
+    },
+  });
+  // 글자로 옮길 때도 문항마다 지문 영역이 함께 감
+  assert.deepEqual(stemSegs, [1, 1, 1]);
+  const files = unzip(bytes);
+  const sec = parseXml(files.find((f) => f.name === 'Contents/section0.xml').data.toString('utf8'), 'section0');
+  const paras = sec.children.filter((c) => c.name === 'hp:p');
+  const stemParas = paras.filter((p) => textOf(p).includes('다음 식을 간단히 하시오.'));
+  assert.equal(stemParas.length, 3);
+  // (textOf 는 수식의 설명·스크립트 글자도 이어 붙임)
+  stemParas.forEach((p, i) => assert.equal(textOf(p), `${i + 1}.다음 식을 간단히 하시오. (단, 수식입니다.a>0, 수식입니다.b>0)`));
+  // 0032 는 지문 아래에 다시 적힌 문항 번호 → 뗌
+  const p32 = paras.find((p) => all(p, 'hp:script').some((s) => textOf(s) === 'sqrt {a}'));
+  assert.equal(textOf(p32), '수식입니다.sqrt {a}');
+  const prv = files.find((f) => f.name === 'Preview/PrvText.txt').data.toString('utf8');
+  assert.ok(!/0030~0037|～|30 \\sim/.test(prv), prv);
+});
+
+// ---------------------------------------------------------------------------
+// 시험지 모양
+// ---------------------------------------------------------------------------
+test('hwpx: 시험지 모양 — 번호 내어쓰기·강조색, 출처는 작고 흐리게, 둘째 쪽부터 머리말', async () => {
+  const { xml } = await build();
+  const head = xml('Contents/header.xml');
+  const sec = xml('Contents/section0.xml');
+  const charPr = new Map(all(head, 'hh:charPr').map((c) => [c.attrs.id, c]));
+  const paraPr = new Map(all(head, 'hh:paraPr').map((p) => [p.attrs.id, p]));
+  const tabPr = new Map(all(head, 'hh:tabPr').map((t) => [t.attrs.id, t]));
+  const paras = sec.children.filter((c) => c.name === 'hp:p');
+  const runOf = (p, s) => p.children.find((r) => r.name === 'hp:run' && all(r, 'hp:t').some((t) => t.text === s));
+  const margin = (p) => {
+    const m = all(paraPr.get(p.attrs.paraPrIDRef), 'hp:case')[0];
+    return Object.fromEntries(all(m, 'hh:margin')[0].children.map((c) => [c.name.slice(3), Number(c.attrs.value)]));
+  };
+
+  // 번호: 첫 글 문단 앞에 굵은 강조색으로, 내어쓰기 + 번호 자리 탭
+  const p1 = paras.find((p) => textOf(p).startsWith('1.') && textOf(p).includes('함수'));
+  assert.ok(p1, '번호와 문제 글이 한 문단');
+  const num = charPr.get(runOf(p1, '1.').attrs.charPrIDRef);
+  assert.equal(num.attrs.textColor, '#1F4E8C');
+  assert.ok(all(num, 'hh:bold').length === 1);
+  assert.ok(margin(p1).intent < 0 && margin(p1).left === 0);
+  const hang = -margin(p1).intent;
+  const tabs = all(tabPr.get(paraPr.get(p1.attrs.paraPrIDRef).attrs.tabPrIDRef), 'hp:case')[0];
+  assert.deepEqual(all(tabs, 'hh:tabItem').map((t) => Number(t.attrs.pos)), [hang]);
+  // 같은 문항의 다음 문단(보기 등)은 번호 자리만큼 들여 씀
+  const choice = paras.find((p) => textOf(p).includes('①'));
+  assert.equal(margin(choice).left, hang);
+  // 번호 글자 모양은 문항마다 같음
+  const numIds = paras.flatMap((p) => p.children.filter((r) => r.name === 'hp:run' && /^\d+\.$/.test(all(r, 'hp:t').map(textOf).join(''))).map((r) => r.attrs.charPrIDRef));
+  assert.ok(numIds.length >= 4);
+  assert.equal(new Set(numIds).size, 1);
+  // 출처: 작고 회색, 오른쪽 정렬
+  const srcPara = paras.find((p) => textOf(p) === 'p.1 3번');
+  const srcChar = charPr.get(srcPara.children[0].attrs.charPrIDRef);
+  assert.equal(srcChar.attrs.height, '800');
+  assert.equal(srcChar.attrs.textColor, '#8A8F98');
+  assert.equal(all(paraPr.get(srcPara.attrs.paraPrIDRef), 'hh:align')[0].attrs.horizontal, 'RIGHT');
+  // 본문은 바탕체, 번호는 돋움체
+  const body = charPr.get(p1.children.find((r) => r.name === 'hp:run' && r !== runOf(p1, '1.') && all(r, 'hp:t').length).attrs.charPrIDRef);
+  assert.equal(all(body, 'hh:fontRef')[0].attrs.hangul, '0');
+  assert.equal(all(num, 'hh:fontRef')[0].attrs.hangul, '1');
+  // 둘째 쪽부터 머리말 (학원 · 제목 … 학생), 첫 쪽은 숨김
+  assert.equal(all(paras[0], 'hp:visibility')[0].attrs.hideFirstHeader, '1');
+  const header = all(paras[0], 'hp:header')[0];
+  assert.ok(header);
+  assert.equal(textOf(header), '오답학원  ·  수학 <오답> & 복습홍길동');
+});
+
+test('hwpx: 보기 — 짧으면 한 줄, 중간이면 3+2, 길면 한 줄에 하나', async () => {
+  const short = ['$1$', '$2$', '$3$', '$4$', '$5$'];
+  const medium = ['$\\log_{2} 3 + 1$', '$\\log_{2} 5 + 1$', '$\\log_{2} 6 + 1$', '$\\log_{2} 7 + 1$', '$\\log_{2} 9 + 1$'];
+  const long = ['그래프는 점 $(1, 2)$를 지나고 직선 $y=x$에 대하여 대칭이다.', '둘', '셋', '넷', '다섯'];
+  const { xml } = await build({
+    mode: 'problems',
+    transcribe: async (block) => (block.item.id === 'p1' ? { blocks: [{ type: 'para', text: '보기' }, ...[short, medium, long].map((items) => ({ type: 'choices', items }))] } : null),
+  });
+  const head = xml('Contents/header.xml');
+  const sec = xml('Contents/section0.xml');
+  const paraPr = new Map(all(head, 'hh:paraPr').map((p) => [p.attrs.id, p]));
+  const tabPr = new Map(all(head, 'hh:tabPr').map((t) => [t.attrs.id, t]));
+  const rows = sec.children.filter((p) => p.name === 'hp:p' && /[①-⑤]/.test(textOf(p)));
+  const marks = rows.map((p) => textOf(p).match(/[①-⑤]/g).join(''));
+  assert.deepEqual(marks, ['①②③④⑤', '①②③', '④⑤', '①', '②', '③', '④', '⑤']);
+  assert.deepEqual(rows.map((p) => all(p, 'hp:tab').length), [4, 2, 1, 0, 0, 0, 0, 0]);
+  // 3+2 의 탭 위치: 번호 자리(들여 쓴 만큼)에서 시작해 같은 간격
+  const stops = all(all(tabPr.get(paraPr.get(rows[1].attrs.paraPrIDRef).attrs.tabPrIDRef), 'hp:case')[0], 'hh:tabItem').map((t) => Number(t.attrs.pos));
+  const left = Number(all(all(paraPr.get(rows[1].attrs.paraPrIDRef), 'hp:case')[0], 'hc:left')[0].attrs.value);
+  assert.equal(stops.length, 2);
+  assert.ok(left > 0);
+  assert.equal(stops[1] - stops[0], stops[0] - left);
+});
+
+test('hwpx: 수식 크기는 한글 수식 크기 셈(convertLatex)과 같음 — 글 속 수식이 뒤 글자와 겹치지 않게', async () => {
+  const { xml } = await build();
+  const sec = xml('Contents/section0.xml');
+  const eq = all(sec, 'hp:equation').find((e) => textOf(all(e, 'hp:script')[0]) === 'f(x)={{1} over {2}}x^{2}');
+  const want = convertLatex('f(x)=\\frac{1}{2}x^{2}');
+  const sz = all(eq, 'hp:sz')[0].attrs;
+  assert.equal(Number(sz.width), want.width);
+  assert.equal(Number(sz.height), want.height);
+  assert.equal(Number(eq.attrs.baseLine), want.baseLine);
+  assert.ok(want.width >= 5335); // 한글이 잰 폭
 });
