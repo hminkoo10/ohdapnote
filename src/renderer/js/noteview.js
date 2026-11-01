@@ -5,7 +5,7 @@ import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS }
 import { buildHwpx, renderStack, cropImage, blockSegs } from './hwpx.js';
 import { geminiTranscribe, geminiTranscribeBatch, canvasToBase64Jpeg } from './gemini.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
-import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOptions, aiLabel, aiModelText } from './shared.js';
+import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOptions, aiLabel, aiModelText, jobDialog, findJob, holdSource } from './shared.js';
 import { topbar, renderUpdateBadge } from './chrome.js';
 import { spineFor } from './home.js';
 
@@ -673,8 +673,13 @@ async function doExport(mode) {
     if (!ns.sources.has(e.bookId)) ns.sources.set(e.bookId, await getSources(e.bookObj));
     e.src = ns.sources.get(e.bookId);
   }
-  const label = (role, it, e) => pageLabel(e.bookObj.docs[role], it.page);
   const opts = n.exportOptions;
+  const jobKey = `hwpx:${n.id}`;
+  if (opts.format === 'hwpx' && findJob(jobKey)) {
+    findJob(jobKey).open(); // 이 오답노트의 한글 문서를 뒤에서 만드는 중
+    return;
+  }
+  const label = (role, it, e) => pageLabel(e.bookObj.docs[role], it.page);
   const blocks = makeBlocks(mode, entries, opts, label);
   const modeName = { problems: '문제지', answers: '해설지', 'both-inline': '문제+해설', 'both-end': '문제+해설(해설 뒤)' }[mode];
   const info = examInfo();
@@ -691,25 +696,31 @@ async function doExport(mode) {
     const fname = [safe(info.student), safe(info.title), modeName, ymd].filter(Boolean).join('_');
     let res;
     let note = '';
+    const saved = (r) => {
+      if (r.canceled) return;
+      toast(`저장했어요${note} — ${r.path}`, {
+        type: 'success',
+        timeout: 10000,
+        actions: [
+          { label: '열기', onClick: () => api.openPath(r.path) },
+          { label: '폴더 보기', onClick: () => api.showItemInFolder(r.path) },
+        ],
+      });
+    };
     if (hwpx) {
-      const bytes = await exportHwpx(blocks, entries, opts, { ...info, subtitle: sub });
+      const bytes = await exportHwpx(blocks, entries, opts, { ...info, subtitle: sub }, jobKey);
       closeToast();
       if (bytes.stats?.picture && bytes.stats?.text) note = ` (그림으로 넣은 문항 ${bytes.stats.picture}개)`;
-      res = await api.saveFile({ defaultName: `${fname}.hwpx`, data: bytes, filters: [{ name: '한글 문서', extensions: ['hwpx'] }], title: '한글 문서 저장' });
+      const save = () => api.saveFile({ defaultName: `${fname}.hwpx`, data: bytes, filters: [{ name: '한글 문서', extensions: ['hwpx'] }], title: '한글 문서 저장' });
+      // 옮기기를 뒤로 보내 둔 채 끝났으면 저장 창을 바로 띄우지 않고 알림의 [저장하기]로 (다른 화면을 보고 있을 수 있음)
+      if (bytes.job?.finish({ message: `${info.student ? `${info.student} · ` : ''}${modeName} 한글 문서가 준비됐어요`, actions: [{ label: '저장하기', onClick: async () => saved(await save()) }] })) return;
+      res = await save();
     } else {
       const bytes = await buildPdf({ blocks, options: opts, title: info.title, info: { ...info, subtitle: sub } });
       closeToast();
       res = await api.savePdf(`${fname}.pdf`, bytes);
     }
-    if (res.canceled) return;
-    toast(`저장했어요${note} — ${res.path}`, {
-      type: 'success',
-      timeout: 10000,
-      actions: [
-        { label: '열기', onClick: () => api.openPath(res.path) },
-        { label: '폴더 보기', onClick: () => api.showItemInFolder(res.path) },
-      ],
-    });
+    saved(res);
   } catch (err) {
     closeToast();
     if (err?.name === 'AbortError') {
@@ -772,7 +783,7 @@ function transcriptKey(block) {
  * 1) 새로 옮길 문항을 먼저 옮겨 저장: 문항 여러 개를 한 요청에 묶고(설정 aiBatch), 요청 여러 개를 동시에(aiConcurrency)
  * 2) buildHwpx 는 문항마다 transcribe 를 부르는데, 미리 옮겨 둔 결과를 그대로 씀
  */
-async function exportHwpx(blocks, entries, opts, info) {
+async function exportHwpx(blocks, entries, opts, info, jobKey) {
   const bookOf = new Map(); // 원본(DocSource) → 책 id
   for (const e of entries) for (const src of [e.src?.problem, e.src?.answer]) if (src) bookOf.set(src, e.bookId);
   // buildHwpx 가 글자로 옮기려는 문항 (그릴 영역이 있는 문제·해설)
@@ -784,6 +795,7 @@ async function exportHwpx(blocks, entries, opts, info) {
   const failed = new Set(); // 이번에 미리 옮기지 못한 문항 → 그림으로 (다시 묻지 않음)
   let quota = false; // 한도가 차면 나머지는 묻지 않고 그림으로
   let ui = null;
+  const releases = [];
 
   /** 새로 옮길 문항을 묶음으로 동시에 옮겨 저장 (같은 열쇠의 문항은 한 번만) */
   const prefetch = async (pending) => {
@@ -913,30 +925,28 @@ async function exportHwpx(blocks, entries, opts, info) {
       for (const bid of new Set(work.map((b) => bookOf.get(b.src)))) await loadTranscripts(bid);
       const pending = work.filter((b) => !storeOf(b).items[transcriptKey(b)]?.blocks?.length);
       if (pending.length) {
-        ui = transcribeDialog(work, pending.length, abort);
+        ui = transcribeDialog(work, pending.length, abort, { key: jobKey, jobTitle: `${info.student ? `${info.student} · ` : ''}한글 문서 (문항 ${work.length}개)` });
+        // 뒤에서 도는 동안 다른 책을 열어도 이 원본들은 닫히지 않게
+        for (const e of entries) for (const role of ['problem', 'answer']) releases.push(holdSource(e.bookObj, role));
         for (const b of work) if (!pending.includes(b)) ui.row(b).set('ok', '저장해 둔 결과');
         await prefetch(pending);
         ui.status('한글 문서를 만드는 중…');
       }
     }
-    return await buildHwpx({
-      blocks,
-      options: opts,
-      title: info.title,
-      info,
-      transcribe: useAi ? transcribe : null,
-      onProgress: (done, total) => {
-        if (done === total) ui?.close(); // 옮기기가 끝나면 창을 닫고 문서를 마저 만듦
-      },
-    });
+    const bytes = await buildHwpx({ blocks, options: opts, title: info.title, info, transcribe: useAi ? transcribe : null });
+    bytes.job = ui; // 옮기기 창을 띄웠으면 부른 쪽이 finish() — 앞에 보이면 창을 닫고, 뒤로 보내 두었으면 [저장하기] 알림
+    return bytes;
+  } catch (err) {
+    ui?.finish();
+    throw err;
   } finally {
-    ui?.close();
+    releases.forEach((release) => release());
     await saveTranscripts();
   }
 }
 
-/** 옮기는 동안 보이는 창 (문항별 상태, 진행 막대, 취소하면 바로 요청을 끊음) */
-function transcribeDialog(work, pendingCount, abort) {
+/** 옮기는 동안 보이는 창 (문항별 상태, 진행 막대). [취소]하면 바로 요청을 끊고, [백그라운드에서 계속]이면 창만 닫고 계속 */
+function transcribeDialog(work, pendingCount, abort, { key, jobTitle }) {
   const rows = new Map();
   const list = h(
     'div.gem-list',
@@ -948,8 +958,11 @@ function transcribeDialog(work, pendingCount, abort) {
   );
   const status = h('div.small.muted.gem-status', `모델: ${aiModelText()}`);
   const bar = h('div.progress-bar');
-  let finished = false;
-  modal({
+  const jd = jobDialog({
+    key,
+    abort,
+    jobTitle,
+    total: work.length,
     title: `문항 ${work.length}개를 글자·수식으로`,
     body: h(
       'div.gem-run',
@@ -960,10 +973,6 @@ function transcribeDialog(work, pendingCount, abort) {
     ),
     width: 480,
     className: 'gem-modal',
-    buttons: [{ label: '취소', value: 'cancel' }],
-    onClose: () => {
-      if (!finished) abort.abort();
-    },
   });
   return {
     row: (block) => ({
@@ -977,14 +986,17 @@ function transcribeDialog(work, pendingCount, abort) {
     }),
     status: (msg) => {
       status.textContent = msg;
+      jd.job.progress({ label: msg });
     },
     progress: (done, total) => {
       bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
+      jd.job.progress({ done, total });
     },
-    close: () => {
-      if (finished) return;
-      finished = true;
-      document.querySelector('.gem-modal')?.close?.('done');
+    /** 끝: 창이 앞에 있으면 닫고 false, 뒤로 보내 두었고 r.message 가 있으면 알림(토스트·윈도우)을 띄우고 true */
+    finish(r) {
+      const bg = jd.finish(r);
+      if (!bg) jd.close();
+      return bg;
     },
   };
 }

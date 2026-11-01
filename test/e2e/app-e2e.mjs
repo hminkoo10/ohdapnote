@@ -197,7 +197,7 @@ try {
     console.log(`    ${mode}: ${statSync(out).size} bytes`);
   }
 
-  step('한글(HWPX): 키 없음 → 그림 / 가짜 Gemini → 글자·수식(2문항씩 묶어 동시에) / 다시 내보내면 저장해 둔 결과');
+  step('한글(HWPX): 키 없음 → 그림 / 가짜 Gemini → 글자·수식(2문항씩 묶어 동시에, 뒤에서 끝나면 [저장하기] 알림) / 다시 내보내면 저장해 둔 결과');
   await win.click('.seg:has(input[name="format"]) label:has-text("한글")');
   await win.waitForSelector('.export-hint:not([hidden])');
   const hwpxPart = (file, name) => {
@@ -218,11 +218,19 @@ try {
     throw new Error(`HWPX: ${name} 없음`);
   };
   const count = (xml, tag) => (xml.match(new RegExp(`<${tag} `, 'g')) || []).length;
-  const exportHwpx = async (name) => {
+  const exportHwpx = async (name, { background = false } = {}) => {
     const out = join(OUT, name);
     rmSync(out, { force: true });
     await stubSave(out);
     await win.click('.export-btn[data-mode="problems"]');
+    if (background) {
+      // 옮기는 창에서 [백그라운드에서 계속] → 위쪽 막대에 보이고, 끝나면 저장 창 대신 [저장하기] 알림
+      await win.click('.gem-modal .modal-footer .btn >> text=백그라운드에서 계속');
+      await win.waitForSelector('.job-chip', { timeout: 5000 });
+      await waitToast('한글 문서가 준비됐어요', 120000);
+      if (existsSync(out)) throw new Error('뒤에서 끝났는데 저장 창을 바로 띄웠습니다');
+      await win.click('.toast .toast-actions .btn >> text=저장하기');
+    }
     await waitToast('저장했어요', 120000);
     await clearToasts();
     const sec = hwpxPart(out, 'Contents/section0.xml');
@@ -262,7 +270,7 @@ try {
   await win.fill('.settings .set-adv input[type="number"] >> nth=1', '2');
   await win.click('.modal-footer .btn-primary');
   await win.waitForSelector('.export-hint:has-text("Gemini 사용")', { timeout: 10000 });
-  const rich = await exportHwpx('app-export-text.hwpx');
+  const rich = await exportHwpx('app-export-text.hwpx', { background: true });
   if (count(rich, 'hp:equation') < 4 * 7 || !rich.includes('root {3} of {8}') || count(rich, 'hp:pic') !== 4) throw new Error('Gemini 결과가 글자·수식으로 들어가지 않았습니다');
   const calls1 = await app.evaluate(() => globalThis.gemCalls);
   const maxInFlight = await app.evaluate(() => globalThis.maxInFlight);
