@@ -32,6 +32,9 @@ const OCR_PASSES = [
 ];
 const OCR_RETRY = [{ width: 2300, mode: 'page' }];
 const CROP_WIDTH = 2300; // 빠진 번호 자리를 하나씩 잘라 읽을 때
+// 쪽 전체·다시 읽기·숫자 자리는 숫자만 보면 되니 영어만 (한국어를 같이 읽으면 2~3배 느림).
+// 말머리("유제 3")는 번호 띠에서 설정한 언어로 읽음
+const DIGIT_LANG = 'eng';
 const GEMINI_WIDTH = 1500;
 
 const abortIfNeeded = (signal) => {
@@ -160,7 +163,7 @@ async function ocrTokens(src, page, { width, mode }, ocrLang) {
   const W = hi.width;
   const H = hi.height;
   const toTokens = (words, sx0 = 0, sy0 = 0) => words.map((w) => ({ str: w.str, conf: w.conf, x0: sx0 + w.x0 / W, x1: sx0 + w.x1 / W, y0: sy0 + w.y0 / H, y1: sy0 + w.y1 / H }));
-  if (mode === 'page') return toTokens(await recognizeWords(hi, { lang: ocrLang, psm: '11' }));
+  if (mode === 'page') return toTokens(await recognizeWords(hi, { lang: DIGIT_LANG, psm: '11' }));
   const L = page.layout;
   const y0 = Math.max(0, L.bodyTop - 0.006);
   const y1 = Math.min(1, L.bodyBottom + 0.006);
@@ -190,10 +193,18 @@ function extractOcr(page) {
   const cands = [];
   const ranges = [];
   page.bodyH = 0;
+  // 영어로만 읽은 쪽 전체에서는 한글을 숫자로 읽기도 함("일" → "2").
+  // 번호 띠를 한국어로 읽었을 때 그 자리가 또렷한 한글이었으면 번호가 아님 ("3다음"처럼 번호에 붙어 읽힌 건 빼고)
+  const hangul = page.ocrPasses.flat().filter((t) => t.conf >= 60 && /[가-힣]/.test(t.str));
+  const onHangul = (c) => {
+    const cx = (c.x0 + c.x1) / 2;
+    const cy = (c.y0 + c.y1) / 2;
+    return !c.prefix && hangul.some((t) => cx > t.x0 && cx < t.x1 && cy > t.y0 && cy < t.y1 && !t.str.startsWith(c.digits));
+  };
   for (const toks of page.ocrPasses) {
     const ex = extractCandidates(toks, page.layout, { ocr: true });
     page.bodyH ||= ex.bodyH;
-    for (const c of ex.candidates) if (!cands.some((d) => samePlace(c, d))) cands.push(c);
+    for (const c of ex.candidates) if (!onHangul(c) && !cands.some((d) => samePlace(c, d))) cands.push(c);
     for (const r of ex.ranges) if (!ranges.some((q) => q.a === r.a && q.b === r.b && Math.abs(q.y0 - r.y0) < 0.01)) ranges.push(r);
   }
   const text = page.textCands || [];
@@ -216,29 +227,42 @@ function applyOcr(page, splitHint = null) {
   }
 }
 
-/** 한 쪽 OCR (passes 마다 한 번씩 읽어 후보를 합침) */
-async function ocrPage(src, page, { ocrLang = 'kor+eng', passes = OCR_PASSES, splitHint = null, role = 'problem' } = {}) {
-  page.textCands ??= page.candidates; // 꼼꼼히 모드: 글자 레이어 후보도 함께 씀
-  page.ocrPasses.push(...(await Promise.all(passes.map((p) => ocrTokens(src, page, p, ocrLang)))));
+/** 읽은 OCR 결과를 쪽에 반영하고 정답표 같은지 봄 */
+function finishOcr(page, splitHint, role) {
   page.needsOcr = false;
   applyOcr(page, splitHint);
   if (looksLikeAnswerTable(page.candidates, { strict: role !== 'answer' })) page.isTable = true;
 }
 
-/** 여러 쪽을 OCR 워커 수만큼 동시에 */
+/** 한 쪽 OCR (passes 마다 한 번씩 읽어 후보를 합침) */
+async function ocrPage(src, page, { ocrLang = 'kor+eng', passes = OCR_PASSES, splitHint = null, role = 'problem' } = {}) {
+  page.textCands ??= page.candidates; // 꼼꼼히 모드: 글자 레이어 후보도 함께 씀
+  page.ocrPasses.push(...(await Promise.all(passes.map((p) => ocrTokens(src, page, p, ocrLang)))));
+  finishOcr(page, splitHint, role);
+}
+
+/**
+ * 여러 쪽을 OCR 워커 수만큼 동시에.
+ * 방식(pass)마다 모든 쪽을 다 읽고 다음 방식으로 넘어감 (방식마다 언어가 달라서, 섞어 읽으면 워커를 자꾸 바꿔 띄움)
+ */
 async function ocrPages(src, list, { passes, ocrLang, role, splitHint, signal, onProgress, label }) {
-  let next = 0;
+  const total = list.length * passes.length;
   let done = 0;
-  const run = async () => {
-    while (next < list.length) {
-      abortIfNeeded(signal);
-      const r = list[next++];
-      await ocrPage(src, r, { passes, ocrLang, role, splitHint });
-      done++;
-      onProgress?.({ phase: 'scan', done, total: list.length, message: `${r.index + 1}쪽 ${label}` });
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(OCR_WORKERS, list.length) }, run));
+  for (const r of list) r.textCands ??= r.candidates;
+  for (const pass of passes) {
+    let next = 0;
+    const run = async () => {
+      while (next < list.length) {
+        abortIfNeeded(signal);
+        const r = list[next++];
+        r.ocrPasses.push(await ocrTokens(src, r, pass, ocrLang));
+        done++;
+        onProgress?.({ phase: 'scan', done, total, message: `${r.index + 1}쪽 ${label}` });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(OCR_WORKERS, list.length) }, run));
+  }
+  for (const r of list) finishOcr(r, splitHint, role);
 }
 
 /**
@@ -308,7 +332,7 @@ function gapRegions(page, chain, prevLast, nextFirst, maxGap = 6) {
  * OCR 로도 빠진 번호는, 그 사이 영역에서 "번호처럼 생긴 잉크 덩어리"를 하나씩 잘라 숫자 전용으로 다시 읽어 채웁니다.
  * (색 상자 속 흰 숫자 "대표 문제", 한 줄에 나란한 번호 포함)
  */
-async function fillOcrGaps(src, results, anchors, signature, { ocrLang, signal, onProgress }) {
+async function fillOcrGaps(src, results, anchors, signature, { signal, onProgress }) {
   if (!signature) return 0;
   const sigKey = `${signature.prefix || ''}|${signature.padded ? signature.digitsLen : 0}`;
   const main = (r) => (anchors.get(r.index) || []).filter((c) => schemeKey(c) === sigKey);
@@ -333,7 +357,7 @@ async function fillOcrGaps(src, results, anchors, signature, { ocrLang, signal, 
     const regions = gapRegions(r, main(r), prevLast, nextFirst);
     if (!regions.length) continue;
     onProgress?.({ phase: 'scan', done: k, total: results.length, message: `${r.index + 1}쪽 빠진 번호 찾는 중` });
-    const found = await findNumbersInRegions(src, r, regions, ref, signature, ocrLang);
+    const found = await findNumbersInRegions(src, r, regions, ref, signature);
     if (found.length) {
       r.candidates.push(...found);
       r.candidates.sort(byReadingOrder);
@@ -426,7 +450,7 @@ function binarizeDigits(canvas, inverted = false) {
 }
 
 /** 페이지 이미지의 한 조각을 키워 흑백으로 만든 뒤 숫자만 읽음 */
-async function readDigitsAt(hi, box, scale, inverted, ocrLang) {
+async function readDigitsAt(hi, box, scale, inverted) {
   const W = hi.width;
   const H = hi.height;
   const cw = (box.x1 - box.x0) * W;
@@ -441,7 +465,7 @@ async function readDigitsAt(hi, box, scale, inverted, ocrLang) {
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, crop.width, crop.height);
   ctx.drawImage(piece, 20, 20);
-  const { text, conf } = await recognizeLine(crop, { lang: ocrLang, whitelist: '0123456789.)' });
+  const { text, conf } = await recognizeLine(crop, { lang: DIGIT_LANG, whitelist: '0123456789.)' });
   // 앞에 붙은 점·잡티는 버리고 첫 숫자 덩어리만 (예: ".0006" → 0006)
   const m = /(\d{1,4})/.exec(text.replace(/\s+/g, ' '));
   return { digits: m ? m[1] : '', conf, boxLike };
@@ -449,7 +473,7 @@ async function readDigitsAt(hi, box, scale, inverted, ocrLang) {
 
 const hamming = (a, b) => (a.length === b.length ? [...a].filter((ch, i) => ch !== b[i]).length : Infinity);
 
-async function findNumbersInRegions(src, page, regions, ref, sig, ocrLang) {
+async function findNumbersInRegions(src, page, regions, ref, sig) {
   const { grid, layout } = page;
   const hNum = median(ref.map((c) => c.h)) || 0.012;
   // 숫자 한 글자 폭(이미 찾은 번호들에서)
@@ -505,7 +529,7 @@ async function findNumbersInRegions(src, page, regions, ref, sig, ocrLang) {
     // 그대로 → (색 상자 같으면) 뒤집어서 → 크게 키워서, 빠진 번호가 읽힐 때까지
     const tries = [{ scale: S, inverted: false }];
     for (let t = 0; t < tries.length && !m; t++) {
-      const r = await readDigitsAt(hi, box, tries[t].scale, tries[t].inverted, ocrLang);
+      const r = await readDigitsAt(hi, box, tries[t].scale, tries[t].inverted);
       if (t === 0) {
         if (r.boxLike) tries.push({ scale: S, inverted: true });
         tries.push({ scale: Math.min(4, S * 1.6), inverted: false });
@@ -670,7 +694,7 @@ export async function analyzeDocument(src, opts) {
     ({ anchors, signature, signatures } = selectAnchors(results, { numberStyle }));
   }
   // 4) 그래도 빠진 번호는 번호 자리를 하나씩 잘라 숫자만 읽음
-  if (ocrList.length) await fillOcrGaps(src, results, anchors, signature, { ocrLang, signal, onProgress });
+  if (ocrList.length) await fillOcrGaps(src, results, anchors, signature, { signal, onProgress });
   // 번호가 건너뛴 곳은 버려진 후보에서 다시 찾아 채움
   fillGapsFromCandidates(results, anchors, signatures);
   // 앞뒤 번호 흐름과 동떨어진 짧은 덩어리(목차·만화 쪽, 부록 표에서 잘못 읽은 숫자)는 뺌
@@ -837,7 +861,7 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
     const mainChain = chain.filter((c) => schemeKey(c) === sigKey);
     const regions = mainChain.length ? gapRegions(page, mainChain, prevLast, nextFirst) : [];
     if (regions.length) {
-      const found = await findNumbersInRegions(src, page, regions, mainChain, sig, ocrLang);
+      const found = await findNumbersInRegions(src, page, regions, mainChain, sig);
       chain = [...chain, ...found].sort(byReadingOrder);
     }
   }

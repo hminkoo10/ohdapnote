@@ -858,8 +858,8 @@ export function chooseExpectedChain(cands, prevLast, nextFirst) {
  * 대표 번호 체계에서 앞뒤 흐름과 동떨어진 짧은 덩어리를 뺍니다.
  * (책 앞 소개 쪽의 견본 번호, 목차·만화 쪽이나 부록 로그표에서 잘못 읽은 "3939" 같은 숫자)
  * 덩어리 = 번호가 1~4씩 늘며 이어지는 구간. 6개 이하이고, 가까운 앞·뒤의 긴 덩어리 어느 쪽과도 이어지지 않으면 버림.
- * 1부터 시작하는 덩어리(단원마다 다시 시작)는 그대로 두되, 글자 레이어로 잰 높이가 이 책 번호들보다 확실히 작은
- * 숫자로만 된 3개 이하 덩어리(개념 쪽 소제목 "1 함수의 수렴과 발산", 책 소개 쪽 견본 그림 속 번호)는 버림.
+ * 1부터 시작하는 덩어리(단원마다 다시 시작)는 그대로 두되, 높이가 이 책 번호들보다 확실히 작은
+ * 숫자로만 된 6개 이하 덩어리(개념 쪽 소제목 "1 함수의 수렴과 발산", 책 소개 쪽 견본 그림 속 "0001 0003 …")는 버림.
  * @returns {number} 뺀 개수
  */
 export function dropStrayRuns(order, anchors, key) {
@@ -878,9 +878,9 @@ export function dropStrayRuns(order, anchors, key) {
   const follows = (a, b) => !!a && !!b && b[0].c.num - a[a.length - 1].c.num >= 1 && b[0].c.num - a[a.length - 1].c.num <= 10;
   const stray = new Set();
   const typicalH = median(runs.flat().map(({ c }) => c.h));
-  const small = ({ c }) => !c.ocr && c.h < 0.6 * typicalH;
+  const small = ({ c }) => c.h < 0.6 * typicalH;
   runs.forEach((r, i) => {
-    if (r.length <= 3 && r.every(small)) {
+    if (r.length <= 6 && r.every(small)) {
       for (const { c } of r) stray.add(c);
       return;
     }
