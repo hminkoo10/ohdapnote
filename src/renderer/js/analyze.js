@@ -266,17 +266,42 @@ async function ocrPages(src, list, { passes, ocrLang, role, splitHint, signal, o
 }
 
 /**
- * 번호 띠를 영어로만 읽어도 되는 책인지: 먼저 읽어 본 쪽들에 말머리("예제 1")가 없고 대표 번호가 0001 처럼 0 을 채운 세 자리 이상.
- * (한국어로 읽은 띠는 영어로 잘못 읽은 한글("일"→"2")을 걸러 주는데, 0 을 채운 번호 체계에는 그런 숫자가 끼지 못함)
+ * 1단계에서 쪽을 읽는 동안, 글자가 없는 쪽(스캔본)부터 첫째 OCR 방식(쪽 전체)을 미리 시작 — 쪽 그리기와 OCR 이 겹치게.
+ * push(쪽) 로 넣고, close() 는 넣은 쪽을 다 읽을 때까지 기다림 (그 뒤로는 진행 상황도 알림)
  */
-function digitsOnlyBook(results, ocrList, { numberStyle, role }) {
-  for (const r of ocrList) {
-    extractOcr(r); // 단 나누기 같은 쪽 정보는 건드리지 않고 후보만 (끝에 finishOcr 로 다시 뽑음)
-    if (looksLikeAnswerTable(r.candidates, { strict: role !== 'answer' })) r.candidates = [];
-  }
-  if (ocrList.some((r) => r.candidates.some((c) => c.prefix))) return false;
-  const { signature } = selectAnchors(results, { numberStyle });
-  return !!signature && !signature.prefix && signature.padded && signature.digitsLen >= 3;
+function earlyPageOcr(src, { ocrLang, signal, onProgress, count }) {
+  const queue = [];
+  const waiting = [];
+  let next = 0;
+  let closed = false;
+  let error = null;
+  const wakeAll = () => waiting.splice(0).forEach((wake) => wake());
+  const run = async () => {
+    while (!signal?.aborted && !error) {
+      if (next < queue.length) {
+        const r = queue[next++];
+        r.ocrPasses.push(await ocrTokens(src, r, OCR_PASSES[0], ocrLang));
+        count.done++;
+        if (closed) onProgress?.({ phase: 'scan', done: count.done, total: count.total, message: `${r.index + 1}쪽 OCR 중` });
+      } else if (closed) return;
+      else await new Promise((wake) => waiting.push(wake));
+    }
+  };
+  const runs = Array.from({ length: OCR_WORKERS }, () => run().catch((err) => (error ||= err)));
+  return {
+    push(r) {
+      r.textCands ??= r.candidates;
+      queue.push(r);
+      wakeAll();
+    },
+    async close() {
+      closed = true;
+      wakeAll();
+      await Promise.all(runs);
+      abortIfNeeded(signal);
+      if (error) throw error;
+    },
+  };
 }
 
 /**
@@ -666,7 +691,9 @@ export async function analyzeDocument(src, opts) {
   let results = [];
   let splitHint = null; // 번호 위치로 추정한 단 위치(같은 책 다음 쪽에도 적용)
 
-  // 1) 쪽마다 레이아웃·글자 레이어 (빠름)
+  // 1) 쪽마다 레이아웃·글자 레이어 (빠름). 스캔한 쪽은 읽는 대로 쪽 전체 OCR 을 시작
+  const count = { done: 0, total: 0 }; // OCR 진행 (쪽 × 방식)
+  const early = earlyPageOcr(src, { ocrLang, signal, onProgress, count });
   for (let k = 0; k < pages.length; k++) {
     abortIfNeeded(signal);
     const idx = pages[k];
@@ -674,6 +701,7 @@ export async function analyzeDocument(src, opts) {
     const page = await readPage(src, idx, { ocrFallback: false, splitHint });
     if (page.layout.inferred) splitHint = page.layout.inferred;
     results.push(page);
+    if (page.needsOcr) early.push(page);
   }
 
   // 문제집 뒤에 붙은 정답과 풀이는 문제가 아님 (글자 레이어로 알 수 있으면 OCR 전에 뺌)
@@ -692,19 +720,13 @@ export async function analyzeDocument(src, opts) {
   const withNums = textPages.filter((r) => r.candidates.length > 0).length;
   if (textPages.length && withNums / textPages.length < 0.3) for (const r of results) if (r.textWithoutNumbers) r.needsOcr = true;
 
-  // 2) OCR (워커 여러 개가 여러 쪽을 동시에)
-  //    쪽 전체(영어)를 다 읽고, 번호 띠는 네 쪽에 한 쪽만 먼저 설정한 언어로 읽어 봄.
-  //    말머리 없이 0001 처럼 0 을 채운 번호만 쓰는 책이면 나머지 쪽 띠는 영어로만 (한국어를 같이 읽으면 두 배쯤 느림)
+  // 2) OCR (워커 여러 개가 여러 쪽을 동시에): 쪽 전체를 마저 다 읽고 → 번호 띠
   const ocrList = results.filter((r) => r.needsOcr);
-  const [pagePass, stripPass] = OCR_PASSES;
-  const sample = ocrList.filter((_, k) => k % 4 === 0);
-  const rest = ocrList.filter((_, k) => k % 4 !== 0);
-  const ocrOpts = { role, splitHint, signal, onProgress, label: 'OCR 중', count: { done: 0, total: ocrList.length * 2 }, finish: false };
-  await ocrPages(src, ocrList, { ...ocrOpts, ocrLang, passes: [pagePass] });
-  await ocrPages(src, sample, { ...ocrOpts, ocrLang, passes: [stripPass] });
-  const stripLang = rest.length && digitsOnlyBook(results, ocrList, { numberStyle, role }) ? DIGIT_LANG : ocrLang;
-  await ocrPages(src, rest, { ...ocrOpts, ocrLang: stripLang, passes: [stripPass] });
-  for (const r of ocrList) finishOcr(r, splitHint, role);
+  count.total = ocrList.length * OCR_PASSES.length;
+  await early.close();
+  const ocrOpts = { ocrLang, role, splitHint, signal, onProgress, label: 'OCR 중', count };
+  await ocrPages(src, ocrList.filter((r) => !r.ocrPasses.length), { ...ocrOpts, passes: OCR_PASSES.slice(0, 1), finish: false });
+  await ocrPages(src, ocrList, { ...ocrOpts, passes: OCR_PASSES.slice(1) });
   shareSplitHints(results);
   if (answersFrom < 0) cutAnswers(); // 스캔본은 OCR 로 정답표를 알아본 뒤에
   onProgress?.({ phase: 'scan', done: pages.length, total: pages.length, message: '번호 정리 중' });
