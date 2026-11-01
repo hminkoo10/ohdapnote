@@ -17,6 +17,25 @@ const median = (arr) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
+const hOf = (c) => c.h ?? c.y1 - c.y0;
+
+/** 같은 단·같은 줄에 나란히 있는지 (한 줄에 문항이 둘 이상인 편집: "0001 …   0002 …") */
+export function sameRow(a, b) {
+  // 위쪽 끝이 아니라 세로로 겹치는 정도로 봄 (OCR 이 옆 분수까지 묶어 상자가 커진 번호도 같은 줄로)
+  const overlap = Math.min(a.y0 + hOf(a), b.y0 + hOf(b)) - Math.max(a.y0, b.y0);
+  return a.col === b.col && overlap > 0.5 * Math.min(hOf(a), hOf(b));
+}
+
+/** b 가 a 와 같은 줄, 오른쪽에 충분히 떨어져 있는지 (나란히 놓인 다음 문항) */
+function besideRight(a, b) {
+  return sameRow(a, b) && b.x0 - (a.x1 ?? a.x0) > 2 * Math.max(hOf(a), hOf(b));
+}
+
+/** 읽는 순서: 단 → 위에서 아래 (같은 줄이면 왼쪽에서 오른쪽) */
+export function byReadingOrder(a, b) {
+  return a.col - b.col || (sameRow(a, b) ? a.x0 - b.x0 : a.y0 - b.y0);
+}
+
 const mode = (arr) => {
   const counts = new Map();
   let best = null;
@@ -163,6 +182,9 @@ export function extractCandidates(tokens, layout, opts = {}) {
         } else segs.push({ words: [w], x0: w.x0, x1: w.x1 });
       }
       for (const seg of segs) {
+        // "예제 1  함수의 극한" 처럼 말머리로 시작하는 줄은 (글씨가 커도) 제목이 아니라 문항 머리
+        const first = seg.words[0].str;
+        if (PREFIXES.some((p) => first === p || (first.startsWith(p) && /^\d/.test(first.slice(p.length))))) continue;
         const textWords = seg.words.filter((w) => !/^[\d.()[\]]+$/.test(w.str));
         const hangul = textWords.reduce((n, w) => n + (w.str.match(HANGUL)?.length || 0), 0);
         if (hangul < 2) continue;
@@ -314,23 +336,81 @@ export function extractCandidates(tokens, layout, opts = {}) {
       ocr: !!opts.ocr,
     });
   }
-  candidates.sort((a, b) => a.col - b.col || a.y0 - b.y0);
-  return { candidates, bodyH, lineCount: lines.length, headings, ranges };
+  candidates.sort(byReadingOrder);
+  return { candidates: dropAnswerRows(candidates), bodyH, lineCount: lines.length, headings, ranges };
+}
+
+/** 한 줄(왼쪽→오른쪽) 안에서 1씩 늘어나며 이어지는 가장 긴 번호들 (정답표 한 줄: 1 ② 2 ② 3 ① 4 24 …) */
+function longestRun(row, maxGap) {
+  let best = [];
+  for (let i = 0; i < row.length; i++) {
+    const run = [row[i]];
+    for (let j = i + 1; j < row.length; j++) {
+      const cur = run[run.length - 1];
+      if (row[j].num === cur.num + 1 && row[j].x0 - cur.x0 <= maxGap) run.push(row[j]);
+    }
+    if (run.length > best.length) best = run;
+  }
+  return best;
+}
+
+/** 같은 단·같은 줄끼리 묶기 (읽는 순서) */
+function rowsOf(cands) {
+  const rows = [];
+  for (const c of [...cands].sort(byReadingOrder)) {
+    const row = rows[rows.length - 1];
+    if (row && sameRow(row[0], c)) row.push(c);
+    else rows.push([c]);
+  }
+  return rows;
 }
 
 /**
- * 빠른 정답표 같은 쪽인지: 한 단 안에서 같은 높이에 번호가 여러 개 나란히 있는 경우가 많음
+ * 해설 단원 첫머리의 작은 정답 상자("1 ② 2 ② 3 ① 4 24 …") 번호를 뺍니다:
+ * 한 줄에 1씩 늘어나는 번호가 촘촘히 4개 이상(답이 셋뿐인 "Level 3" 상자는 더 촘촘히 3개) 나란한 줄
+ * + 바로 아래에서 그 번호를 이어 가는 줄. (한 줄에 문항이 둘·셋 나란한 문제 쪽은 번호 사이가 넓어서 해당 없음)
  */
-export function looksLikeAnswerTable(candidates) {
-  if (candidates.length >= 20) {
-    let sideBySide = 0;
-    for (const c of candidates) {
-      if (candidates.some((d) => d !== c && d.col === c.col && Math.abs(d.y0 - c.y0) < 0.4 * c.h && Math.abs(d.x0 - c.x0) > 3 * c.h)) sideBySide++;
+function dropAnswerRows(cands) {
+  const rows = rowsOf(cands);
+  const drop = new Set();
+  rows.forEach((row, i) => {
+    let run = longestRun(row, 0.09);
+    if (run.length < 4) run = longestRun(row, 0.075);
+    if (run.length < 3) return;
+    row.forEach((c) => drop.add(c));
+    let last = run[run.length - 1];
+    let prev = row;
+    for (let j = i + 1; j < rows.length; j++) {
+      const next = rows[j];
+      if (next[0].col !== row[0].col || next[0].y0 - prev[0].y0 > 3 * hOf(prev[0])) break;
+      if (!next.some((c) => c.num === last.num + 1)) break;
+      next.forEach((c) => drop.add(c));
+      for (const c of next) if (c.num === last.num + 1) last = c;
+      prev = next;
     }
-    if (sideBySide >= candidates.length * 0.4) return true;
-  }
-  // 표를 단 단위로 읽으면 번호가 일정한 간격(예: +6)으로 건너뜀 (스캔본처럼 칸 일부만 읽힌 경우)
+  });
+  return drop.size ? cands.filter((c) => !drop.has(c)) : cands;
+}
+
+/**
+ * 빠른 정답표 같은 쪽인지
+ *  - 한 줄에 1씩 늘어나는 번호가 여럿 나란한 줄이 두 줄 이상, 또는
+ *  - 줄 맨 앞 번호가 촘촘한 줄 간격으로 일정하게 건너뛰거나(1, 7, 13 …) 줄마다 다시 1부터(1, 1, 1 …)
+ *    (답 ①② 가 붙은 번호는 후보가 아니라서 줄 맨 앞 번호만 남는 경우가 많음)
+ * @param {{strict?:boolean}} [opts] strict: 문제집용 — 칸이 촘촘한 표만 (한 줄에 문항이 둘·셋 나란한 쪽과 구분)
+ */
+export function looksLikeAnswerTable(all, { strict = false } = {}) {
+  // 분수·지수 속 작은 숫자는 빼고 봄 (번호보다 확실히 작음. 해설 쪽의 1/2, 1/3 … 이 표처럼 보이지 않게)
+  const hs = all.map((c) => c.h).sort((a, b) => a - b);
+  const big = hs.length ? hs[Math.floor(hs.length * 0.75)] : 0;
+  const candidates = all.filter((c) => c.h >= 0.6 * big);
+  // 해설 속 증감표나 단원 첫머리의 작은 정답 상자 한 줄과 구분하려고, 그런 줄이 두 줄 이상이어야 함
+  const tableRows = rowsOf(candidates).filter((row) => longestRun(row, strict ? 0.09 : Infinity).length >= 4);
+  const members = tableRows.reduce((n, row) => n + row.length, 0);
+  if (tableRows.length >= 2 && members >= candidates.length * (strict ? 0.5 : 0.4)) return true;
+  // 단마다 줄 맨 앞(왼쪽 끝) 번호만 위→아래로
   const diffs = [];
+  const gaps = [];
   const byCol = new Map();
   for (const c of candidates) {
     if (c.prefix) continue;
@@ -338,12 +418,18 @@ export function looksLikeAnswerTable(candidates) {
     byCol.get(c.col).push(c);
   }
   for (const list of byCol.values()) {
-    list.sort((a, b) => a.y0 - b.y0);
-    for (let i = 1; i < list.length; i++) diffs.push(list[i].num - list[i - 1].num);
+    const minRel = Math.min(...list.map((c) => c.relX ?? c.x0));
+    const left = list.filter((c) => (c.relX ?? c.x0) <= minRel + 0.012).sort((a, b) => a.y0 - b.y0);
+    for (let i = 1; i < left.length; i++) {
+      diffs.push(left[i].num - left[i - 1].num);
+      gaps.push(left[i].y0 - left[i - 1].y0);
+    }
   }
   if (diffs.length < 4) return false;
   const { value, count } = mode(diffs);
-  return value >= 3 && count >= diffs.length * 0.7;
+  if (!(value === 0 || value >= 3) || count < diffs.length * 0.7) return false;
+  // 정답표는 한 줄에 한 칸씩이라 줄 간격이 촘촘함 (한 줄에 문항이 셋 나란한 문제 쪽은 줄 사이가 넓음)
+  return median(gaps) <= 4 * median(candidates.map((c) => c.h));
 }
 
 // ---------------------------------------------------------------------------
@@ -367,7 +453,8 @@ function startScore(prevLast, c) {
   if (c.num === 1) return 0.8;
   const d = c.num - prevLast;
   if (d > 1 && d <= 4) return 0.3;
-  return -0.6;
+  // 앞 쪽보다 작은 번호로 시작(1번 제외)은 거의 늘 잘못 읽은 것 (부록 표의 숫자 등)
+  return d <= 0 ? -2.5 : -0.6;
 }
 
 /** 페이지 안에서의 정렬 근거(같은 단에서 x 가 거의 같은 후보 수) */
@@ -401,8 +488,8 @@ function priorWithStyle(cands, i, sig) {
   if (c.style === sig.style) s += 0.9;
   else if (c.ocr && (c.style === 'dot' || c.style === 'plain') && (sig.style === 'dot' || sig.style === 'plain')) s -= 0.2; // OCR 은 점을 놓치거나 더 읽기도 함
   else s -= 1.6;
-  // 0 채움(0001, 01)은 아주 뚜렷한 특징이라 다르면 크게 감점
-  s += c.padded === sig.padded ? 0.4 : -3.5;
+  // 0 채움(0001, 01)은 아주 뚜렷한 특징이라 다르면 크게 감점 (단, 0001 체계의 1000 처럼 자릿수가 꽉 찬 번호는 같은 모양)
+  s += c.padded === sig.padded || (sig.padded && fullWidth(c) && c.digits.length === sig.digitsLen) ? 0.4 : -3.5;
   if (sig.padded && sig.digitsLen && c.digits.length !== sig.digitsLen) s -= 2.5;
   if ((c.prefix || '') !== (sig.prefix || '')) s -= 3;
   if (sig.hRatio > 0) {
@@ -435,8 +522,8 @@ export function chooseChain(cands, prevLast, priorFn) {
     for (let i = 0; i < j; i++) {
       const a = cands[i];
       const b = cands[j];
-      // 같은 단에서 거의 같은 높이면 같이 선택할 수 없음
-      if (a.col === b.col && b.y0 - a.y0 < 0.6 * Math.max(a.h, b.h)) continue;
+      // 같은 단에서 거의 같은 높이면 같이 선택할 수 없음 (한 줄에 나란히 놓인 문항은 예외)
+      if (a.col === b.col && b.y0 - a.y0 < 0.6 * Math.max(a.h, b.h) && !besideRight(a, b)) continue;
       const v = dp[i] + transitionScore(a, b);
       if (v > best) {
         best = v;
@@ -535,10 +622,11 @@ function mergeAnchors(anchors, extraByPage) {
     const merged = [...(anchors.get(idx) || [])];
     for (const c of extra) {
       // 이미 고른 번호와 거의 같은 자리면 건너뜀
-      if (merged.some((a) => a.col === c.col && Math.abs(a.y0 - c.y0) < 0.6 * Math.max(a.h, c.h))) continue;
+      const hh = (a) => Math.max(a.h, c.h);
+      if (merged.some((a) => a.col === c.col && Math.abs(a.y0 - c.y0) < 0.6 * hh(a) && Math.abs(a.x0 - c.x0) < 3 * hh(a))) continue;
       merged.push(c);
     }
-    merged.sort((a, b) => a.col - b.col || a.y0 - b.y0);
+    merged.sort(byReadingOrder);
     anchors.set(idx, merged);
   }
 }
@@ -558,7 +646,7 @@ export function selectAnchors(pages, opts = {}) {
     const styleOk = (c) => {
       if (forced === 'dot') return c.style === 'dot';
       if (forced === 'plain') return c.style === 'plain' && !c.padded;
-      if (forced === 'pad') return c.padded;
+      if (forced === 'pad') return c.padded || c.digits.length >= 3;
       if (forced === 'bracket') return c.style === 'bracket' || c.style === 'paren';
       return true;
     };
@@ -579,6 +667,17 @@ export function selectAnchors(pages, opts = {}) {
       g.get(p.index).push(c);
     }
   }
+  // 0001 체계에서 1000 이상 번호는 앞에 0 이 없으므로, 같은 자릿수의 0 채움 묶음에도 넣음
+  for (const p of pages) {
+    for (const c of p.candidates) {
+      if (!fullWidth(c)) continue;
+      const g = groups.get(groupKey({ ...c, padded: true }));
+      if (!g) continue;
+      if (!g.has(p.index)) g.set(p.index, []);
+      g.get(p.index).push(c);
+      g.get(p.index).sort(byReadingOrder);
+    }
+  }
   const pagesOf = (byPage) => pages.map((p) => ({ index: p.index, candidates: byPage.get(p.index) || [] }));
 
   // 이미 학습한 번호 체계가 있으면(한 쪽 다시 인식) 그대로 사용
@@ -589,6 +688,7 @@ export function selectAnchors(pages, opts = {}) {
       const byPage = groups.get(sg.key);
       if (!byPage) return;
       const res = runSelection(pagesOf(byPage), { prevLast: i === 0 ? opts.prevLast : null }, sg);
+      markFixedWidth(res.anchors, sg);
       mergeAnchors(anchors, res.anchors);
     });
     return { anchors, signature: known[0], signatures: known };
@@ -616,17 +716,35 @@ export function selectAnchors(pages, opts = {}) {
   const main = results[0];
   // 대표 체계는 이어지는 앞 쪽 번호(prevLast)를 반영해 다시 선택
   const mainRes = opts.prevLast != null ? runSelection(pagesOf(groups.get(main.key)), opts, main.res.signature) : main.res;
+  markFixedWidth(mainRes.anchors, main.res.signature);
   const anchors = new Map(pages.map((p) => [p.index, [...(mainRes.anchors.get(p.index) || [])]]));
   const signatures = [main.res.signature];
   for (const r of results.slice(1)) {
     if (!groupQuality(r.q, r.seq.length, r.res.signature, main.res.signature, r.prefixed)) continue;
     signatures.push(r.res.signature);
+    markFixedWidth(r.res.anchors, r.res.signature);
     mergeAnchors(anchors, r.res.anchors);
   }
   return { anchors, signature: main.res.signature, signatures };
 }
 
-const schemeKey = (c) => `${c.prefix || ''}|${c.padded ? c.digits.length : 0}`;
+/**
+ * 0 채움 없이 자릿수가 꽉 찬 번호(0001 체계의 1000 …)일 수 있는지.
+ * 2자리(01 체계)는 본문의 10 이상 숫자가 너무 흔해서 빼고 3자리 이상만
+ */
+const fullWidth = (c) => !c.padded && c.digits.length >= 3 && c.digits[0] !== '0';
+
+/** 0 채움 체계로 고른 꽉 찬 번호에 표시 (체계 열쇠가 같아지게) */
+function markFixedWidth(anchors, sig) {
+  if (!sig?.padded) return;
+  for (const chain of anchors.values()) for (const c of chain) if (fullWidth(c) && c.digits.length === sig.digitsLen) c.fixedWidth = true;
+}
+
+/** 번호 체계 열쇠: 말머리 | 0 채움 자릿수 (0001 체계의 1000 이상도 같은 체계) */
+export const schemeKey = (c) => `${c.prefix || ''}|${c.padded || c.fixedWidth ? c.digits.length : 0}`;
+
+/** 버려진 후보가 그 체계에 들어갈 수 있는지 (꽉 찬 번호는 0 채움 체계에도) */
+const fitsScheme = (c, key) => schemeKey(c) === key || (fullWidth(c) && key === `${c.prefix || ''}|${c.digits.length}`);
 
 /**
  * 번호가 건너뛴 곳(예: 5 → 7)을 "버려진 후보"에서 찾아 채웁니다.
@@ -640,12 +758,21 @@ export function fillGapsFromCandidates(pages, anchors, signatures = []) {
     const k = `${sg.prefix || ''}|${sg.padded ? sg.digitsLen : 0}`;
     if (!sigByScheme.has(k)) sigByScheme.set(k, sg);
   }
-  const order = (c) => c.col * 10 + c.y0;
   const lastByKey = new Map();
+  const nextFirstOf = (pi, key) => {
+    for (let j = pi + 1; j < pages.length; j++) {
+      const c = (anchors.get(pages[j].index) || []).find((x) => schemeKey(x) === key);
+      if (c) return c.num;
+    }
+    return null;
+  };
   let filled = 0;
   for (let pi = 0; pi < pages.length; pi++) {
     const p = pages[pi];
     const chain = anchors.get(p.index) || [];
+    // 읽는 순서상의 자리 (같은 줄에 나란한 번호는 왼쪽이 먼저)
+    const rank = new Map([...new Set([...p.candidates, ...chain])].sort(byReadingOrder).map((c, i) => [c, i]));
+    const order = (c) => rank.get(c);
     const chosen = new Set(chain);
     const pool = p.candidates.filter((c) => !chosen.has(c));
     const add = [];
@@ -663,32 +790,34 @@ export function fillGapsFromCandidates(pages, anchors, signatures = []) {
     for (const [key, seq] of byKey) {
       const sig = sigByScheme.get(key) || signatures[0];
       const okShape = (c) =>
-        schemeKey(c) === key && (!sig || Math.abs(c.relX - sig.relX) <= 0.045) && (!sig?.hRatio || (c.hRatio / sig.hRatio > 0.6 && c.hRatio / sig.hRatio < 1.7));
+        fitsScheme(c, key) && (!sig || Math.abs(c.relX - sig.relX) <= 0.045) && (!sig?.hRatio || (c.hRatio / sig.hRatio > 0.6 && c.hRatio / sig.hRatio < 1.7));
       const points = [{ num: lastByKey.get(key) ?? null, pos: -Infinity }, ...seq.map((c) => ({ num: c.num, pos: order(c) })), { num: null, pos: Infinity }];
       for (let i = 0; i + 1 < points.length; i++) {
         const a = points[i];
         const b = points[i + 1];
         if (a.num == null) continue;
-        const hi = b.num != null ? b.num : a.num + 12;
-        if (hi - a.num < 2 && b.num != null) continue;
+        // 쪽 끝 구간은 다음 쪽 첫 번호가 실제로 건너뛰었을 때만 그 사이를 채움 (다음 단원이 1번부터면 빠진 게 없음)
+        const hi = b.num != null ? b.num : nextFirstOf(pi, key);
+        if (hi == null || hi - a.num < 2) continue;
         let want = a.num + 1;
         const between = pool
-          .filter((c) => okShape(c) && order(c) > a.pos && order(c) < b.pos && c.num > a.num && c.num < (b.num ?? hi + 1))
+          .filter((c) => okShape(c) && order(c) > a.pos && order(c) < b.pos && c.num > a.num && c.num < hi)
           .sort((x, y) => order(x) - order(y));
         for (const c of between) {
           if (c.num === want || (c.num > want && c.num - want <= 1)) {
             c.filled = true;
+            if (schemeKey(c) !== key) c.fixedWidth = true;
             add.push(c);
             want = c.num + 1;
           }
         }
       }
-      const all = [...seq, ...add.filter((c) => schemeKey(c) === key)];
+      const all = [...seq, ...add.filter((c) => fitsScheme(c, key))];
       if (all.length) lastByKey.set(key, Math.max(...all.map((c) => c.num)));
     }
     if (add.length) {
       filled += add.length;
-      anchors.set(p.index, [...chain, ...add].sort((x, y) => x.col - y.col || x.y0 - y.y0));
+      anchors.set(p.index, [...chain, ...add].sort(byReadingOrder));
     }
   }
   return filled;
@@ -701,7 +830,7 @@ export function fillGapsFromCandidates(pages, anchors, signatures = []) {
 export function chooseExpectedChain(cands, prevLast, nextFirst) {
   const lo = prevLast ?? 0;
   const hi = nextFirst ?? lo + 40;
-  const list = cands.filter((c) => c.num > lo && c.num < hi).sort((a, b) => a.col - b.col || a.y0 - b.y0);
+  const list = cands.filter((c) => c.num > lo && c.num < hi).sort(byReadingOrder);
   // 최장 증가 부분수열 (번호가 1씩 늘어날수록, 줄 맨 앞에 가까울수록 가점)
   const n = list.length;
   const best = new Float64Array(n);
@@ -710,7 +839,7 @@ export function chooseExpectedChain(cands, prevLast, nextFirst) {
     best[j] = 1 + (list[j].num === lo + 1 ? 0.5 : 0) - Math.min(0.5, list[j].relX * 5);
     for (let i = 0; i < j; i++) {
       if (list[i].num >= list[j].num) continue;
-      if (list[i].col === list[j].col && list[j].y0 - list[i].y0 < 0.6 * Math.max(list[i].h, list[j].h)) continue;
+      if (list[i].col === list[j].col && list[j].y0 - list[i].y0 < 0.6 * Math.max(list[i].h, list[j].h) && !besideRight(list[i], list[j])) continue;
       const v = best[i] + 1 + (list[j].num - list[i].num === 1 ? 0.6 : 0) - Math.min(0.5, list[j].relX * 5);
       if (v > best[j]) {
         best[j] = v;
@@ -723,6 +852,49 @@ export function chooseExpectedChain(cands, prevLast, nextFirst) {
   const chain = [];
   for (let k = end; k >= 0; k = back[k]) chain.push(list[k]);
   return chain.reverse();
+}
+
+/**
+ * 대표 번호 체계에서 앞뒤 흐름과 동떨어진 짧은 덩어리를 뺍니다.
+ * (책 앞 소개 쪽의 견본 번호, 목차·만화 쪽이나 부록 로그표에서 잘못 읽은 "3939" 같은 숫자)
+ * 덩어리 = 번호가 1~4씩 늘며 이어지는 구간. 6개 이하이고, 가까운 앞·뒤의 긴 덩어리 어느 쪽과도 이어지지 않으면 버림.
+ * 1부터 시작하는 덩어리(단원마다 다시 시작)는 그대로 두되, 글자 레이어로 잰 높이가 이 책 번호들보다 확실히 작은
+ * 숫자로만 된 3개 이하 덩어리(개념 쪽 소제목 "1 함수의 수렴과 발산", 책 소개 쪽 견본 그림 속 번호)는 버림.
+ * @returns {number} 뺀 개수
+ */
+export function dropStrayRuns(order, anchors, key) {
+  const runs = [];
+  for (const idx of order) {
+    for (const c of anchors.get(idx) || []) {
+      if (schemeKey(c) !== key) continue;
+      const run = runs[runs.length - 1];
+      const d = run ? c.num - run[run.length - 1].c.num : 0;
+      if (run && d >= 1 && d <= 4) run.push({ idx, c });
+      else runs.push([{ idx, c }]);
+    }
+  }
+  const isLong = (r) => r.length > 6;
+  if (!runs.some(isLong)) return 0;
+  const follows = (a, b) => !!a && !!b && b[0].c.num - a[a.length - 1].c.num >= 1 && b[0].c.num - a[a.length - 1].c.num <= 10;
+  const stray = new Set();
+  const typicalH = median(runs.flat().map(({ c }) => c.h));
+  const small = ({ c }) => !c.ocr && c.h < 0.6 * typicalH;
+  runs.forEach((r, i) => {
+    if (r.length <= 3 && r.every(small)) {
+      for (const { c } of r) stray.add(c);
+      return;
+    }
+    if (isLong(r) || r[0].c.num === 1) return;
+    const prev = runs.slice(0, i).reverse().find(isLong);
+    const next = runs.slice(i + 1).find(isLong);
+    if (!follows(prev, r) && !follows(r, next)) for (const { c } of r) stray.add(c);
+  });
+  if (!stray.size) return 0;
+  for (const idx of order) {
+    const chain = anchors.get(idx);
+    if (chain?.some((c) => stray.has(c))) anchors.set(idx, chain.filter((c) => !stray.has(c)));
+  }
+  return stray.size;
 }
 
 /**
@@ -747,7 +919,7 @@ export function flagPages(order, anchors, layouts) {
       // 번호 체계별로 연속성 확인 (유제 1,2 와 Level 01,02 처럼 섞여 있을 수 있음)
       const byKey = new Map();
       for (const c of chain) {
-        const key = `${c.prefix || ''}|${c.padded ? c.digits.length : 0}`;
+        const key = schemeKey(c);
         if (!byKey.has(key)) byKey.set(key, []);
         byKey.get(key).push(c);
       }
@@ -856,9 +1028,14 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
         const col = cols[c];
         const x0 = Math.max(0, col.x0 - 0.006);
         const x1 = Math.min(1, col.x1 + 0.006);
-        const inCol = chain
-          .filter((a) => a.col === c && a.y0 >= top - 0.01 && (a.y0 < bottom || z === zones.length - 1))
-          .sort((a, b) => a.y0 - b.y0);
+        const inCol = chain.filter((a) => a.col === c && a.y0 >= top - 0.01 && (a.y0 < bottom || z === zones.length - 1)).sort(byReadingOrder);
+        // 한 줄에 나란히 놓인 번호들은 한 줄로 묶음 (세로는 다음 줄 번호까지, 가로는 오른쪽 번호 앞까지)
+        const rows = [];
+        for (const a of inCol) {
+          const row = rows[rows.length - 1];
+          if (row && sameRow(row[0], a)) row.push(a);
+          else rows.push([a]);
+        }
         // 공통 지문 머리 ([0100~0120]) — 그 아래 첫 문항 전까지가 공통 지문
         const rangesHere = (opts.ranges?.get(pageIdx) || []).filter((r) => r.col === c && r.y0 >= top - 0.01 && r.y0 < bottom);
         // 단원·유형 제목 등에서 영역을 끊음 (이 단과 가로로 겹치는 것만)
@@ -889,29 +1066,34 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
           const r = trimRect(grid, { x: x0, y: y0, w: x1 - x0, h: Math.max(0.01, y1 - y0) });
           if (r) stems.push({ a: rg.a, b: rg.b, y: rg.y0, page: pageIdx, z, c, rect: { page: pageIdx, ...r } });
         }
-        for (let k = 0; k < inCol.length; k++) {
-          const a = inCol[k];
-          const next = inCol[k + 1];
-          const y0 = Math.max(top - 0.01, a.y0 - padOf(a));
-          const nominal = next ? next.y0 - padOf(next) : bottom;
-          const y1 = cutBetween(y0, nominal);
-          const raw = { x: Math.min(x0, a.x0 - 0.004), y: y0, w: 0, h: Math.max(0.01, y1 - y0) };
-          raw.w = x1 - raw.x;
-          const r = trimRect(grid, raw) || raw;
-          const item = {
-            page: pageIdx,
-            zone: z,
-            col: c,
-            number: a.digits,
-            num: a.num,
-            prefix: a.prefix || '',
-            rects: [{ page: pageIdx, ...r }],
-            source: opts.source?.get(pageIdx) || 'text',
-            conf: Math.round(a.conf ?? 100),
-          };
-          items.push(item);
-          open = item;
-          if (y1 < nominal - 1e-6) open = null; // 제목에서 끊겼으면 더 잇지 않음
+        for (let ri = 0; ri < rows.length; ri++) {
+          const row = rows[ri];
+          const nextRow = rows[ri + 1];
+          const nominal = nextRow ? Math.min(...nextRow.map((b) => b.y0 - padOf(b))) : bottom;
+          for (let k = 0; k < row.length; k++) {
+            const a = row[k];
+            const right = row[k + 1];
+            const y0 = Math.max(top - 0.01, a.y0 - padOf(a));
+            const y1 = cutBetween(y0, nominal);
+            const rx0 = k === 0 ? Math.min(x0, a.x0 - 0.004) : a.x0 - 0.004;
+            const rx1 = right ? right.x0 - 0.004 : x1;
+            const raw = { x: rx0, y: y0, w: rx1 - rx0, h: Math.max(0.01, y1 - y0) };
+            const r = trimRect(grid, raw) || raw;
+            const item = {
+              page: pageIdx,
+              zone: z,
+              col: c,
+              number: a.digits,
+              num: a.num,
+              prefix: a.prefix || '',
+              rects: [{ page: pageIdx, ...r }],
+              source: opts.source?.get(pageIdx) || 'text',
+              conf: Math.round(a.conf ?? 100),
+            };
+            items.push(item);
+            open = item;
+            if (y1 < nominal - 1e-6) open = null; // 제목에서 끊겼으면 더 잇지 않음
+          }
         }
         if (flow !== 'continue') open = null;
       }
@@ -950,10 +1132,11 @@ export function assignIds(items) {
   return items;
 }
 
-/** 문항을 읽는 순서로 정렬(쪽 → 구역 → 단 → 위치) */
+/** 문항을 읽는 순서로 정렬(쪽 → 구역 → 단 → 위치, 같은 줄에 나란하면 왼쪽부터) */
 export function sortItems(items) {
+  const pos = (r, s) => (Math.abs(r.y - s.y) < 0.008 ? r.x - s.x : r.y - s.y);
   return [...items].sort(
-    (a, b) => a.page - b.page || (a.zone ?? 0) - (b.zone ?? 0) || (a.col ?? 0) - (b.col ?? 0) || a.rects[0].y - b.rects[0].y,
+    (a, b) => a.page - b.page || (a.zone ?? 0) - (b.zone ?? 0) || (a.col ?? 0) - (b.col ?? 0) || pos(a.rects[0], b.rects[0]),
   );
 }
 

@@ -2417,6 +2417,11 @@ main.sheet {
   font-weight: 650;
   color: var(--text-3);
 }
+.export-hint {
+  margin: 0;
+  padding-left: 74px;
+  line-height: 1.45;
+}
 .export-buttons {
   display: grid;
   grid-template-columns: 1fr 1fr;

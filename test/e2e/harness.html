@@ -13,7 +13,7 @@
       const res = await analyzeDocument(src, { pages: parsePageRange(opts.range || '', src.numPages), role: opts.role || 'problem', flow: opts.flow || 'column', ocrLang: opts.ocrLang || 'kor+eng' });
       const ms = performance.now() - t0;
       await src.destroy();
-      return { ms, numPages: src.numPages, items: res.items.map((it) => ({ id: it.id, page: it.page, number: it.number, num: it.num, rects: it.rects, source: it.source, conf: it.conf })), pageInfo: res.pageInfo, signature: res.signature, pageOffset: res.pageOffset };
+      return { ms, numPages: src.numPages, items: res.items.map((it) => ({ id: it.id, page: it.page, number: it.number, num: it.num, prefix: it.prefix || '', rects: it.rects, source: it.source, conf: it.conf })), pageInfo: res.pageInfo, signature: res.signature, pageOffset: res.pageOffset };
     },
     match(problems, answers) { return Object.fromEntries(matchItems(problems, answers)); },
   };

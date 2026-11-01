@@ -11,12 +11,13 @@ const TYPES = {
   '.jpg': 'image/jpeg', '.gz': 'application/gzip',
 };
 
-export function startServer(port = 0) {
+/** @param {Record<string,string>} [extra] 저장소 밖 파일 (URL 경로 → 실제 경로) */
+export function startServer(port = 0, extra = {}) {
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://x');
-      const file = resolve(join(ROOT, decodeURIComponent(url.pathname)));
-      if (!file.startsWith(ROOT)) throw new Error('bad path');
+      const file = extra[url.pathname] || resolve(join(ROOT, decodeURIComponent(url.pathname)));
+      if (!extra[url.pathname] && !file.startsWith(ROOT)) throw new Error('bad path');
       const data = await readFile(file);
       res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' });
       res.end(data);

@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld('ohdap', {
   importFiles: (bookId, role, paths) => ipcRenderer.invoke('files:import', { bookId, role, paths }),
   pathForFile: (file) => webUtils.getPathForFile(file),
   savePdf: (defaultName, data) => ipcRenderer.invoke('files:savePdf', { defaultName, data }),
+  saveFile: ({ defaultName, data, filters, title }) => ipcRenderer.invoke('files:saveFile', { defaultName, data, filters, title }),
+  getTranscripts: (bookId) => ipcRenderer.invoke('books:getTranscripts', bookId),
+  saveTranscripts: (bookId, data) => ipcRenderer.invoke('books:saveTranscripts', { bookId, data }),
 
   openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
   showItemInFolder: (p) => ipcRenderer.invoke('shell:showItem', p),

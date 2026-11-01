@@ -1,9 +1,10 @@
 // Electron 앱 E2E
 //  예전 데이터 옮기기 → 책 등록 → 문제집/답지 따로 분석 → 인식 결과·검토 편집
-//  → 학생 오답노트 만들기 → 문항 고르기 → 시험지 PDF 4종 → 사진 책(OCR) → 재실행 후 유지 확인
+//  → 학생 오답노트 만들기 → 문항 고르기 → 시험지 PDF 4종 → 한글(HWPX) → 사진 책(OCR) → 재실행 후 유지 확인
 // 실행: xvfb-run -a node test/e2e/app-e2e.mjs
 import { _electron as electron } from '../lib/playwright.mjs';
-import { mkdtempSync, existsSync, statSync, mkdirSync, rmSync, writeFileSync, copyFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, existsSync, statSync, mkdirSync, rmSync, writeFileSync, copyFileSync, readdirSync, readFileSync } from 'node:fs';
+import { inflateRawSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -194,6 +195,72 @@ try {
     if (!existsSync(out) || statSync(out).size < 1000) throw new Error(`${mode} PDF 생성 실패`);
     console.log(`    ${mode}: ${statSync(out).size} bytes`);
   }
+
+  step('한글(HWPX): 키 없음 → 그림 / 가짜 Gemini → 글자·수식 / 다시 내보내면 저장해 둔 결과');
+  await win.click('.seg:has(input[name="format"]) label:has-text("한글")');
+  await win.waitForSelector('.export-hint:not([hidden])');
+  const hwpxPart = (file, name) => {
+    // ZIP 에서 파일 하나 꺼내기 (중앙 디렉터리)
+    const buf = readFileSync(file);
+    if (buf.toString('latin1', 30, 38) !== 'mimetype' || buf.toString('latin1', 38, 57) !== 'application/hwp+zip') throw new Error('HWPX: mimetype 이 맨 앞이 아님');
+    const end = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+    let p = buf.readUInt32LE(end + 16);
+    for (let k = 0; k < buf.readUInt16LE(end + 10); k++) {
+      const nameLen = buf.readUInt16LE(p + 28);
+      const at = buf.readUInt32LE(p + 42);
+      if (buf.toString('utf8', p + 46, p + 46 + nameLen) === name) {
+        const data = buf.subarray(at + 30 + buf.readUInt16LE(at + 26) + buf.readUInt16LE(at + 28), at + 30 + buf.readUInt16LE(at + 26) + buf.readUInt16LE(at + 28) + buf.readUInt32LE(p + 20));
+        return (buf.readUInt16LE(p + 10) === 8 ? inflateRawSync(data) : data).toString('utf8');
+      }
+      p += 46 + nameLen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+    }
+    throw new Error(`HWPX: ${name} 없음`);
+  };
+  const count = (xml, tag) => (xml.match(new RegExp(`<${tag} `, 'g')) || []).length;
+  const exportHwpx = async (name) => {
+    const out = join(OUT, name);
+    rmSync(out, { force: true });
+    await stubSave(out);
+    await win.click('.export-btn[data-mode="problems"]');
+    await waitToast('저장했어요', 120000);
+    await clearToasts();
+    const sec = hwpxPart(out, 'Contents/section0.xml');
+    console.log(`    ${name}: ${statSync(out).size} bytes, 수식 ${count(sec, 'hp:equation')}개, 그림 ${count(sec, 'hp:pic')}개`);
+    return sec;
+  };
+  const plain = await exportHwpx('app-export-picture.hwpx');
+  if (count(plain, 'hp:equation') !== 0 || count(plain, 'hp:pic') < 4) throw new Error('키가 없을 때 문항이 그림으로 들어가지 않았습니다');
+  // 가짜 Gemini (메인 프로세스의 요청 처리를 바꿔 끼움) + 설정에서 키 넣기
+  await app.evaluate(({ ipcMain }) => {
+    globalThis.gemCalls = 0;
+    ipcMain.removeHandler('gemini:generate');
+    ipcMain.handle('gemini:generate', async () => {
+      globalThis.gemCalls++;
+      const blocks = [
+        { type: 'para', text: '함수 $f(x)=\\frac{1}{2}x^{2}$ 에 대하여 $\\sqrt[3]{8}$ 의 값은?' },
+        { type: 'figure', box_2d: [100, 100, 700, 600] },
+        { type: 'choices', items: ['$1$', '$2$', '$3$', '$4$', '$5$'] },
+      ];
+      return { ok: true, status: 200, json: { candidates: [{ content: { parts: [{ text: JSON.stringify({ blocks }) }] } }] } };
+    });
+  });
+  await win.click('#settings-btn');
+  await win.waitForSelector('.modal .settings');
+  await win.fill('.settings input[type="password"]', 'test-key');
+  await win.fill('.settings input[type="number"]', '60');
+  await win.click('.modal-footer .btn-primary');
+  await win.waitForSelector('.export-hint:has-text("Gemini 사용")', { timeout: 10000 });
+  const rich = await exportHwpx('app-export-text.hwpx');
+  if (count(rich, 'hp:equation') < 4 * 7 || !rich.includes('root {3} of {8}') || count(rich, 'hp:pic') !== 4) throw new Error('Gemini 결과가 글자·수식으로 들어가지 않았습니다');
+  const calls1 = await app.evaluate(() => globalThis.gemCalls);
+  if (calls1 !== 4) throw new Error(`Gemini 호출 수: ${calls1}`);
+  const bookDirs = readdirSync(join(userData, 'data', 'books')).filter((d) => existsSync(join(userData, 'data', 'books', d, 'transcripts.json')));
+  if (bookDirs.length !== 1) throw new Error('옮긴 결과가 책 폴더에 저장되지 않았습니다');
+  await exportHwpx('app-export-text2.hwpx');
+  const calls2 = await app.evaluate(() => globalThis.gemCalls);
+  if (calls2 !== calls1) throw new Error('다시 내보낼 때 Gemini 를 또 불렀습니다');
+  await win.click('.seg:has(input[name="format"]) label:has-text("PDF")');
+  await win.waitForSelector('.export-hint[hidden]', { state: 'attached' });
 
   step('설정 창 (학원·선생님 기본값, Gemini 1·2순위)');
   await win.click('#settings-btn');

@@ -237,19 +237,28 @@ export function analyzeLayout(grid) {
           if (!best || d < best.d) best = { g0: k, g1: q, d };
           k = q;
         }
-        splits.push(best ? { g0: best.g0, g1: best.g1 } : { g0: x, g1: e });
+        let hasRule = false;
+        for (let k = x; k < e && !hasRule; k++) hasRule = rule[k] === 1;
+        splits.push({ ...(best ? { g0: best.g0, g1: best.g1 } : { g0: x, g1: e }), rule: hasRule, width: e - x });
       }
     }
     x = e;
   }
 
+  // 단 최소 폭보다 가까운 후보끼리는 하나만: 세로 구분선이 있는 것 > 더 넓은 빈칸
+  // (수식이 짧아 단 안쪽에 빈 세로 띠가 생긴 쪽에서 진짜 단 구분을 놓치지 않게)
+  const chosen = [];
+  for (const s of [...splits].sort((a, b) => b.rule - a.rule || b.width - a.width)) {
+    if (s.g0 - cx0 < minColW || cx1 - s.g1 < minColW) continue;
+    if (chosen.some((c) => s.g0 - c.g1 < minColW && c.g0 - s.g1 < minColW)) continue;
+    chosen.push(s);
+  }
+  chosen.sort((a, b) => a.g0 - b.g0);
   const columns = [];
   let start = cx0;
-  for (const s of splits) {
-    if (s.g0 - start >= minColW && cx1 - s.g1 >= minColW) {
-      columns.push({ x0: start, x1: s.g0 });
-      start = s.g1;
-    }
+  for (const s of chosen) {
+    columns.push({ x0: start, x1: s.g0 });
+    start = s.g1;
   }
   columns.push({ x0: start, x1: cx1 });
   // 각 단의 실제 잉크 범위로 좁히기

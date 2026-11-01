@@ -5,7 +5,7 @@ import { api, state, nav, runLeaveHooks } from './shared.js';
 import { onUpdateStatus, openSettings, applyMotion } from './chrome.js';
 import { showHome } from './home.js';
 import { openBook } from './bookview.js';
-import { openNote } from './noteview.js';
+import { openNote, renderFormatHint } from './noteview.js';
 
 const root = document.getElementById('app');
 let current = { view: 'home', args: [] };
@@ -36,6 +36,7 @@ nav.settings = () => openSettings();
 nav.refresh = () => {
   // 설정이 바뀐 뒤 지금 화면 다시 그리기
   if (current.view === 'home') return go('home', showHome);
+  if (current.view === 'note') renderFormatHint(); // Gemini 키를 넣거나 뺐으면 한글 내보내기 안내도
   return null;
 };
 

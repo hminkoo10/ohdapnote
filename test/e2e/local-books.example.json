@@ -1,0 +1,6 @@
+[
+  { "name": "쎈 대수 (문제집, 스캔본)", "file": "C:/Users/me/Downloads/쎈 대수.pdf", "role": "problem" },
+  { "name": "쎈 대수 (답지, 스캔본)", "file": "C:/Users/me/Downloads/정답지 쎈 대수.pdf", "role": "answer" },
+  { "name": "수능특강 수학Ⅱ (문제집, 뒤쪽 정답과 풀이 제외)", "file": "C:/Users/me/Downloads/2027 수능특강 수학 II .pdf", "role": "problem", "range": "1-101" },
+  { "name": "수능특강 수학Ⅱ (정답과 해설)", "file": "C:/Users/me/Downloads/2027 수능특강 수학Ⅱ 정답과 해설.pdf", "role": "answer" }
+]

@@ -26,10 +26,11 @@ export const DEFAULT_EXPORT_OPTIONS = {
   labels: true,
   bothOrder: 'append', // append: 문제 모두 → 해설 모두, interleave: 문제·해설 번갈아
   renumber: true,
+  format: 'pdf', // pdf | hwpx(한글 문서)
 };
 
 /** 원본 쪽 단위(pt)를 정규화: 비정상적으로 큰/작은 페이지(스캔 PDF 등)는 A4 폭으로 */
-function unitScale(page) {
+export function unitScale(page) {
   return page.w > 1000 || page.w < 300 ? A4.w / page.w : 1;
 }
 
