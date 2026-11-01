@@ -323,6 +323,68 @@ export function trimRect(grid, rect, pad = 0.008) {
   return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
 }
 
+/**
+ * 단 왼쪽 끝에 붙은 색칠된 이름표(알약 모양 "유형 15", "02-2" 등)를 찾습니다.
+ * 스캔본은 글자 크기로 단원·유형 제목 줄을 알 수 없어서, 그 앞의 이런 이름표로 찾습니다.
+ * 꽉 찬 덩어리이면서 본문 글줄보다 높아야 함. cutY 는 같은 줄 장식(위로 튀어나온 배지 등) 위의 빈 줄
+ * @param {number} lineH 본문 글줄 높이(비율)
+ * @returns {{x0:number,x1:number,y0:number,y1:number,cutY:number}[]}
+ */
+export function findLabelBlocks(grid, layout, lineH = 0) {
+  const { w, h, data } = grid;
+  const top = Math.max(0, Math.floor((layout.bodyTop ?? 0) * h));
+  const bottom = Math.min(h, Math.ceil((layout.bodyBottom ?? 1) * h));
+  const out = [];
+  for (const col of layout.columns || []) {
+    const cx0 = Math.max(0, Math.floor(col.x0 * w) - 1);
+    const cx1 = Math.min(w, Math.ceil(col.x1 * w) + 1);
+    const reach = cx0 + Math.round(0.03 * w);
+    // 줄마다: 단 왼쪽 끝 근처에서 시작하는 잉크 띠
+    const runs = [];
+    for (let y = top; y < bottom; y++) {
+      let s = cx0;
+      while (s < reach && !data[y * w + s]) s++;
+      let e = s;
+      while (e < cx1 && data[y * w + e]) e++;
+      runs.push(s < reach ? { s, e } : null);
+    }
+    const long = (r) => r && r.e - r.s >= 0.025 * w && r.e - r.s <= 0.16 * w;
+    const like = (a, b) => b && Math.abs(a.s - b.s) <= 2 && Math.abs(a.e - b.e) <= 2;
+    for (let i = 0; i < runs.length; i++) {
+      if (!long(runs[i])) continue;
+      // 시작·끝이 거의 같은 띠가 이어지는 동안이 이름표 몸통 (모서리가 둥근 위아래 줄은 덜 맞아도 됨)
+      let j = i + 1;
+      while (j < runs.length && like(runs[j - 1], runs[j])) j++;
+      const { s, e } = runs[i];
+      let a = i;
+      let b = j;
+      const edge = (r) => r && r.s <= s + 3 && r.e >= e - 3 && r.e - r.s >= 0.6 * (e - s);
+      if (a > 0 && edge(runs[a - 1])) a--;
+      if (b < runs.length && edge(runs[b])) b++;
+      i = j - 1;
+      const bh = (b - a) / h;
+      if (bh < Math.max(0.013, 1.3 * lineH) || bh > 0.035) continue;
+      let ink = 0;
+      for (let y = a; y < b; y++) for (let x = s; x < e; x++) ink += data[(top + y) * w + x];
+      if (ink < 0.85 * (b - a) * (e - s)) continue;
+      // 위로 같은 줄 장식이 이어지면 그 위 빈 줄에서 끊음 (이름표 높이만큼까지만)
+      const blankRow = (y) => {
+        for (let x = cx0; x < cx1; x++) if (data[y * w + x]) return false;
+        return true;
+      };
+      let cut = top + a;
+      for (let y = top + a - 1; y >= Math.max(top, top + a - Math.round(1.2 * (b - a))); y--) {
+        if (blankRow(y)) {
+          cut = y + 1;
+          break;
+        }
+      }
+      out.push({ x0: s / w, x1: e / w, y0: (top + a) / h, y1: (top + b) / h, cutY: cut / h });
+    }
+  }
+  return out;
+}
+
 /** rect 안 잉크 셀 개수 */
 export function inkCount(grid, rect) {
   const { w, h, data } = grid;

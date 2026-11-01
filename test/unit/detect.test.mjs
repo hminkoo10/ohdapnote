@@ -9,7 +9,7 @@ import {
   computeItems,
   guessPageOffset,
 } from '../../src/renderer/js/detect.js';
-import { analyzeLayout, trimRect } from '../../src/renderer/js/layout.js';
+import { analyzeLayout, trimRect, findLabelBlocks } from '../../src/renderer/js/layout.js';
 
 test('parseNumberWord: 문제 번호 모양 판별', () => {
   assert.deepEqual(parseNumberWord('12'), { num: 12, digits: '12', style: 'plain' });
@@ -119,6 +119,25 @@ test('trimRect: 여백 잘라내기', () => {
     { x: 0.2, y: 0.4, w: 0.2, h: 0.2 },
   );
   assert.equal(trimRect({ w, h, data }, { x: 0.8, y: 0.8, w: 0.1, h: 0.1 }), null);
+});
+
+test('findLabelBlocks: 단 왼쪽 끝의 꽉 찬 이름표("유형 15")만 찾고, 위로 튀어나온 배지 위에서 끊음', () => {
+  const w = 240;
+  const h = 330;
+  const data = new Uint8Array(w * h);
+  const fill = (x0, x1, y0, y1) => {
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) data[y * w + x] = 1;
+  };
+  for (let y = 40; y < 80; y += 5) for (let x = 20; x < 110; x += 4) fill(x, x + 3, y, y + 3); // 본문 글줄
+  fill(20, 33, 100, 106); // 이름표 (높이 6칸 ≈ 0.018)
+  for (let x = 37; x < 100; x += 4) fill(x, x + 3, 101, 105); // 이름표 옆 제목 글자
+  fill(100, 106, 95, 101); // 제목 줄 오른쪽 끝 배지 (이름표보다 위로 튀어나옴)
+  fill(20, 23, 140, 144); // 글줄 첫 글자 (작음)
+  const layout = { bodyTop: 0, bodyBottom: 1, columns: [{ x0: 20 / w, x1: 110 / w }] };
+  const found = findLabelBlocks({ w, h, data }, layout, 0.011);
+  assert.equal(found.length, 1);
+  assert.ok(Math.abs(found[0].y0 - 100 / h) < 1e-9);
+  assert.ok(Math.abs(found[0].cutY - 95 / h) < 1e-9, `cutY ${found[0].cutY * h}`);
 });
 
 test('guessPageOffset: 쪽번호로 책 쪽 보정값 추정', () => {

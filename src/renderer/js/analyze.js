@@ -1,7 +1,7 @@
 // 문서 분석 파이프라인: 렌더링 → 레이아웃 → (텍스트 | OCR) → 번호 선택 → 영역 계산
 // (Gemini 는 사용자가 고른 쪽만 따로: detectPageWithGemini)
 
-import { analyzeLayout, inkGridFromCanvas, trimRect, inkCount } from './layout.js';
+import { analyzeLayout, inkGridFromCanvas, trimRect, inkCount, findLabelBlocks } from './layout.js';
 import {
   extractCandidates,
   selectAnchors,
@@ -232,6 +232,8 @@ function finishOcr(page, splitHint, role) {
   page.needsOcr = false;
   applyOcr(page, splitHint);
   if (looksLikeAnswerTable(page.candidates, { strict: role !== 'answer' })) page.isTable = true;
+  // 스캔한 문제집: 유형·단원 제목 앞의 색칠된 이름표 (해설에는 "다른 풀이" 같은 이름표가 문항 안에 있어서 문제집만)
+  if (role === 'problem' && page.source === 'ocr') page.labels = findLabelBlocks(page.grid, page.layout, page.bodyH);
 }
 
 /** 한 쪽 OCR (passes 마다 한 번씩 읽어 후보를 합침) */
@@ -245,9 +247,7 @@ async function ocrPage(src, page, { ocrLang = 'kor+eng', passes = OCR_PASSES, sp
  * 여러 쪽을 OCR 워커 수만큼 동시에.
  * 방식(pass)마다 모든 쪽을 다 읽고 다음 방식으로 넘어감 (방식마다 언어가 달라서, 섞어 읽으면 워커를 자꾸 바꿔 띄움)
  */
-async function ocrPages(src, list, { passes, ocrLang, role, splitHint, signal, onProgress, label }) {
-  const total = list.length * passes.length;
-  let done = 0;
+async function ocrPages(src, list, { passes, ocrLang, role, splitHint, signal, onProgress, label, count = { done: 0, total: list.length * passes.length }, finish = true }) {
   for (const r of list) r.textCands ??= r.candidates;
   for (const pass of passes) {
     let next = 0;
@@ -256,13 +256,27 @@ async function ocrPages(src, list, { passes, ocrLang, role, splitHint, signal, o
         abortIfNeeded(signal);
         const r = list[next++];
         r.ocrPasses.push(await ocrTokens(src, r, pass, ocrLang));
-        done++;
-        onProgress?.({ phase: 'scan', done, total, message: `${r.index + 1}쪽 ${label}` });
+        count.done++;
+        onProgress?.({ phase: 'scan', done: count.done, total: count.total, message: `${r.index + 1}쪽 ${label}` });
       }
     };
     await Promise.all(Array.from({ length: Math.min(OCR_WORKERS, list.length) }, run));
   }
-  for (const r of list) finishOcr(r, splitHint, role);
+  if (finish) for (const r of list) finishOcr(r, splitHint, role);
+}
+
+/**
+ * 번호 띠를 영어로만 읽어도 되는 책인지: 먼저 읽어 본 쪽들에 말머리("예제 1")가 없고 대표 번호가 0001 처럼 0 을 채운 세 자리 이상.
+ * (한국어로 읽은 띠는 영어로 잘못 읽은 한글("일"→"2")을 걸러 주는데, 0 을 채운 번호 체계에는 그런 숫자가 끼지 못함)
+ */
+function digitsOnlyBook(results, ocrList, { numberStyle, role }) {
+  for (const r of ocrList) {
+    extractOcr(r); // 단 나누기 같은 쪽 정보는 건드리지 않고 후보만 (끝에 finishOcr 로 다시 뽑음)
+    if (looksLikeAnswerTable(r.candidates, { strict: role !== 'answer' })) r.candidates = [];
+  }
+  if (ocrList.some((r) => r.candidates.some((c) => c.prefix))) return false;
+  const { signature } = selectAnchors(results, { numberStyle });
+  return !!signature && !signature.prefix && signature.padded && signature.digitsLen >= 3;
 }
 
 /**
@@ -647,8 +661,9 @@ function shareSplitHints(results) {
  *   signal
  */
 export async function analyzeDocument(src, opts) {
-  const { pages, role = 'problem', flow = 'column', numberStyle = 'auto', ocrLang, onProgress, signal } = opts;
-  const results = [];
+  const { role = 'problem', flow = 'column', numberStyle = 'auto', ocrLang, onProgress, signal } = opts;
+  let { pages } = opts;
+  let results = [];
   let splitHint = null; // 번호 위치로 추정한 단 위치(같은 책 다음 쪽에도 적용)
 
   // 1) 쪽마다 레이아웃·글자 레이어 (빠름)
@@ -661,15 +676,37 @@ export async function analyzeDocument(src, opts) {
     results.push(page);
   }
 
+  // 문제집 뒤에 붙은 정답과 풀이는 문제가 아님 (글자 레이어로 알 수 있으면 OCR 전에 뺌)
+  let answersFrom = -1;
+  const cutAnswers = () => {
+    const k = role === 'problem' ? answerSectionStart(results) : -1;
+    if (k < 0) return;
+    answersFrom = results[k].index;
+    results = results.slice(0, k + 1);
+    pages = pages.slice(0, pages.indexOf(answersFrom) + 1);
+  };
+  cutAnswers();
+
   // 텍스트 레이어는 있지만 번호를 거의 못 찾은 문서 → 번호가 그림으로 되어 있는 것으로 보고 OCR
   const textPages = results.filter((r) => r.source === 'text' && !r.layout.blank && !r.needsOcr);
   const withNums = textPages.filter((r) => r.candidates.length > 0).length;
   if (textPages.length && withNums / textPages.length < 0.3) for (const r of results) if (r.textWithoutNumbers) r.needsOcr = true;
 
   // 2) OCR (워커 여러 개가 여러 쪽을 동시에)
+  //    쪽 전체(영어)를 다 읽고, 번호 띠는 네 쪽에 한 쪽만 먼저 설정한 언어로 읽어 봄.
+  //    말머리 없이 0001 처럼 0 을 채운 번호만 쓰는 책이면 나머지 쪽 띠는 영어로만 (한국어를 같이 읽으면 두 배쯤 느림)
   const ocrList = results.filter((r) => r.needsOcr);
-  await ocrPages(src, ocrList, { passes: OCR_PASSES, ocrLang, role, splitHint, signal, onProgress, label: 'OCR 중' });
+  const [pagePass, stripPass] = OCR_PASSES;
+  const sample = ocrList.filter((_, k) => k % 4 === 0);
+  const rest = ocrList.filter((_, k) => k % 4 !== 0);
+  const ocrOpts = { role, splitHint, signal, onProgress, label: 'OCR 중', count: { done: 0, total: ocrList.length * 2 }, finish: false };
+  await ocrPages(src, ocrList, { ...ocrOpts, ocrLang, passes: [pagePass] });
+  await ocrPages(src, sample, { ...ocrOpts, ocrLang, passes: [stripPass] });
+  const stripLang = rest.length && digitsOnlyBook(results, ocrList, { numberStyle, role }) ? DIGIT_LANG : ocrLang;
+  await ocrPages(src, rest, { ...ocrOpts, ocrLang: stripLang, passes: [stripPass] });
+  for (const r of ocrList) finishOcr(r, splitHint, role);
   shareSplitHints(results);
+  if (answersFrom < 0) cutAnswers(); // 스캔본은 OCR 로 정답표를 알아본 뒤에
   onProgress?.({ phase: 'scan', done: pages.length, total: pages.length, message: '번호 정리 중' });
 
   // 빠른 정답표 쪽은 번호 인식에서 뺌 (문제집 끝에 붙은 "한눈에 보는 정답"도: 문제집은 칸이 촘촘한 표만)
@@ -705,6 +742,7 @@ export async function analyzeDocument(src, opts) {
   const sourceMap = new Map(results.map((r) => [r.index, r.source]));
   const flags = flagPages(pages, anchors, layouts);
   for (const idx of tablePages) flags.set(idx, ['빠른 정답표 같아서 건너뜀']);
+  if (answersFrom >= 0) flags.set(answersFrom, ['여기부터는 정답과 풀이 같아서 뺌 (문제 쪽까지만 범위를 정하면 사라짐)']);
   const cutters = buildCutters(results, anchors, signature);
   const ranges = new Map(results.filter((r) => r.ranges?.length).map((r) => [r.index, r.ranges]));
   let items = computeItems(pages, anchors, layouts, grids, { flow, source: sourceMap, cutters, stopPages: tablePages, ranges });
@@ -724,6 +762,16 @@ export async function analyzeDocument(src, opts) {
   const pageOffset = guessPageOffset(results.map((r) => ({ index: r.index, numbers: r.footerNumbers })));
   const ocrPageCount = results.filter((r) => r.ocrPasses.length).length;
   return { items, pageInfo, signature, signatures, pageOffset, ocrPages: ocrPageCount, layouts, grids };
+}
+
+/**
+ * 문제집 PDF 뒤에 정답과 풀이가 붙어 있으면 그 첫머리의 빠른 정답표 쪽 (results 안 위치). 없으면 -1
+ * 앞에 문제가 있고, 문서 뒤쪽 절반에서 나온 정답표만 봄 (단원 중간의 정답표로 문제를 잘라 내지 않게)
+ */
+function answerSectionStart(results) {
+  return results.findIndex(
+    (r, k) => k >= results.length / 2 && (r.isTable || looksLikeAnswerTable(r.candidates, { strict: true })) && results.slice(0, k).some((q) => q.candidates.length),
+  );
 }
 
 const round4 = (v) => Math.round(v * 10000) / 10000;
@@ -762,7 +810,7 @@ function promoteFullWidthHeadings(page) {
 }
 
 /**
- * 문항 영역을 끊는 위치들: 큰 글씨 제목, 여러 단 쪽의 가로 띠(단원 제목 막대), 제목처럼 큰 번호
+ * 문항 영역을 끊는 위치들: 큰 글씨 제목, 여러 단 쪽의 가로 띠(단원 제목 막대), 제목처럼 큰 번호, 스캔본 제목 이름표
  * @returns {Map<number, {x0:number,x1:number,y0:number}[]>}
  */
 export function buildCutters(results, anchors, signature) {
@@ -777,6 +825,12 @@ export function buildCutters(results, anchors, signature) {
   for (const r of results) {
     for (const hd of r.headings || []) add(r.index, { x0: hd.x0, x1: hd.x1, y0: hd.y0 - 0.004 });
     for (const rg of r.ranges || []) add(r.index, { x0: rg.x0, x1: rg.x1, y0: rg.y0 - 0.006 });
+    // 이름표 중 문항 번호가 들어 있지 않은 것 ("0094 대표 문제" 는 문항 머리, "유형 15" 는 제목)
+    const chain = anchors.get(r.index) || [];
+    for (const lb of r.labels || []) {
+      const own = chain.some((a) => (a.x0 + a.x1) / 2 > lb.x0 - 0.01 && (a.x0 + a.x1) / 2 < lb.x1 + 0.01 && (a.y0 + a.y1) / 2 > lb.y0 - 0.01 && (a.y0 + a.y1) / 2 < lb.y1 + 0.01);
+      if (!own) add(r.index, { x0: lb.x0, x1: lb.x1, y0: lb.cutY - 0.002 });
+    }
     if ((r.layout?.columns?.length || 1) >= 2) {
       for (const b of r.layout.spans || []) add(r.index, { x0: 0, x1: 1, y0: b.y0 - 0.002 });
     }
