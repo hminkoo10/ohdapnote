@@ -1,7 +1,7 @@
 {
   "name": "ohdapnote",
   "productName": "OhdapNote",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "문제집과 답지 PDF를 스캔해 틀린 문제만 모아 PDF로 만들어 주는 수학 오답노트 프로그램",
   "main": "src/main/main.js",
   "author": {
