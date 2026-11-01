@@ -5,6 +5,7 @@
 import { _electron as electron } from '../lib/playwright.mjs';
 import { mkdtempSync, existsSync, statSync, mkdirSync, rmSync, writeFileSync, copyFileSync, readdirSync, readFileSync } from 'node:fs';
 import { inflateRawSync } from 'node:zlib';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -196,7 +197,7 @@ try {
     console.log(`    ${mode}: ${statSync(out).size} bytes`);
   }
 
-  step('한글(HWPX): 키 없음 → 그림 / 가짜 Gemini → 글자·수식 / 다시 내보내면 저장해 둔 결과');
+  step('한글(HWPX): 키 없음 → 그림 / 가짜 Gemini → 글자·수식(2문항씩 묶어 동시에) / 다시 내보내면 저장해 둔 결과');
   await win.click('.seg:has(input[name="format"]) label:has-text("한글")');
   await win.waitForSelector('.export-hint:not([hidden])');
   const hwpxPart = (file, name) => {
@@ -230,39 +231,119 @@ try {
   };
   const plain = await exportHwpx('app-export-picture.hwpx');
   if (count(plain, 'hp:equation') !== 0 || count(plain, 'hp:pic') < 4) throw new Error('키가 없을 때 문항이 그림으로 들어가지 않았습니다');
-  // 가짜 Gemini (메인 프로세스의 요청 처리를 바꿔 끼움) + 설정에서 키 넣기
+  // 가짜 Gemini (메인 프로세스의 요청 처리를 바꿔 끼움): 그림이 여러 장이면 그림마다 답하는 묶음 답 + 설정에서 키 넣기
   await app.evaluate(({ ipcMain }) => {
-    globalThis.gemCalls = 0;
-    ipcMain.removeHandler('gemini:generate');
-    ipcMain.handle('gemini:generate', async () => {
-      globalThis.gemCalls++;
+    globalThis.gemCalls = [];
+    globalThis.inFlight = 0;
+    globalThis.maxInFlight = 0;
+    globalThis.__realAiGenerate ??= ipcMain._invokeHandlers?.get('ai:generate'); // 나중에 원래 처리로 되돌릴 때
+    ipcMain.removeHandler('ai:generate');
+    ipcMain.handle('ai:generate', async (_e, { provider, body }) => {
+      const images = body.contents[0].parts.filter((p) => p.inlineData).length;
+      globalThis.gemCalls.push({ provider, images });
+      globalThis.maxInFlight = Math.max(globalThis.maxInFlight, ++globalThis.inFlight);
+      await new Promise((r) => setTimeout(r, 1500));
+      globalThis.inFlight--;
       const blocks = [
         { type: 'para', text: '함수 $f(x)=\\frac{1}{2}x^{2}$ 에 대하여 $\\sqrt[3]{8}$ 의 값은?' },
         { type: 'figure', box_2d: [100, 100, 700, 600] },
         { type: 'choices', items: ['$1$', '$2$', '$3$', '$4$', '$5$'] },
       ];
-      return { ok: true, status: 200, json: { candidates: [{ content: { parts: [{ text: JSON.stringify({ blocks }) }] } }] } };
+      const answer = images > 1 ? { items: Array.from({ length: images }, (_, i) => ({ index: i + 1, blocks })) } : { blocks };
+      return { ok: true, status: 200, json: { candidates: [{ content: { parts: [{ text: JSON.stringify(answer) }] } }] } };
     });
   });
   await win.click('#settings-btn');
   await win.waitForSelector('.modal .settings');
   await win.fill('.settings input[type="password"]', 'test-key');
   await win.fill('.settings input[type="number"]', '60');
+  // 세부 설정: 한 요청에 2문항씩 → 4문항이 요청 2개로 (분당 60개 = 1초 간격으로 시작, 응답은 1.5초 → 동시에 2개)
+  await win.click('.settings .set-adv summary');
+  await win.fill('.settings .set-adv input[type="number"] >> nth=1', '2');
   await win.click('.modal-footer .btn-primary');
   await win.waitForSelector('.export-hint:has-text("Gemini 사용")', { timeout: 10000 });
   const rich = await exportHwpx('app-export-text.hwpx');
   if (count(rich, 'hp:equation') < 4 * 7 || !rich.includes('root {3} of {8}') || count(rich, 'hp:pic') !== 4) throw new Error('Gemini 결과가 글자·수식으로 들어가지 않았습니다');
   const calls1 = await app.evaluate(() => globalThis.gemCalls);
-  if (calls1 !== 4) throw new Error(`Gemini 호출 수: ${calls1}`);
+  const maxInFlight = await app.evaluate(() => globalThis.maxInFlight);
+  console.log(`    요청 ${calls1.length}개 (그림 ${calls1.map((c) => c.images).join('+')}장), 동시에 최대 ${maxInFlight}개`);
+  if (calls1.length !== 2 || calls1.some((c) => c.images !== 2 || c.provider !== 'gemini')) throw new Error(`Gemini 호출: ${JSON.stringify(calls1)}`);
+  if (maxInFlight < 2) throw new Error('요청이 동시에 나가지 않았습니다');
   const bookDirs = readdirSync(join(userData, 'data', 'books')).filter((d) => existsSync(join(userData, 'data', 'books', d, 'transcripts.json')));
   if (bookDirs.length !== 1) throw new Error('옮긴 결과가 책 폴더에 저장되지 않았습니다');
   await exportHwpx('app-export-text2.hwpx');
-  const calls2 = await app.evaluate(() => globalThis.gemCalls);
-  if (calls2 !== calls1) throw new Error('다시 내보낼 때 Gemini 를 또 불렀습니다');
+  const calls2 = await app.evaluate(() => globalThis.gemCalls.length);
+  if (calls2 !== calls1.length) throw new Error('다시 내보낼 때 Gemini 를 또 불렀습니다');
+
+  step('다른 AI: 세부 설정에서 Claude 로 바꿔 해설지 한글 내보내기 / OpenAI 호환 (내 컴퓨터의 가짜 서버로, 메인 프로세스·SDK 그대로)');
+  const fakeSeen = [];
+  const fakeAi = createServer((req, res) => {
+    let data = '';
+    req.on('data', (d) => (data += d));
+    req.on('end', () => {
+      const body = JSON.parse(data || '{}');
+      fakeSeen.push({ url: req.url, headers: req.headers, body });
+      const blocks = [{ type: 'para', text: '해설: $x^{2}=4$ 이므로 $x=2$' }];
+      let text = JSON.stringify({ blocks });
+      const content = body.messages?.[0]?.content;
+      const images = Array.isArray(content) ? content.filter((c) => c.type === 'image' || c.type === 'image_url').length : 0;
+      if (images > 1) text = JSON.stringify({ items: Array.from({ length: images }, (_, i) => ({ index: i + 1, blocks })) });
+      const reply = req.url.startsWith('/v1/messages')
+        ? { id: 'msg_e2e', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }
+        : { id: 'cc', object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }] };
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(reply));
+    });
+  });
+  await new Promise((r) => fakeAi.listen(0, '127.0.0.1', r));
+  const fakeUrl = `http://127.0.0.1:${fakeAi.address().port}`;
+  try {
+    await app.evaluate(({ ipcMain }) => {
+      // 가짜 Gemini 를 빼고 원래 메인 프로세스 처리(src/main/ai.js)로 되돌림
+      if (!globalThis.__realAiGenerate) throw new Error('원래 ai:generate 처리기를 찾지 못함');
+      ipcMain.removeHandler('ai:generate');
+      ipcMain.handle('ai:generate', globalThis.__realAiGenerate);
+    });
+    await win.click('#settings-btn');
+    await win.waitForSelector('.modal .settings');
+    await win.click('.settings .set-adv summary');
+    await win.selectOption('.settings .set-adv select', 'anthropic');
+    await win.fill('.settings .ai-panel:not([hidden]) input[type="password"]', 'sk-ant-e2e');
+    await win.fill('.settings .ai-panel:not([hidden]) input[type="number"]', '600');
+    await win.fill('.settings .set-adv .ai-only:not([hidden]) input', fakeUrl);
+    await shot('9-settings-claude');
+    await win.click('.modal-footer .btn-primary');
+    await win.waitForSelector('.export-hint:has-text("Claude 사용")', { timeout: 10000 });
+    const out = join(OUT, 'app-export-claude.hwpx');
+    rmSync(out, { force: true });
+    await stubSave(out);
+    await win.click('.export-btn[data-mode="answers"]');
+    await waitToast('저장했어요', 120000);
+    await clearToasts();
+    const sec = hwpxPart(out, 'Contents/section0.xml');
+    const msgs = fakeSeen.filter((r) => r.url.startsWith('/v1/messages'));
+    console.log(`    Claude 요청 ${msgs.length}개 (그림 ${msgs.map((r) => r.body.messages[0].content.filter((c) => c.type === 'image').length).join('+')}장), 수식 ${count(sec, 'hp:equation')}개`);
+    if (msgs.length !== 2) throw new Error(`Claude 요청 수: ${msgs.length}`);
+    const m0 = msgs[0];
+    if (m0.body.model !== 'claude-opus-5-5' || m0.body.output_config?.format?.type !== 'json_schema' || !/sk-ant-e2e/.test(m0.headers['x-api-key'] || m0.headers.authorization || '') || !m0.headers['anthropic-version']) {
+      throw new Error('Claude 요청 모양이 다릅니다: ' + JSON.stringify({ headers: m0.headers, model: m0.body.model }));
+    }
+    if (count(sec, 'hp:equation') < 4 * 2) throw new Error('Claude 결과가 글자·수식으로 들어가지 않았습니다');
+    // OpenAI 호환 (로컬 서버처럼 키 없이)
+    await win.evaluate((u) => window.ohdap.setSettings({ openaiBaseUrl: u }), fakeUrl);
+    const r = await win.evaluate(() => window.ohdap.aiGenerate({ provider: 'openai', model: 'fake-vl', body: { messages: [{ role: 'user', content: 'hi' }] }, requestId: 'e2e-openai' }));
+    const oa = fakeSeen.find((x) => x.url === '/v1/chat/completions');
+    if (!r.ok || !oa || oa.body.model !== 'fake-vl' || oa.headers.authorization) throw new Error('OpenAI 호환 요청이 다릅니다: ' + JSON.stringify({ r, oa: oa && { headers: oa.headers, body: oa.body } }));
+    // Codex: CLI 가 없는 경로면 "못 찾음" (실제 codex 는 부르지 않음)
+    const cx = await win.evaluate(() => window.ohdap.aiCodexStatus('C:/no/such/codex.exe'));
+    if (cx.found !== false) throw new Error('codex 상태: ' + JSON.stringify(cx));
+  } finally {
+    fakeAi.close();
+  }
   await win.click('.seg:has(input[name="format"]) label:has-text("PDF")');
   await win.waitForSelector('.export-hint[hidden]', { state: 'attached' });
 
-  step('설정 창 (학원·선생님 기본값, Gemini 1·2순위)');
+  step('설정 창 (학원·선생님 기본값, AI 1·2순위)');
   await win.click('#settings-btn');
   await win.waitForSelector('.modal .settings');
   await win.waitForTimeout(500);

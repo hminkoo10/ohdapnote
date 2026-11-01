@@ -2,10 +2,10 @@
 
 import { h, clear, toast, modal, confirmDialog, icon, animateOut, countUp } from './ui.js';
 import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS } from './exporter.js';
-import { buildHwpx, renderStack, cropImage } from './hwpx.js';
-import { geminiTranscribe, canvasToBase64Jpeg } from './gemini.js';
+import { buildHwpx, renderStack, cropImage, blockSegs } from './hwpx.js';
+import { geminiTranscribe, geminiTranscribeBatch, canvasToBase64Jpeg } from './gemini.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
-import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, geminiModels } from './shared.js';
+import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOptions, aiLabel, aiModelText } from './shared.js';
 import { topbar, renderUpdateBadge } from './chrome.js';
 import { spineFor } from './home.js';
 
@@ -545,8 +545,8 @@ function formatHint() {
 function setFormatHint(el) {
   el.hidden = ns.note?.exportOptions.format !== 'hwpx';
   el.textContent = geminiReady()
-    ? '문제·해설을 글자와 수식으로 옮겨 한글 수식 편집기로 고칠 수 있어요 (Gemini 사용)'
-    : 'Gemini 키가 없으면 문항이 그림으로 들어가요 (설정에서 키 입력)';
+    ? `문제·해설을 글자와 수식으로 옮겨 한글 수식 편집기로 고칠 수 있어요 (${aiLabel()} 사용)`
+    : 'AI 를 설정하지 않으면 문항이 그림으로 들어가요 (설정에서 AI 키 입력)';
 }
 
 export function renderFormatHint() {
@@ -724,9 +724,9 @@ async function doExport(mode) {
 }
 
 // ===========================================================================
-// 한글 문서(HWPX): Gemini 로 문항을 글자·수식으로 옮겨 넣음 (키가 없거나 못 옮긴 문항은 그림으로)
+// 한글 문서(HWPX): AI 로 문항을 글자·수식으로 옮겨 넣음 (AI 설정이 없거나 못 옮긴 문항은 그림으로)
 // ===========================================================================
-const TRANSCRIBE_WIDTH = 1500; // Gemini 에 보내는 그림 폭(px)
+const TRANSCRIBE_WIDTH = 1500; // AI 에 보내는 그림 폭(px)
 const MAX_TRANSCRIPTS = 3000; // 책 하나에 저장해 두는 개수
 const transcripts = new Map(); // 책 id → {items: {열쇠: {blocks, model, at}}, dirty}  (책 폴더의 transcripts.json)
 
@@ -768,23 +768,93 @@ function transcriptKey(block) {
   return `${block.role}|${block.item.id}|${(hash >>> 0).toString(36)}`;
 }
 
+/**
+ * 1) 새로 옮길 문항을 먼저 옮겨 저장: 문항 여러 개를 한 요청에 묶고(설정 aiBatch), 요청 여러 개를 동시에(aiConcurrency)
+ * 2) buildHwpx 는 문항마다 transcribe 를 부르는데, 미리 옮겨 둔 결과를 그대로 씀
+ */
 async function exportHwpx(blocks, entries, opts, info) {
   const bookOf = new Map(); // 원본(DocSource) → 책 id
   for (const e of entries) for (const src of [e.src?.problem, e.src?.answer]) if (src) bookOf.set(src, e.bookId);
-  const work = blocks.filter((b) => (b.kind === 'problem' || b.kind === 'answer') && b.item && bookOf.has(b.src));
-  const useGemini = geminiReady() && work.length > 0;
+  // buildHwpx 가 글자로 옮기려는 문항 (그릴 영역이 있는 문제·해설)
+  const work = blocks.filter((b) => (b.kind === 'problem' || b.kind === 'answer') && b.item && bookOf.has(b.src) && blockSegs(b).length);
+  const useAi = geminiReady() && work.length > 0;
+  const { batch: batchSize, ...ai } = aiOptions();
   const abort = new AbortController();
-  let ui = null;
-  if (useGemini) {
-    for (const bid of new Set(work.map((b) => bookOf.get(b.src)))) await loadTranscripts(bid);
-    const pending = work.filter((b) => !transcripts.get(bookOf.get(b.src)).items[transcriptKey(b)]);
-    if (pending.length) ui = transcribeDialog(work, pending.length, abort);
-  }
+  const storeOf = (block) => transcripts.get(bookOf.get(block.src));
+  const failed = new Set(); // 이번에 미리 옮기지 못한 문항 → 그림으로 (다시 묻지 않음)
   let quota = false; // 한도가 차면 나머지는 묻지 않고 그림으로
+  let ui = null;
+
+  /** 새로 옮길 문항을 묶음으로 동시에 옮겨 저장 (같은 열쇠의 문항은 한 번만) */
+  const prefetch = async (pending) => {
+    const groups = new Map(); // 열쇠 → 블록들
+    for (const b of pending) {
+      const key = transcriptKey(b);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(b);
+    }
+    // 문제와 해설은 지시문이 달라서 따로 묶음
+    const batches = [];
+    for (const role of ['problem', 'answer']) {
+      const keys = [...groups.keys()].filter((k) => groups.get(k)[0].role === role);
+      for (let i = 0; i < keys.length; i += batchSize) batches.push({ role, keys: keys.slice(i, i + batchSize) });
+    }
+    let done = work.length - pending.length;
+    ui.progress(done, work.length);
+    const settle = (key, stateName, msg) => {
+      for (const b of groups.get(key)) ui.row(b).set(stateName, msg);
+      done += groups.get(key).length;
+      ui.progress(done, work.length);
+    };
+    const giveUp = (key, stateName, msg) => {
+      for (const b of groups.get(key)) failed.add(b);
+      settle(key, stateName, msg);
+    };
+
+    let next = 0;
+    const worker = async () => {
+      while (next < batches.length) {
+        const { role, keys } = batches[next++];
+        if (quota) {
+          for (const k of keys) giveUp(k, 'empty', '한도 초과 → 그림으로');
+          continue;
+        }
+        for (const k of keys) for (const b of groups.get(k)) ui.row(b).set('run', '옮기는 중…');
+        let results;
+        try {
+          // buildHwpx 가 transcribe 에 넘기는 것과 같은 영역(blockSegs)·같은 폭의 그림
+          const images = [];
+          for (const k of keys) images.push(canvasToBase64Jpeg(await renderStack(blockSegs(groups.get(k)[0]), TRANSCRIBE_WIDTH), 0.85));
+          results = await geminiTranscribeBatch(images, { role, ...ai, signal: abort.signal, onStatus: (msg) => ui.status(msg) });
+        } catch (err) {
+          if (err?.name === 'AbortError') throw err;
+          results = keys.map(() => err);
+        }
+        keys.forEach((k, i) => {
+          const r = results[i];
+          if (r instanceof Error) {
+            if (/한도/.test(r.message)) {
+              quota = true;
+              ui.status(r.message);
+            }
+            giveUp(k, 'err', `${r.message} → 그림으로`);
+          } else if (!r.length) {
+            giveUp(k, 'empty', '읽은 내용이 없음 → 그림으로');
+          } else {
+            const store = storeOf(groups.get(k)[0]);
+            store.items[k] = { blocks: [...r], model: r.model, at: Date.now() };
+            store.dirty = true;
+            settle(k, 'ok', `글자·수식으로 옮김 · ${r.model || '기본 모델'}`);
+          }
+        });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(ai.concurrency, batches.length) }, worker));
+  };
 
   const transcribe = async (block, segs) => {
     if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
-    const store = transcripts.get(bookOf.get(block.src));
+    const store = storeOf(block);
     if (!store) return null;
     const key = transcriptKey(block);
     const row = ui?.row(block);
@@ -804,20 +874,18 @@ async function exportHwpx(blocks, entries, opts, info) {
       };
     };
     const cached = store.items[key];
-    if (cached?.blocks?.length) {
-      row?.set('ok', '저장해 둔 결과');
-      return finish(cached.blocks);
-    }
+    if (cached?.blocks?.length) return finish(cached.blocks);
+    if (failed.has(block)) return null;
     if (quota) {
       row?.set('empty', '한도 초과 → 그림으로');
       return null;
     }
+    // 미리 옮기기에서 빠진 문항만 여기서 하나씩
     row?.set('run', '옮기는 중…');
     try {
       const result = await geminiTranscribe(canvasToBase64Jpeg(await getStack(), 0.85), {
         role: block.role,
-        models: geminiModels(),
-        rpm: state.settings.geminiRpm,
+        ...ai,
         signal: abort.signal,
         onStatus: (msg) => ui?.status(msg),
       });
@@ -827,7 +895,7 @@ async function exportHwpx(blocks, entries, opts, info) {
       }
       store.items[key] = { blocks: [...result], model: result.model, at: Date.now() };
       store.dirty = true;
-      row?.set('ok', `글자·수식으로 옮김 · ${result.model}`);
+      row?.set('ok', `글자·수식으로 옮김 · ${result.model || '기본 모델'}`);
       return finish(store.items[key].blocks);
     } catch (err) {
       if (err?.name === 'AbortError') throw err;
@@ -841,14 +909,23 @@ async function exportHwpx(blocks, entries, opts, info) {
   };
 
   try {
+    if (useAi) {
+      for (const bid of new Set(work.map((b) => bookOf.get(b.src)))) await loadTranscripts(bid);
+      const pending = work.filter((b) => !storeOf(b).items[transcriptKey(b)]?.blocks?.length);
+      if (pending.length) {
+        ui = transcribeDialog(work, pending.length, abort);
+        for (const b of work) if (!pending.includes(b)) ui.row(b).set('ok', '저장해 둔 결과');
+        await prefetch(pending);
+        ui.status('한글 문서를 만드는 중…');
+      }
+    }
     return await buildHwpx({
       blocks,
       options: opts,
       title: info.title,
       info,
-      transcribe: useGemini ? transcribe : null,
+      transcribe: useAi ? transcribe : null,
       onProgress: (done, total) => {
-        ui?.progress(done, total);
         if (done === total) ui?.close(); // 옮기기가 끝나면 창을 닫고 문서를 마저 만듦
       },
     });
@@ -869,14 +946,14 @@ function transcribeDialog(work, pendingCount, abort) {
       return row;
     }),
   );
-  const status = h('div.small.muted.gem-status', `모델: ${geminiModels().join(' → ')}`);
+  const status = h('div.small.muted.gem-status', `모델: ${aiModelText()}`);
   const bar = h('div.progress-bar');
   let finished = false;
   modal({
     title: `문항 ${work.length}개를 글자·수식으로`,
     body: h(
       'div.gem-run',
-      h('p.small.muted', `새로 옮길 문항 ${pendingCount}개를 Gemini에게 보내요. 한 문항에 몇 초~수십 초 걸려요. 옮기지 못한 문항은 그림으로 넣어요. 옮긴 결과는 저장해 두어 다음에는 다시 묻지 않아요.`),
+      h('p.small.muted', `새로 옮길 문항 ${pendingCount}개를 AI(${aiLabel()})에게 보내요. 여러 문항을 한 요청에 묶어 동시에 보내요. 옮기지 못한 문항은 그림으로 넣어요. 옮긴 결과는 저장해 두어 다음에는 다시 묻지 않아요.`),
       h('div.progress', bar),
       status,
       list,

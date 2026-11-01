@@ -36,7 +36,7 @@ window.addEventListener('beforeunload', () => {
 const analysisKey = (id, role) => `analyze:${id}:${role}`;
 /** 이 책에서 도는 분석 (한 책에 하나만) */
 const analysisJob = (b = bs.book) => (b ? findJob(analysisKey(b.id, 'problem')) || findJob(analysisKey(b.id, 'answer')) : null);
-/** 이 책에 도는 작업(분석·Gemini)이 있으면 파일 바꾸기·분석을 막음 */
+/** 이 책에 도는 작업(분석·AI 인식)이 있으면 파일 바꾸기·분석을 막음 */
 const bookBusy = (b = bs.book) => !!b && [...jobs.values()].some((j) => j.bookId === b.id);
 /** 지금 이 책 화면인지 */
 const onBook = (b) => state.view === 'book' && !!b && bs.book === b;
@@ -362,7 +362,7 @@ async function analyzeRole(role) {
   if (!doc || !src) return;
   const running = analysisJob(b) || [...jobs.values()].find((j) => j.bookId === b.id);
   if (running) {
-    // 이 책에서 도는 작업이 있으면 새로 시작하지 않고 그것을 보여 줌 (분석은 이 카드, Gemini 는 그 창)
+    // 이 책에서 도는 작업이 있으면 새로 시작하지 않고 그것을 보여 줌 (분석은 이 카드, AI 인식은 그 창)
     if (running === analysisJob(b)) render();
     else running.open();
     return;
@@ -582,7 +582,7 @@ function showPreview(role, it) {
   });
 }
 
-/** 확인할 쪽 목록: 사용자가 먼저 보고 → 문제없음 / 직접 고치기 / 꼼꼼히 다시 찾기 / Gemini */
+/** 확인할 쪽 목록: 사용자가 먼저 보고 → 문제없음 / 직접 고치기 / 꼼꼼히 다시 찾기 / AI */
 function checkPanel(role, doc, pages, missing) {
   const picked = new Set();
   const panel = h('section.check-panel');
@@ -593,10 +593,10 @@ function checkPanel(role, doc, pages, missing) {
     h('span.spacer'),
     h('button.btn.btn-small', { onclick: () => dismissPages(role, pages), title: '모두 이대로 괜찮다고 표시' }, icon('checkAll'), '모두 문제없음'),
   );
-  const gemBtn = h('button.btn.btn-small', { disabled: true, onclick: () => sendToGemini(role, [...picked]) }, icon('sparkle'), 'Gemini로 보내기');
+  const gemBtn = h('button.btn.btn-small', { disabled: true, onclick: () => sendToGemini(role, [...picked]) }, icon('sparkle'), 'AI로 보내기');
   const updateGem = () => {
     gemBtn.disabled = !picked.size;
-    gemBtn.lastChild.textContent = picked.size ? `고른 ${picked.size}쪽 Gemini로` : 'Gemini로 보내기';
+    gemBtn.lastChild.textContent = picked.size ? `고른 ${picked.size}쪽 AI로` : 'AI로 보내기';
   };
   const list = h(
     'div.cp-list',
@@ -607,20 +607,20 @@ function checkPanel(role, doc, pages, missing) {
       return h(
         'div.cp-row',
         { style: { '--i': Math.min(i, 12) }, dataset: { page: String(p) } },
-        h('label.cp-pick', { title: 'Gemini로 보낼 쪽 고르기' }, h('input', { type: 'checkbox', onchange: (e) => { if (e.target.checked) picked.add(p); else picked.delete(p); updateGem(); } })),
+        h('label.cp-pick', { title: 'AI로 보낼 쪽 고르기' }, h('input', { type: 'checkbox', onchange: (e) => { if (e.target.checked) picked.add(p); else picked.delete(p); updateGem(); } })),
         h('button.cp-page', { onclick: () => switchTab('review', { role, page: p }) }, pageLabel(doc, p)),
         h('span.cp-why', [...new Set(flags)].join(' · ')),
         h(
           'div.cp-actions',
           h('button.btn.btn-small.btn-ghost', { onclick: () => switchTab('review', { role, page: p }), title: '페이지 검토에서 직접 보고 고치기' }, icon('eye'), '검토'),
           h('button.btn.btn-small.btn-ghost', { onclick: () => deepPage(role, p), title: '이 쪽만 더 꼼꼼하게(고해상도 OCR + 앞뒤 번호에 맞춰) 다시 찾기' }, icon('search'), '꼼꼼히 다시 찾기'),
-          h('button.btn.btn-small.btn-ghost', { onclick: () => sendToGemini(role, [p]), title: 'Gemini로 이 쪽 인식' }, icon('sparkle')),
+          h('button.btn.btn-small.btn-ghost', { onclick: () => sendToGemini(role, [p]), title: 'AI로 이 쪽 인식' }, icon('sparkle')),
           h('button.btn.btn-small.btn-ok', { onclick: () => dismissPages(role, [p]), title: '이대로 괜찮아요' }, icon('check'), '문제없음'),
         ),
       );
     }),
   );
-  panel.append(head, list, h('div.cp-foot', h('span.small.muted', geminiReady() ? '애매한 쪽은 골라서 Gemini에게 맡길 수 있어요.' : '설정에서 Gemini 키를 넣으면 애매한 쪽을 AI에게 맡길 수 있어요.'), h('span.spacer'), gemBtn));
+  panel.append(head, list, h('div.cp-foot', h('span.small.muted', geminiReady() ? '애매한 쪽은 골라서 AI에게 맡길 수 있어요.' : '설정에서 AI 키를 넣으면 애매한 쪽을 AI에게 맡길 수 있어요.'), h('span.spacer'), gemBtn));
   return panel;
 }
 
@@ -671,11 +671,11 @@ async function deepPage(role, page) {
       if (!keep) return;
     }
     if (sameAsBefore) {
-      toast(`더 찾은 번호가 없어요 (${items.length}개 그대로). 페이지 검토에서 점선 후보를 눌러 추가하거나, Gemini로 보내 보세요.`, {
+      toast(`더 찾은 번호가 없어요 (${items.length}개 그대로). 페이지 검토에서 점선 후보를 눌러 추가하거나, AI로 보내 보세요.`, {
         timeout: 9000,
         actions: [
           { label: '페이지 검토', onClick: () => switchTab('review', { role, page }) },
-          ...(geminiReady() ? [{ label: 'Gemini로', onClick: () => sendToGemini(role, [page]) }] : []),
+          ...(geminiReady() ? [{ label: 'AI로', onClick: () => sendToGemini(role, [page]) }] : []),
         ],
       });
       doc.pageInfo[page] = { ...(doc.pageInfo[page] || {}), ...meta };

@@ -1,4 +1,4 @@
-// 여러 화면이 같이 쓰는 것들: 상태, 화면 이동, 원본 파일 열기, 문항 표, 미리보기, 뒤에서 도는 작업, Gemini 실행 창
+// 여러 화면이 같이 쓰는 것들: 상태, 화면 이동, 원본 파일 열기, 문항 표, 미리보기, 뒤에서 도는 작업, AI 실행 창
 
 import { h, clear, toast, modal, confirmDialog, icon, debounce } from './ui.js';
 import { openDocSource, bookFileUrl } from './docsource.js';
@@ -6,6 +6,7 @@ import { detectPageWithGemini, replacePageItems } from './analyze.js';
 import { itemName } from './exporter.js';
 import { ROLE_NAME, pageLabel, bookPage, itemsByPage, findItem, flaggedPages, normalizeDoc } from './store.js';
 import { sortItems } from './detect.js';
+import { PROVIDERS, providerOf } from './aiproviders.js';
 
 export const api = window.ohdap;
 
@@ -405,7 +406,7 @@ export function renderQTable(table, o) {
 }
 
 // ===========================================================================
-// 뒤에서 도는 작업 (책 분석, Gemini 인식 …)
+// 뒤에서 도는 작업 (책 분석, AI 인식 …)
 //  - 진행 창에서 [백그라운드에서 계속]을 누르면 창만 닫히고 작업은 계속됨 → 위쪽 막대(chrome.js)에 진행 상황
 //  - 위쪽 막대를 누르면 job.open() → 진행 창(또는 그 책 화면)을 다시 보여 줌. 취소는 거기서
 //  - 뒤에서 끝나면 토스트 + 창이 앞에 없으면 윈도우 알림
@@ -508,7 +509,7 @@ let closeOk = false;
 let askingClose = false;
 window.addEventListener('beforeunload', (e) => {
   if (closeOk || !jobs.size) {
-    // 끄기로 했으면 뒤에서 작업하던 책도 그때까지 바뀐 대로 저장 (Gemini 로 바꾼 쪽 등. 열려 있는 책 화면은 bookview 가 저장)
+    // 끄기로 했으면 뒤에서 작업하던 책도 그때까지 바뀐 대로 저장 (AI 로 바꾼 쪽 등. 열려 있는 책 화면은 bookview 가 저장)
     for (const { book } of liveBooks.values()) api?.saveBookSync(book);
     return;
   }
@@ -621,16 +622,46 @@ export function holdBook(book) {
 export const liveBook = (id) => liveBooks.get(id)?.book || null;
 
 // ===========================================================================
-// Gemini: 사용자가 고른 쪽만 보내고, 진행 상황·즉시 취소
+// AI (기본 Gemini, 설정 → 세부 설정에서 다른 AI): 사용자가 고른 쪽만 보내고, 진행 상황·즉시 취소
 // ===========================================================================
-export function geminiReady() {
-  return !!state.settings?.geminiApiKey;
+/** 설정에서 고른 AI 종류 (gemini | openai | anthropic | codex) */
+export function aiProvider() {
+  const p = state.settings?.aiProvider;
+  return PROVIDERS[p] ? p : 'gemini';
 }
 
+/** 화면에 보이는 AI 이름 (Gemini, Claude …) */
+export const aiLabel = () => providerOf(aiProvider()).label;
+
+/** 고른 AI 를 쓸 준비가 됐는지 (이름은 예전 그대로) */
+export function geminiReady() {
+  const s = state.settings || {};
+  const p = aiProvider();
+  if (p === 'openai') return !!String(s.openaiModel || '').trim(); // 로컬 서버는 키 없이도 됨
+  if (p === 'anthropic') return !!s.anthropicApiKey;
+  if (p === 'codex') return true; // CLI·로그인은 설정 화면에서 확인, 안 되면 요청할 때 알려 줌
+  return !!s.geminiApiKey;
+}
+
+/** 1순위·2순위 모델 (Codex 는 '' = CLI 기본 모델) */
 export function geminiModels() {
   const s = state.settings || {};
-  return [s.geminiModel || 'gemini-flash-latest', s.geminiModel2].filter(Boolean);
+  const p = aiProvider();
+  if (p === 'codex') return [String(s.codexModel || '').trim()];
+  return [s[`${p}Model`] || PROVIDERS[p].defaultModel, s[`${p}Model2`]].filter(Boolean);
 }
+
+/** AI 호출에 넘기는 공통 설정 */
+export function aiOptions() {
+  const s = state.settings || {};
+  const provider = aiProvider();
+  const clamp = (v, d) => Math.max(1, Math.min(8, v | 0 || d));
+  // batch: 한글 내보내기에서 한 요청에 담는 문항 수
+  return { provider, models: geminiModels(), rpm: s[`${provider}Rpm`], concurrency: clamp(s.aiConcurrency, 3), batch: clamp(s.aiBatch, 4) };
+}
+
+/** 진행 창에 보이는 "AI · 모델" */
+export const aiModelText = () => `${aiLabel()} · ${geminiModels().map((m) => m || '기본 모델').join(' → ')}`;
 
 /**
  * 진행 창에서 [백그라운드에서 계속]을 누르면 창만 닫히고 계속 돔 (위쪽 막대에서 다시 열기).
@@ -646,7 +677,7 @@ export function geminiModels() {
  */
 export async function runGeminiPages(book, role, pages, hooks = {}) {
   if (!geminiReady()) {
-    toast('설정에서 Gemini API 키를 먼저 넣어 주세요.', { type: 'error', actions: [{ label: '설정 열기', onClick: () => nav.settings() }] });
+    toast('설정에서 AI(API 키·모델)를 먼저 정해 주세요.', { type: 'error', actions: [{ label: '설정 열기', onClick: () => nav.settings() }] });
     return;
   }
   const key = `gemini:${book.id}:${role}`;
@@ -658,7 +689,6 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
     return;
   }
   const abort = new AbortController();
-  const s = state.settings;
   const rows = new Map();
   const list = h(
     'div.gem-list',
@@ -668,11 +698,11 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
       return row;
     }),
   );
-  const status = h('div.small.muted.gem-status', `모델: ${geminiModels().join(' → ')}`);
+  const status = h('div.small.muted.gem-status', `모델: ${aiModelText()}`);
   const bar = h('div.progress-bar');
   const body = h(
     'div.gem-run',
-    h('p.small.muted', '고른 쪽을 Gemini에게 보내 문항 위치를 다시 찾아요. 한 쪽에 몇 초~수십 초 걸려요. 그 쪽에 있던 문항은 Gemini 결과로 바뀝니다.'),
+    h('p.small.muted', `고른 쪽을 AI(${aiLabel()})에게 보내 문항 위치를 다시 찾아요. 한 쪽에 몇 초~수십 초 걸려요. 그 쪽에 있던 문항은 AI 결과로 바뀝니다.`),
     h('div.progress', bar),
     status,
     list,
@@ -685,8 +715,8 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
     role,
     abort,
     total: pages.length,
-    title: `Gemini로 ${pages.length}쪽 인식`,
-    jobTitle: `${book.name} · Gemini ${pages.length}쪽`,
+    title: `AI로 ${pages.length}쪽 인식`,
+    jobTitle: `${book.name} · AI ${pages.length}쪽`,
     body,
     width: 480,
     className: 'gem-modal',
@@ -706,7 +736,7 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
       try {
         const found = await detectPageWithGemini(src, p, {
           role,
-          gemini: { models: geminiModels(), rpm: s.geminiRpm },
+          gemini: aiOptions(),
           signal: abort.signal,
           onStatus: (msg) => {
             status.textContent = msg;
@@ -744,7 +774,7 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
     if (err?.name !== 'AbortError') failure = err;
     else {
       aborted = true;
-      toast(`Gemini 인식을 멈췄어요.${changed ? ` (${changed}쪽은 바뀌었어요)` : ''}`);
+      toast(`AI 인식을 멈췄어요.${changed ? ` (${changed}쪽은 바뀌었어요)` : ''}`);
     }
   }
   try {
@@ -752,7 +782,7 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
   } finally {
     // 결과를 저장한 뒤에 끝냄 (책을 지울 때 stopJobs 가 저장까지 기다리게)
     const actions = hooks.open && !hooks.isOpen?.() ? [{ label: '책 열기', onClick: hooks.open }] : [];
-    ui.finish(aborted || failure ? {} : { message: `${book.name} · ${ROLE_NAME[role]}: Gemini 인식 끝 — ${changed}쪽 바꿈${errors ? `, 실패 ${errors}쪽` : ''}`, actions });
+    ui.finish(aborted || failure ? {} : { message: `${book.name} · ${ROLE_NAME[role]}: AI 인식 끝 — ${changed}쪽 바꿈${errors ? `, 실패 ${errors}쪽` : ''}`, actions });
     if (aborted || failure) ui.close();
     releaseSrc();
     releaseBook();

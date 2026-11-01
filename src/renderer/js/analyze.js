@@ -846,7 +846,7 @@ export async function detectPageWithGemini(src, idx, { role, gemini, grid, layou
     grid = inkGridFromCanvas(small);
     layout = analyzeLayout(grid);
   }
-  const found = await geminiDetect(canvasToBase64Jpeg(canvas), { role, models: gemini.models, model: gemini.model, rpm: gemini.rpm, signal, onStatus });
+  const found = await geminiDetect(canvasToBase64Jpeg(canvas), { role, provider: gemini.provider, models: gemini.models, model: gemini.model, rpm: gemini.rpm, signal, onStatus });
   const items = found.map((f) => {
     const pad = 0.006;
     const expanded = {

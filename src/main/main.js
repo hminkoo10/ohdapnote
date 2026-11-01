@@ -3,7 +3,7 @@
 // 오답노트 - Electron 메인 프로세스
 // - app:// 프로토콜로 화면(renderer)과 프로젝트 파일을 제공
 // - 책(문제집/답지 파일 + 분석 결과)과 오답노트(학생별 선택) 저장소
-// - Gemini API 호출(선택 기능)
+// - AI 호출(선택 기능): Gemini(기본) · OpenAI 호환 · Claude · ChatGPT 구독(Codex CLI) — src/main/ai.js
 // - GitHub Releases 기반 자동 업데이트
 
 const { app, BrowserWindow, protocol, ipcMain, dialog, shell, Menu, net } = require('electron');
@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const crypto = require('node:crypto');
 const log = require('electron-log/main');
+const ai = require('./ai');
 
 log.initialize();
 log.transports.file.level = 'info';
@@ -116,10 +117,26 @@ function writeJsonAtomicSync(file, value) {
 }
 
 const DEFAULT_SETTINGS = {
+  aiProvider: 'gemini', // gemini | openai(OpenAI 호환) | anthropic(Claude) | codex(ChatGPT 구독)
   geminiApiKey: '',
   geminiModel: 'gemini-flash-latest', // 1순위
   geminiModel2: '', // 1순위 한도가 다 찼거나 안 될 때 쓰는 2순위
   geminiRpm: 8,
+  geminiBaseUrl: '', // 비우면 Google 주소, 게이트웨이를 쓰면 그 주소
+  openaiBaseUrl: '', // 비우면 https://api.openai.com/v1 (로컬: http://localhost:11434/v1 등)
+  openaiApiKey: '', // 로컬 서버면 비워 둠
+  openaiModel: '',
+  openaiModel2: '',
+  openaiRpm: 60,
+  anthropicApiKey: '',
+  anthropicModel: 'claude-opus-5-5',
+  anthropicModel2: '',
+  anthropicRpm: 50,
+  anthropicBaseUrl: '',
+  codexModel: '', // 비우면 Codex CLI 기본 모델
+  codexPath: '', // 비우면 자동으로 찾음
+  aiConcurrency: 3, // 동시에 보내는 요청 수
+  aiBatch: 4, // 한글 내보내기: 한 요청에 담는 문항 수
   ocrLang: 'kor+eng',
   academy: '', // 학원 이름 (내보내기 기본값)
   teacher: '', // 선생님 이름 (내보내기 기본값)
@@ -328,7 +345,7 @@ async function migrateProjects() {
   }
 }
 
-const geminiRequests = new Map(); // requestId → AbortController
+const aiRequests = new Map(); // requestId → AbortController
 
 function registerIpc() {
   ipcMain.handle('app:info', () => ({
@@ -549,7 +566,7 @@ function registerIpc() {
     return { canceled: false, path: result.filePath };
   });
 
-  // 한글 문서로 내보낼 때 Gemini 로 옮긴 글자·수식 (책 폴더에 따로 저장해 다시 묻지 않음)
+  // 한글 문서로 내보낼 때 AI 로 옮긴 글자·수식 (책 폴더에 따로 저장해 다시 묻지 않음)
   ipcMain.handle('books:getTranscripts', async (_e, id) => readJson(path.join(bookDir(id), 'transcripts.json'), {}));
   ipcMain.handle('books:saveTranscripts', async (_e, { bookId, data } = {}) => {
     const dir = bookDir(bookId);
@@ -566,65 +583,29 @@ function registerIpc() {
     return false;
   });
 
-  // ---- Gemini (선택 기능) ----
-  ipcMain.handle('gemini:abort', (_e, requestId) => {
-    const ctrl = geminiRequests.get(requestId);
+  // ---- AI (선택 기능) ----
+  ipcMain.handle('ai:abort', (_e, requestId) => {
+    const ctrl = aiRequests.get(requestId);
     if (ctrl) ctrl.abort();
     return !!ctrl;
   });
-  ipcMain.handle('gemini:generate', async (_e, { model, body, apiKey, requestId }) => {
+  ipcMain.handle('ai:generate', async (_e, { provider, model, body, requestId } = {}) => {
     const settings = await loadSettings();
-    const key = apiKey || settings.geminiApiKey;
-    if (!key) return { ok: false, status: 0, error: 'Gemini API 키가 설정되지 않았습니다.' };
-    const modelName = String(model || settings.geminiModel || DEFAULT_SETTINGS.geminiModel).replace(/^models\//, '');
-    if (!/^[\w.-]+$/.test(modelName)) return { ok: false, status: 0, error: '모델 이름이 올바르지 않습니다.' };
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 120000);
-    if (requestId) geminiRequests.set(requestId, ctrl);
+    if (requestId) aiRequests.set(requestId, ctrl);
     try {
-      const res = await net.fetch(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-        body: JSON.stringify(body),
-        signal: ctrl.signal,
-      });
-      const text = await res.text();
-      let json = null;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        /* 무시 */
-      }
-      return { ok: res.ok, status: res.status, json, error: res.ok ? null : json?.error?.message || text.slice(0, 500), reason: json?.error?.status || '' };
+      return await ai.generate({ provider, model, body, settings, signal: ctrl.signal, fetch: (...a) => net.fetch(...a) });
     } catch (err) {
-      if (ctrl.signal.aborted) return { ok: false, status: 0, aborted: true, error: '취소됨' };
-      return { ok: false, status: 0, error: `네트워크 오류: ${err.message}` };
+      log.error('[ai]', err);
+      return { ok: false, status: 0, error: err.message };
     } finally {
-      clearTimeout(timer);
-      if (requestId) geminiRequests.delete(requestId);
+      if (requestId) aiRequests.delete(requestId);
     }
   });
-
-  ipcMain.handle('gemini:listModels', async (_e, { apiKey } = {}) => {
-    const settings = await loadSettings();
-    const key = apiKey || settings.geminiApiKey;
-    if (!key) return { ok: false, error: 'Gemini API 키를 먼저 입력하세요.' };
-    try {
-      const res = await net.fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', {
-        headers: { 'x-goog-api-key': key },
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) return { ok: false, error: json?.error?.message || `HTTP ${res.status}` };
-      const models = (json?.models || [])
-        .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
-        .filter((m) => /gemini|gemma/i.test(m.name) && !/embedding|tts|image-generation|live|audio/i.test(m.name))
-        .map((m) => ({ name: m.name.replace(/^models\//, ''), displayName: m.displayName || m.name, description: m.description || '' }));
-      return { ok: true, models };
-    } catch (err) {
-      return { ok: false, error: `네트워크 오류: ${err.message}` };
-    }
-  });
+  ipcMain.handle('ai:listModels', async (_e, { provider, apiKey, baseUrl } = {}) =>
+    ai.listModels({ provider, apiKey, baseUrl, settings: await loadSettings(), fetch: (...a) => net.fetch(...a) }),
+  );
+  ipcMain.handle('ai:codexStatus', async (_e, { path: exe } = {}) => ai.codexStatus(exe ?? (await loadSettings()).codexPath));
 
   // ---- 업데이트 ----
   ipcMain.handle('update:check', () => checkForUpdates(true));
@@ -782,4 +763,5 @@ if (!isSmokeTest && !app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {
     app.quit();
   });
+  app.on('will-quit', () => ai.killAll()); // 돌고 있던 codex 도 같이 끔
 }

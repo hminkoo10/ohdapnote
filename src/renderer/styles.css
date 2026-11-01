@@ -3182,6 +3182,38 @@ main.sheet {
 .model-chip:active {
   transform: scale(0.95);
 }
+/* AI 세부 설정 (다른 AI · 게이트웨이 · 속도) */
+.set-adv {
+  margin: 2px 0 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line-2);
+}
+.set-adv summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 720;
+  cursor: pointer;
+  list-style: none;
+}
+.set-adv summary::-webkit-details-marker {
+  display: none;
+}
+.set-adv summary .icon {
+  width: 15px;
+  height: 15px;
+  color: var(--primary);
+}
+.set-adv summary .small {
+  font-weight: 500;
+}
+.codex-status {
+  flex: 1;
+  line-height: 1.5;
+}
 .update-card {
   margin: 6px 0 10px;
   padding: 12px 14px;
