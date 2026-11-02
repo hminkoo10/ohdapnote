@@ -351,7 +351,10 @@ async function migrateProjects() {
 const aiRequests = new Map(); // requestId → AbortController
 
 // 수식 인식: 모델 폴더, 일꾼(utilityProcess — 처음 인식할 때 띄우고 2분 쉬면 끔), 진행 중인 설치·인식
-const mathocrDir = () => path.join(app.getPath('userData'), 'models', 'pix2text-mfr-1.5');
+// 모델은 설치 파일에 들어 있음(resources/models). 없으면(개발 실행) 설정에서 받아 둔 userData/models 를 씀
+const mathocrBundledDir = () => path.join(process.resourcesPath, 'models', 'pix2text-mfr-1.5');
+const mathocrDownloadDir = () => path.join(app.getPath('userData'), 'models', 'pix2text-mfr-1.5');
+const mathocrDir = () => (mathocr.modelStatus(mathocrBundledDir()).installed ? mathocrBundledDir() : mathocrDownloadDir());
 const MATHOCR_IDLE_MS = 2 * 60 * 1000;
 let mathocrWorker = null; // { proc, pending: Map<일꾼 요청 id, resolve>, idle }
 let mathocrInstall = null; // AbortController
@@ -652,7 +655,10 @@ function registerIpc() {
   ipcMain.handle('ai:codexStatus', async (_e, { path: exe } = {}) => ai.codexStatus(exe ?? (await loadSettings()).codexPath));
 
   // ---- 수식 인식 (선택 기능, 모델을 한 번 받아 두면 인터넷 없이) ----
-  ipcMain.handle('mathocr:status', () => mathocr.modelStatus(mathocrDir()));
+  ipcMain.handle('mathocr:status', () => {
+    const dir = mathocrDir();
+    return { ...mathocr.modelStatus(dir), bundled: dir !== mathocrDownloadDir() };
+  });
   ipcMain.handle('mathocr:install', async () => {
     if (mathocrInstall) return { ok: false, error: '이미 받고 있어요.' };
     const ctrl = new AbortController();
@@ -661,7 +667,7 @@ function registerIpc() {
       // 새로 받은 파일을 쓰도록 모델을 열어 둔 일꾼은 끔
       stopMathocrWorker();
       await mathocr.installModel({
-        dir: mathocrDir(),
+        dir: mathocrDownloadDir(),
         signal: ctrl.signal,
         fetch: (...a) => net.fetch(...a),
         onProgress: (p) => send('mathocr:progress', p),

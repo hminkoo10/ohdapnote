@@ -75,7 +75,7 @@ const mathocrDl = { running: false, percent: 0, render: null };
 
 /**
  * 설정: 스캔본 수식 인식 (AI 없이). 켜고 끄는 스위치는 없음 — 쓸지는 한글로 내보낼 때 고름
- * 모델 상태 · [모델 받기] (진행 막대 · 취소)
+ * 모델 상태 · [모델 받기] (진행 막대 · 취소) — 모델은 설치 파일에 들어 있어서 받기는 개발 실행 때만 보임
  */
 function mathOcrCard() {
   const status = h('span.small.muted', '확인하는 중…');
@@ -86,7 +86,7 @@ function mathOcrCard() {
   const card = h(
     'section.set-card',
     h('h4', icon('scan'), '스캔본 수식 인식 (AI 없이)'),
-    h('p.small.muted', '모델을 한 번 받아 두면 스캔본 문제를 이 컴퓨터에서 글자·한글 수식으로 옮겨요. 쓸지는 한글(HWPX)로 내보낼 때 고를 수 있어요.'),
+    h('p.small.muted', '스캔본 문제를 AI 없이 이 컴퓨터에서 글자·한글 수식으로 옮겨요. 쓸지는 한글(HWPX)로 내보낼 때 고를 수 있어요.'),
     h('div.field-row', getBtn, cancelBtn, status),
     progress,
   );
@@ -113,7 +113,7 @@ function mathOcrCard() {
     }
     if (mathocrDl.running) return render();
     getBtn.hidden = !!st?.installed;
-    status.textContent = st?.installed ? `받아 둠 (${fmtMB(st.bytes)})` : st?.bytes ? '받다 만 파일이 있어요 — 다시 받으면 이어서 받아요' : '아직 받지 않았어요';
+    status.textContent = st?.bundled ? '설치돼 있어요' : st?.installed ? `받아 둠 (${fmtMB(st.bytes)})` : st?.bytes ? '받다 만 파일이 있어요 — 다시 받으면 이어서 받아요' : '아직 받지 않았어요';
   };
   const install = async () => {
     if (mathocrDl.running) return;

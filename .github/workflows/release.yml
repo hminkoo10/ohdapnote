@@ -61,6 +61,15 @@ jobs:
 
       - run: npm test
 
+      # 수식 인식 모델(약 120MB)은 저장소에 없어서 빌드 전에 받아 설치 파일에 넣음 (받은 파일은 캐시에 둠).
+      # 못 받으면 버전을 올리고 태그를 만들기 전에 멈추도록 여기서 받음
+      - uses: actions/cache@v4
+        with:
+          path: build/models
+          key: mathocr-model-${{ hashFiles('src/main/mathocr.js') }}
+          restore-keys: mathocr-model-
+      - run: node scripts/fetch-model.mjs
+
       - name: 버전 정하기 + 태그
         if: github.ref_type != 'tag'
         shell: bash
@@ -131,7 +140,9 @@ jobs:
       # 빌드만 하고 세 파일을 한 번에 하나의 릴리스로 올립니다.
       - name: 설치 파일 빌드
         shell: bash
-        run: npx electron-builder --win --x64 --publish never -c.releaseInfo.releaseNotesFile=release-notes.md
+        run: |
+          npx electron-builder --win --x64 --publish never -c.releaseInfo.releaseNotesFile=release-notes.md
+          test -f dist/win-unpacked/resources/models/pix2text-mfr-1.5/encoder_model.onnx || { echo "::error::설치 파일에 수식 인식 모델이 없습니다"; exit 1; }
 
       - name: GitHub Release 올리기 (설치 파일 + blockmap + latest.yml)
         shell: bash
