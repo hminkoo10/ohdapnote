@@ -15,6 +15,23 @@ test('makeBlocks: 문제+해설 — 해설은 맨 뒤에', () => {
   assert.deepEqual(kinds, ['problem', 'problem', 'section', 'answer', 'answer']);
 });
 
+test('makeBlocks: 공통 지문은 그 지문을 쓰는 문항마다 (이어져도, 해설과 번갈아도)', () => {
+  const stem = [{ page: 0, x: 0.1, y: 0.02, w: 0.4, h: 0.04 }];
+  const other = [{ page: 0, x: 0.1, y: 0.5, w: 0.4, h: 0.04 }];
+  const s = (n, st) => ({ problem: { number: String(n), prefix: '', page: 0, rects: [], ...(st ? { stem: st } : {}) }, answer: null });
+  const list = [s(30, stem), s(32, stem), s(33, stem), s(40), s(41, other), s(42, other)];
+  const probs = (mode) => makeBlocks(mode, list, {}, label).filter((b) => b.kind === 'problem');
+  for (const mode of ['problems', 'both-inline', 'both-end']) {
+    assert.deepEqual(
+      probs(mode).map((b) => b.stem),
+      [stem, stem, stem, null, other, other],
+      mode,
+    );
+  }
+  // 해설에는 지문을 붙이지 않음
+  assert.ok(makeBlocks('answers', list, {}, label).every((b) => !b.stem));
+});
+
 test('itemName: 말머리 표시', () => {
   assert.equal(itemName({ number: '12' }), '12번');
   assert.equal(itemName({ number: '3', prefix: '유제' }), '유제 3');

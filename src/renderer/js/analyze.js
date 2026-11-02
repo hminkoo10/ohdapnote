@@ -1,7 +1,7 @@
 // 문서 분석 파이프라인: 렌더링 → 레이아웃 → (텍스트 | OCR) → 번호 선택 → 영역 계산
 // (Gemini 는 사용자가 고른 쪽만 따로: detectPageWithGemini)
 
-import { analyzeLayout, inkGridFromCanvas, trimRect, inkCount } from './layout.js';
+import { analyzeLayout, inkGridFromCanvas, trimRect, inkCount, findLabelBlocks, cutAbove, snapUpToGap } from './layout.js';
 import {
   extractCandidates,
   selectAnchors,
@@ -19,6 +19,7 @@ import {
   dropStrayRuns,
   byReadingOrder,
   schemeKey,
+  mergeFigureColumns,
 } from './detect.js';
 import { recognizeWords, recognizeLine, OCR_WORKERS } from './ocr.js';
 import { geminiDetect, canvasToBase64Jpeg } from './gemini.js';
@@ -89,7 +90,7 @@ function splitAt(page, mx) {
 
 function inferColumnsFromCandidates(page, splitHint = null) {
   const L = page.layout;
-  if (L.columns.length !== 1) return false;
+  if (L.columns.length !== 1 || L.merged) return false;
   const col = L.columns[0];
   const width = col.x1 - col.x0;
   if (width < 0.55) return false;
@@ -134,10 +135,12 @@ async function readPage(src, index, { forceOcr = false, ocrFallback = true, deep
     page.candidates = ex.candidates;
     page.headings = ex.headings;
     page.ranges = ex.ranges;
+    page.answerBoxes = ex.answerBoxes;
+    page.sectionLabels = ex.sectionLabels;
   };
   if (textChars >= 30) {
     runText();
-    if (inferColumnsFromCandidates(page, splitHint)) runText();
+    if (inferColumnsFromCandidates(page, splitHint) || mergeFigureColumns(page)) runText();
     promoteFullWidthHeadings(page);
     for (const t of tokens) {
       const cy = (t.y0 + t.y1) / 2;
@@ -201,22 +204,31 @@ function extractOcr(page) {
     const cy = (c.y0 + c.y1) / 2;
     return !c.prefix && hangul.some((t) => cx > t.x0 && cx < t.x1 && cy > t.y0 && cy < t.y1 && !t.str.startsWith(c.digits));
   };
+  const boxes = [];
+  const labels = [];
+  const near = (p, q) => Math.abs(p.y0 - q.y0) < 0.01 && Math.abs(p.x0 - q.x0) < 0.03;
   for (const toks of page.ocrPasses) {
     const ex = extractCandidates(toks, page.layout, { ocr: true });
     page.bodyH ||= ex.bodyH;
     for (const c of ex.candidates) if (!onHangul(c) && !cands.some((d) => samePlace(c, d))) cands.push(c);
     for (const r of ex.ranges) if (!ranges.some((q) => q.a === r.a && q.b === r.b && Math.abs(q.y0 - r.y0) < 0.01)) ranges.push(r);
+    for (const b of ex.answerBoxes) if (!boxes.some((q) => near(q, b))) boxes.push(b);
+    for (const l of ex.sectionLabels) if (!labels.some((q) => near(q, l))) labels.push(l);
   }
   const text = page.textCands || [];
   page.source = text.length ? 'text' : 'ocr';
   page.candidates = [...text, ...cands.filter((o) => !text.some((t) => samePlace(t, o)))].sort(byReadingOrder);
-  if (!text.length) page.ranges = ranges;
+  if (!text.length) {
+    page.ranges = ranges;
+    page.answerBoxes = boxes;
+    page.sectionLabels = labels;
+  }
 }
 
 /** OCR 결과를 쪽에 반영 (단 구분을 번호 위치로 보정) */
 function applyOcr(page, splitHint = null) {
   extractOcr(page);
-  if (inferColumnsFromCandidates(page, splitHint)) extractOcr(page);
+  if (inferColumnsFromCandidates(page, splitHint) || mergeFigureColumns(page)) extractOcr(page);
   const L = page.layout;
   if (page.source === 'ocr' && !page.footerNumbers.length) {
     for (const t of page.ocrPasses[0] || []) {
@@ -232,6 +244,8 @@ function finishOcr(page, splitHint, role) {
   page.needsOcr = false;
   applyOcr(page, splitHint);
   if (looksLikeAnswerTable(page.candidates, { strict: role !== 'answer' })) page.isTable = true;
+  // 스캔한 문제집: 유형·단원 제목 앞의 색칠된 이름표 (해설에는 "다른 풀이" 같은 이름표가 문항 안에 있어서 문제집만)
+  if (role === 'problem' && page.source === 'ocr') page.labels = findLabelBlocks(page.grid, page.layout, page.bodyH);
 }
 
 /** 한 쪽 OCR (passes 마다 한 번씩 읽어 후보를 합침) */
@@ -245,9 +259,7 @@ async function ocrPage(src, page, { ocrLang = 'kor+eng', passes = OCR_PASSES, sp
  * 여러 쪽을 OCR 워커 수만큼 동시에.
  * 방식(pass)마다 모든 쪽을 다 읽고 다음 방식으로 넘어감 (방식마다 언어가 달라서, 섞어 읽으면 워커를 자꾸 바꿔 띄움)
  */
-async function ocrPages(src, list, { passes, ocrLang, role, splitHint, signal, onProgress, label }) {
-  const total = list.length * passes.length;
-  let done = 0;
+async function ocrPages(src, list, { passes, ocrLang, role, splitHint, signal, onProgress, label, count = { done: 0, total: list.length * passes.length }, finish = true }) {
   for (const r of list) r.textCands ??= r.candidates;
   for (const pass of passes) {
     let next = 0;
@@ -256,13 +268,52 @@ async function ocrPages(src, list, { passes, ocrLang, role, splitHint, signal, o
         abortIfNeeded(signal);
         const r = list[next++];
         r.ocrPasses.push(await ocrTokens(src, r, pass, ocrLang));
-        done++;
-        onProgress?.({ phase: 'scan', done, total, message: `${r.index + 1}쪽 ${label}` });
+        count.done++;
+        onProgress?.({ phase: 'scan', done: count.done, total: count.total, message: `${r.index + 1}쪽 ${label}` });
       }
     };
     await Promise.all(Array.from({ length: Math.min(OCR_WORKERS, list.length) }, run));
   }
-  for (const r of list) finishOcr(r, splitHint, role);
+  if (finish) for (const r of list) finishOcr(r, splitHint, role);
+}
+
+/**
+ * 1단계에서 쪽을 읽는 동안, 글자가 없는 쪽(스캔본)부터 첫째 OCR 방식(쪽 전체)을 미리 시작 — 쪽 그리기와 OCR 이 겹치게.
+ * push(쪽) 로 넣고, close() 는 넣은 쪽을 다 읽을 때까지 기다림 (그 뒤로는 진행 상황도 알림)
+ */
+function earlyPageOcr(src, { ocrLang, signal, onProgress, count }) {
+  const queue = [];
+  const waiting = [];
+  let next = 0;
+  let closed = false;
+  let error = null;
+  const wakeAll = () => waiting.splice(0).forEach((wake) => wake());
+  const run = async () => {
+    while (!signal?.aborted && !error) {
+      if (next < queue.length) {
+        const r = queue[next++];
+        r.ocrPasses.push(await ocrTokens(src, r, OCR_PASSES[0], ocrLang));
+        count.done++;
+        if (closed) onProgress?.({ phase: 'scan', done: count.done, total: count.total, message: `${r.index + 1}쪽 OCR 중` });
+      } else if (closed) return;
+      else await new Promise((wake) => waiting.push(wake));
+    }
+  };
+  const runs = Array.from({ length: OCR_WORKERS }, () => run().catch((err) => (error ||= err)));
+  return {
+    push(r) {
+      r.textCands ??= r.candidates;
+      queue.push(r);
+      wakeAll();
+    },
+    async close() {
+      closed = true;
+      wakeAll();
+      await Promise.all(runs);
+      abortIfNeeded(signal);
+      if (error) throw error;
+    },
+  };
 }
 
 /**
@@ -647,11 +698,14 @@ function shareSplitHints(results) {
  *   signal
  */
 export async function analyzeDocument(src, opts) {
-  const { pages, role = 'problem', flow = 'column', numberStyle = 'auto', ocrLang, onProgress, signal } = opts;
-  const results = [];
+  const { role = 'problem', flow = 'column', numberStyle = 'auto', ocrLang, onProgress, signal } = opts;
+  let { pages } = opts;
+  let results = [];
   let splitHint = null; // 번호 위치로 추정한 단 위치(같은 책 다음 쪽에도 적용)
 
-  // 1) 쪽마다 레이아웃·글자 레이어 (빠름)
+  // 1) 쪽마다 레이아웃·글자 레이어 (빠름). 스캔한 쪽은 읽는 대로 쪽 전체 OCR 을 시작
+  const count = { done: 0, total: 0 }; // OCR 진행 (쪽 × 방식)
+  const early = earlyPageOcr(src, { ocrLang, signal, onProgress, count });
   for (let k = 0; k < pages.length; k++) {
     abortIfNeeded(signal);
     const idx = pages[k];
@@ -659,17 +713,34 @@ export async function analyzeDocument(src, opts) {
     const page = await readPage(src, idx, { ocrFallback: false, splitHint });
     if (page.layout.inferred) splitHint = page.layout.inferred;
     results.push(page);
+    if (page.needsOcr) early.push(page);
   }
+
+  // 문제집 뒤에 붙은 정답과 풀이는 문제가 아님 (글자 레이어로 알 수 있으면 OCR 전에 뺌)
+  let answersFrom = -1;
+  const cutAnswers = () => {
+    const k = role === 'problem' ? answerSectionStart(results) : -1;
+    if (k < 0) return;
+    answersFrom = results[k].index;
+    results = results.slice(0, k + 1);
+    pages = pages.slice(0, pages.indexOf(answersFrom) + 1);
+  };
+  cutAnswers();
 
   // 텍스트 레이어는 있지만 번호를 거의 못 찾은 문서 → 번호가 그림으로 되어 있는 것으로 보고 OCR
   const textPages = results.filter((r) => r.source === 'text' && !r.layout.blank && !r.needsOcr);
   const withNums = textPages.filter((r) => r.candidates.length > 0).length;
   if (textPages.length && withNums / textPages.length < 0.3) for (const r of results) if (r.textWithoutNumbers) r.needsOcr = true;
 
-  // 2) OCR (워커 여러 개가 여러 쪽을 동시에)
+  // 2) OCR (워커 여러 개가 여러 쪽을 동시에): 쪽 전체를 마저 다 읽고 → 번호 띠
   const ocrList = results.filter((r) => r.needsOcr);
-  await ocrPages(src, ocrList, { passes: OCR_PASSES, ocrLang, role, splitHint, signal, onProgress, label: 'OCR 중' });
+  count.total = ocrList.length * OCR_PASSES.length;
+  await early.close();
+  const ocrOpts = { ocrLang, role, splitHint, signal, onProgress, label: 'OCR 중', count };
+  await ocrPages(src, ocrList.filter((r) => !r.ocrPasses.length), { ...ocrOpts, passes: OCR_PASSES.slice(0, 1), finish: false });
+  await ocrPages(src, ocrList, { ...ocrOpts, passes: OCR_PASSES.slice(1) });
   shareSplitHints(results);
+  if (answersFrom < 0) cutAnswers(); // 스캔본은 OCR 로 정답표를 알아본 뒤에
   onProgress?.({ phase: 'scan', done: pages.length, total: pages.length, message: '번호 정리 중' });
 
   // 빠른 정답표 쪽은 번호 인식에서 뺌 (문제집 끝에 붙은 "한눈에 보는 정답"도: 문제집은 칸이 촘촘한 표만)
@@ -705,9 +776,18 @@ export async function analyzeDocument(src, opts) {
   const sourceMap = new Map(results.map((r) => [r.index, r.source]));
   const flags = flagPages(pages, anchors, layouts);
   for (const idx of tablePages) flags.set(idx, ['빠른 정답표 같아서 건너뜀']);
+  if (answersFrom >= 0) flags.set(answersFrom, ['여기부터는 정답과 풀이 같아서 뺌 (문제 쪽까지만 범위를 정하면 사라짐)']);
   const cutters = buildCutters(results, anchors, signature);
   const ranges = new Map(results.filter((r) => r.ranges?.length).map((r) => [r.index, r.ranges]));
   let items = computeItems(pages, anchors, layouts, grids, { flow, source: sourceMap, cutters, stopPages: tablePages, ranges });
+  // 앞 쪽 해설이 통째로 이어지는 쪽(긴 해설의 가운데 쪽)은 번호가 없는 게 맞음
+  if (flow === 'continue') {
+    const continued = new Set(items.flatMap((it) => it.rects.filter((r) => r.page !== it.page).map((r) => r.page)));
+    for (const idx of continued) {
+      const f = flags.get(idx);
+      if (f?.length === 1 && f[0] === '번호를 찾지 못함') flags.delete(idx);
+    }
+  }
 
   items = assignIds(sortItems(items));
   const pageInfo = {};
@@ -724,6 +804,16 @@ export async function analyzeDocument(src, opts) {
   const pageOffset = guessPageOffset(results.map((r) => ({ index: r.index, numbers: r.footerNumbers })));
   const ocrPageCount = results.filter((r) => r.ocrPasses.length).length;
   return { items, pageInfo, signature, signatures, pageOffset, ocrPages: ocrPageCount, layouts, grids };
+}
+
+/**
+ * 문제집 PDF 뒤에 정답과 풀이가 붙어 있으면 그 첫머리의 빠른 정답표 쪽 (results 안 위치). 없으면 -1
+ * 앞에 문제가 있고, 문서 뒤쪽 절반에서 나온 정답표만 봄 (단원 중간의 정답표로 문제를 잘라 내지 않게)
+ */
+function answerSectionStart(results) {
+  return results.findIndex(
+    (r, k) => k >= results.length / 2 && (r.isTable || looksLikeAnswerTable(r.candidates, { strict: true })) && results.slice(0, k).some((q) => q.candidates.length),
+  );
 }
 
 const round4 = (v) => Math.round(v * 10000) / 10000;
@@ -762,7 +852,7 @@ function promoteFullWidthHeadings(page) {
 }
 
 /**
- * 문항 영역을 끊는 위치들: 큰 글씨 제목, 여러 단 쪽의 가로 띠(단원 제목 막대), 제목처럼 큰 번호
+ * 문항 영역을 끊는 위치들: 큰 글씨 제목, 여러 단 쪽의 가로 띠(단원 제목 막대), 제목처럼 큰 번호, 스캔본 제목 이름표
  * @returns {Map<number, {x0:number,x1:number,y0:number}[]>}
  */
 export function buildCutters(results, anchors, signature) {
@@ -775,10 +865,28 @@ export function buildCutters(results, anchors, signature) {
     for (const c of list) add(idx, { x0: c.x0, x1: c.x1, y0: c.y0 - (0.45 * c.h + 0.004) });
   }
   for (const r of results) {
-    for (const hd of r.headings || []) add(r.index, { x0: hd.x0, x1: hd.x1, y0: hd.y0 - 0.004 });
+    // 제목 위 장식(동그라미 번호, 띠)에 걸리지 않게 그 위 빈 줄로
+    const snap = (x0, x1, y) => (r.grid ? snapUpToGap(r.grid, x0, x1, y) : y);
+    for (const hd of r.headings || []) add(r.index, { x0: hd.x0, x1: hd.x1, y0: snap(hd.x0 - 0.01, hd.x1 + 0.01, hd.y0 - 0.004) });
     for (const rg of r.ranges || []) add(r.index, { x0: rg.x0, x1: rg.x1, y0: rg.y0 - 0.006 });
+    // 번호 없는 말머리 이름표("유제" 띠): 다음 묶음의 시작
+    for (const lb of r.sectionLabels || []) add(r.index, { x0: lb.x0, x1: lb.x1, y0: snap(lb.x0 - 0.01, lb.x1 + 0.01, lb.y0 - 0.004) });
+    // 해설 중간의 작은 정답 상자("Level 1 기초 연습 / 1 ③ 2 ③ …"): 앞 해설에 딸려 오지 않게 상자 머리 위에서 끊음
+    // (단 왼쪽 끝에서 시작하는 줄만 — 그래프 눈금 "1 2 3" 같은 건 아님)
+    for (const bx of r.answerBoxes || []) {
+      if (bx.relX > 0.08) continue;
+      const col = r.layout?.columns?.[bx.col] || { x0: bx.x0, x1: bx.x1 };
+      const y = r.grid ? cutAbove(r.grid, { y0: bx.y0, h: bx.h }, col.x0 - 0.006, col.x1 + 0.006, r.layout?.bodyTop ?? 0, { maxW: 1, maxH: 3, maxGap: 2 }) : bx.y0 - 0.006;
+      add(r.index, { x0: bx.x0, x1: bx.x1, y0: y });
+    }
+    // 이름표 중 문항 번호가 들어 있지 않은 것 ("0094 대표 문제" 는 문항 머리, "유형 15" 는 제목)
+    const chain = anchors.get(r.index) || [];
+    for (const lb of r.labels || []) {
+      const own = chain.some((a) => (a.x0 + a.x1) / 2 > lb.x0 - 0.01 && (a.x0 + a.x1) / 2 < lb.x1 + 0.01 && (a.y0 + a.y1) / 2 > lb.y0 - 0.01 && (a.y0 + a.y1) / 2 < lb.y1 + 0.01);
+      if (!own) add(r.index, { x0: lb.x0, x1: lb.x1, y0: lb.cutY - 0.002 });
+    }
     if ((r.layout?.columns?.length || 1) >= 2) {
-      for (const b of r.layout.spans || []) add(r.index, { x0: 0, x1: 1, y0: b.y0 - 0.002 });
+      for (const b of r.layout.spans || []) add(r.index, { x0: 0, x1: 1, y0: b.y0 - 0.002, kind: 'span' });
     }
   }
   return map;
@@ -792,7 +900,7 @@ export async function detectPageWithGemini(src, idx, { role, gemini, grid, layou
     grid = inkGridFromCanvas(small);
     layout = analyzeLayout(grid);
   }
-  const found = await geminiDetect(canvasToBase64Jpeg(canvas), { role, models: gemini.models, model: gemini.model, rpm: gemini.rpm, signal, onStatus });
+  const found = await geminiDetect(canvasToBase64Jpeg(canvas), { role, provider: gemini.provider, models: gemini.models, model: gemini.model, rpm: gemini.rpm, signal, onStatus });
   const items = found.map((f) => {
     const pad = 0.006;
     const expanded = {

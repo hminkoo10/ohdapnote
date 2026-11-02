@@ -8,8 +8,10 @@ import {
   selectAnchors,
   computeItems,
   guessPageOffset,
+  mergeFigureColumns,
+  flagPages,
 } from '../../src/renderer/js/detect.js';
-import { analyzeLayout, trimRect } from '../../src/renderer/js/layout.js';
+import { analyzeLayout, trimRect, findLabelBlocks } from '../../src/renderer/js/layout.js';
 
 test('parseNumberWord: 문제 번호 모양 판별', () => {
   assert.deepEqual(parseNumberWord('12'), { num: 12, digits: '12', style: 'plain' });
@@ -119,6 +121,25 @@ test('trimRect: 여백 잘라내기', () => {
     { x: 0.2, y: 0.4, w: 0.2, h: 0.2 },
   );
   assert.equal(trimRect({ w, h, data }, { x: 0.8, y: 0.8, w: 0.1, h: 0.1 }), null);
+});
+
+test('findLabelBlocks: 단 왼쪽 끝의 꽉 찬 이름표("유형 15")만 찾고, 위로 튀어나온 배지 위에서 끊음', () => {
+  const w = 240;
+  const h = 330;
+  const data = new Uint8Array(w * h);
+  const fill = (x0, x1, y0, y1) => {
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) data[y * w + x] = 1;
+  };
+  for (let y = 40; y < 80; y += 5) for (let x = 20; x < 110; x += 4) fill(x, x + 3, y, y + 3); // 본문 글줄
+  fill(20, 33, 100, 106); // 이름표 (높이 6칸 ≈ 0.018)
+  for (let x = 37; x < 100; x += 4) fill(x, x + 3, 101, 105); // 이름표 옆 제목 글자
+  fill(100, 106, 95, 101); // 제목 줄 오른쪽 끝 배지 (이름표보다 위로 튀어나옴)
+  fill(20, 23, 140, 144); // 글줄 첫 글자 (작음)
+  const layout = { bodyTop: 0, bodyBottom: 1, columns: [{ x0: 20 / w, x1: 110 / w }] };
+  const found = findLabelBlocks({ w, h, data }, layout, 0.011);
+  assert.equal(found.length, 1);
+  assert.ok(Math.abs(found[0].y0 - 100 / h) < 1e-9);
+  assert.ok(Math.abs(found[0].cutY - 95 / h) < 1e-9, `cutY ${found[0].cutY * h}`);
 });
 
 test('guessPageOffset: 쪽번호로 책 쪽 보정값 추정', () => {
@@ -313,4 +334,180 @@ test('selectAnchors: 두 번호 체계(유제 1,2… / Level 01,02…)를 함께
   assert.equal(signatures.length, 2);
   const got = [0, 1, 2].flatMap((i) => anchors.get(i).map((a) => a.digits));
   assert.deepEqual(got, ['1', '2', '3', '4', '01', '02', '03', '04', '01', '02', '5', '6', '01', '02', '03']);
+});
+
+test('extractCandidates: 줄 맨 앞 수식("1 + 2 = 3", "8 = 2³")·앞 줄에서 넘어온 문장 끝("8 이므로")은 번호가 아님, 번호 없는 "유제" 이름표는 따로 모음', () => {
+  const t = (str, x, y, h = 0.012) => ({ str, x0: x, x1: x + 0.012 * Math.max(1, [...str].length), y0: y, y1: y + h });
+  const tokens = [
+    t('1', 0.1, 0.1), t('정답', 0.116, 0.1),
+    t('1', 0.1, 0.13), t('+', 0.116, 0.13), t('2', 0.132, 0.13), t('=', 0.148, 0.13), t('3', 0.164, 0.13),
+    t('8', 0.1, 0.16), t('이므로', 0.116, 0.16), t('a', 0.16, 0.16),
+    t('8', 0.1, 0.19), t('=', 0.116, 0.19), t('2³', 0.132, 0.19),
+    t('2', 0.1, 0.22), t('정답', 0.116, 0.22),
+    t('유제', 0.1, 0.3, 0.016), t('정답과', 0.6, 0.3), t('풀이', 0.65, 0.3),
+    t('유제', 0.1, 0.35), t('3', 0.128, 0.35), t('함수', 0.17, 0.35),
+  ];
+  const layout = { columns: [{ x0: 0.1, x1: 0.9 }], bodyTop: 0.05, bodyBottom: 0.95 };
+  const { candidates, sectionLabels } = extractCandidates(tokens, layout);
+  assert.deepEqual(candidates.map((c) => `${c.prefix}${c.num}`), ['1', '2', '유제3']);
+  assert.equal(sectionLabels.length, 1);
+  assert.ok(Math.abs(sectionLabels[0].y0 - 0.3) < 1e-9);
+});
+
+test('extractCandidates: 해설 머리 "유형 01 답 ④" 와 문제집 "유형 02 …" 옆 "대표 문제" 는 유형 번호 문항 (빠른 정답표 줄·해설 속 "유형03" 표시는 아님)', () => {
+  const t = (str, x, y, h = 0.012) => ({ str, x0: x, x1: x + 0.012 * Math.max(1, [...str].length), y0: y, y1: y + h });
+  const one = { columns: [{ x0: 0.1, x1: 0.9 }], bodyTop: 0.05, bodyBottom: 0.95 };
+  const answer = [
+    t('유형', 0.1, 0.1), t('01', 0.126, 0.1), t('답', 0.152, 0.1), t('④', 0.166, 0.1), // 해설 머리
+    t('유형', 0.1, 0.3), t('02', 0.126, 0.3), t('④', 0.152, 0.3), t('유형', 0.3, 0.3), t('03', 0.326, 0.3), t('5', 0.352, 0.3), // 빠른 정답표 줄
+    t('유형', 0.1, 0.32), t('04', 0.126, 0.32), t('①', 0.152, 0.32), // 정답표 마지막 줄 (하나뿐)
+    t('유형', 0.1, 0.6), t('03', 0.126, 0.6), t('에서', 0.152, 0.6, 0.012), // 해설 속 참고 표시 아님: 뒤가 "답" 이 아니면 제목으로 봄
+  ];
+  assert.deepEqual(extractCandidates(answer, one).candidates.map((c) => `${c.prefix}${c.digits}`), ['유형01']);
+  // 문제집: 왼쪽 단 유형 제목(작은 "유형" 옆 큰 번호, 제목이 수식으로 시작하기도), 오른쪽 단 같은 높이의 "대표 문제"
+  const two = { columns: [{ x0: 0.1, x1: 0.48 }, { x0: 0.52, x1: 0.9 }], bodyTop: 0.05, bodyBottom: 0.95 };
+  const problem = [
+    t('유형', 0.1, 0.1, 0.009), t('01', 0.126, 0.1, 0.016), t('구분구적법', 0.16, 0.1),
+    t('대표', 0.55, 0.11), t('문제', 0.58, 0.11),
+    t('유형', 0.1, 0.5, 0.009), t('02', 0.126, 0.5, 0.016), t('lim', 0.16, 0.5),
+    t('대표', 0.55, 0.51), t('문제', 0.58, 0.51),
+  ];
+  const got = extractCandidates(problem, two).candidates;
+  assert.deepEqual(got.map((c) => `${c.prefix}${c.digits}:${c.col}`), ['유형01:1', '유형02:1']);
+  assert.ok(Math.abs(got[0].h - 0.016) < 1e-9, '번호 크기는 유형 번호 글자');
+});
+
+test('extractCandidates: 같은 단 한 줄에 번호가 셋 이상 커지며 나란하면(몇 개는 답에 붙어 후보에서 빠져도) 정답표', () => {
+  const t = (str, x, y) => ({ str, x0: x, x1: x + 0.012 * [...str].length, y0: y, y1: y + 0.012 });
+  const one = { columns: [{ x0: 0.1, x1: 0.5 }], bodyTop: 0.05, bodyBottom: 0.95 };
+  const tokens = [
+    t('1', 0.1, 0.5), t('①', 0.116, 0.5), t('2', 0.2, 0.5), t('③', 0.216, 0.5), t('3①', 0.26, 0.5), t('4', 0.34, 0.5), t('①', 0.356, 0.5), // 3 은 답에 붙어 후보가 아님
+    t('6', 0.1, 0.522), t('④', 0.116, 0.522),
+    t('7', 0.1, 0.8), t('함수', 0.13, 0.8),
+  ];
+  const { candidates, answerBoxes } = extractCandidates(tokens, one);
+  assert.deepEqual(candidates.map((c) => c.num), [7]);
+  assert.equal(answerBoxes.length, 1);
+});
+
+test('extractCandidates: 공통 지문 머리는 괄호가 있거나 단 왼쪽 끝일 때만 (줄 가운데 "3−27" 같은 수식은 아님)', () => {
+  const t = (str, x, y) => ({ str, x0: x, x1: x + 0.01 * str.length, y0: y, y1: y + 0.012 });
+  const layout = { columns: [{ x0: 0.07, x1: 0.47 }, { x0: 0.42, x1: 0.93 }], bodyTop: 0.05, bodyBottom: 0.95 };
+  const tokens = [t('[0030~0037]', 0.07, 0.1), t('다음', 0.2, 0.1), t('3-27', 0.3, 0.3), t('[0040~0041]', 0.51, 0.5), t('12~15', 0.07, 0.7)];
+  const { ranges } = extractCandidates(tokens, layout);
+  assert.deepEqual(ranges.map((r) => [r.a, r.b, r.col]), [[30, 37, 0], [40, 41, 1], [12, 15, 0]]);
+});
+
+test('mergeFigureColumns: 1단 쪽 오른쪽의 그래프·⑤ 때문에 생긴 빈 띠는 단 구분이 아님 (진짜 2단·세로선 있는 쪽은 그대로)', () => {
+  const num = (n, col, relX, h = 0.025, font = 'N') => ({ num: n, col, relX, h, font, x0: 0, y0: 0.1 * n });
+  const page = (columns, candidates, gutters = []) => ({ layout: { columns, gutters }, candidates });
+  // 넓은 단(문제)과 좁은 단(그래프 눈금 숫자만)
+  const fig = page([{ x0: 0.075, x1: 0.667 }, { x0: 0.683, x1: 0.896 }], [num(1, 0, 0.032), num(2, 0, 0.032), num(1, 1, 0.124, 0.011, 'S'), num(2, 1, 0.124, 0.011, 'S')]);
+  assert.equal(mergeFigureColumns(fig), true);
+  assert.deepEqual(fig.layout.columns, [{ x0: 0.075, x1: 0.896 }]);
+  assert.equal(fig.layout.merged, true);
+  // 폭이 비슷한 진짜 2단
+  const two = page([{ x0: 0.07, x1: 0.47 }, { x0: 0.53, x1: 0.93 }], [num(1, 0, 0.01), num(2, 1, 0.01)]);
+  assert.equal(mergeFigureColumns(two), false);
+  // 단 사이 세로선이 있으면 그대로
+  const ruled = page([{ x0: 0.075, x1: 0.667 }, { x0: 0.683, x1: 0.896 }], [num(1, 0, 0.032)], [{ x0: 0.667, x1: 0.683, rule: true }]);
+  assert.equal(mergeFigureColumns(ruled), false);
+  // 좁은 단 왼쪽 끝에도 같은 모양 번호가 있으면 진짜 단
+  const narrowNums = page([{ x0: 0.075, x1: 0.667 }, { x0: 0.683, x1: 0.896 }], [num(1, 0, 0.032), num(2, 1, 0)]);
+  assert.equal(mergeFigureColumns(narrowNums), false);
+});
+
+test('flagPages: 번호가 없는 쪽이라도 앞뒤 번호가 체계마다 그대로 이어지면 확인할 쪽이 아님 (개념 설명 쪽)', () => {
+  const c = (num, prefix = '') => ({ num, digits: String(num), prefix, conf: 100 });
+  const layouts = new Map([0, 1, 2, 3, 4].map((i) => [i, { blank: false, inkRatio: 0.1 }]));
+  const anchors = new Map([
+    [0, [c(1, '예제'), c(1), c(2)]],
+    [1, []], // 개념 쪽
+    [2, [c(2, '예제'), c(3), c(4)]],
+    [3, []], // 번호를 놓친 쪽
+    [4, [c(8), c(9)]],
+  ]);
+  const flags = flagPages([0, 1, 2, 3, 4], anchors, layouts);
+  assert.equal(flags.has(1), false);
+  assert.deepEqual(flags.get(3), ['번호를 찾지 못함']);
+});
+
+test('computeItems: 해설이 단원 제목 띠 위쪽 오른쪽 단으로 이어질 때, 띠(구역 아래 끝)에서 닫지 않음', () => {
+  const w = 120;
+  const h = 160;
+  const data = new Uint8Array(w * h);
+  for (let y = 10; y < 150; y += 3) {
+    if (y >= 68 && y < 82) continue;
+    for (let x = 8; x < 52; x++) data[y * w + x] = 1;
+    for (let x = 68; x < 112; x++) data[y * w + x] = 1;
+  }
+  for (let y = 72; y < 78; y++) for (let x = 8; x < 112; x++) data[y * w + x] = 1; // 단원 제목 띠
+  const grid = { w, h, data };
+  const layout = analyzeLayout(grid);
+  assert.equal(layout.columns.length, 2);
+  assert.ok(layout.spans?.length >= 1);
+  const band = layout.spans[0];
+  const cutters = new Map([[0, [{ x0: 0, x1: 1, y0: band.y0 - 0.002, kind: 'span' }]]]);
+  const anchors = new Map([[0, [
+    { num: 1, digits: '1', col: 0, x0: 0.07, x1: 0.08, y0: 0.118, h: 0.015, conf: 100 },
+    { num: 2, digits: '2', col: 0, x0: 0.07, x1: 0.08, y0: 0.6, h: 0.015, conf: 100 },
+  ]]]);
+  const items = computeItems([0], anchors, new Map([[0, layout]]), new Map([[0, grid]]), { flow: 'continue', cutters });
+  assert.equal(items.length, 2);
+  // 1번: 왼쪽 단 띠 위 + 오른쪽 단 띠 위
+  assert.equal(items[0].rects.length, 2);
+  const r = items[0].rects[1];
+  assert.ok(r.x > 0.5 && r.y + r.h <= band.y0 + 0.01, JSON.stringify(r));
+  // 띠 아래(새 단원)는 2번부터: 오른쪽 단 띠 아래로 이어지는 것은 2번
+  assert.ok(items[1].rects.every((q) => q.y >= band.y1 - 0.01));
+});
+
+test('computeItems: 마지막 해설은 번호 없는 같은 꼴(단 폭이 같은) 쪽으로는 이어지지만, 단 폭이 다른 쪽(책 끝 메모 쪽)으로는 이어지지 않음', () => {
+  const page = (kind) => {
+    const w = 120;
+    const h = 160;
+    const data = new Uint8Array(w * h);
+    for (let y = 10; y < 150; y += 3) {
+      if (kind === 'full') {
+        for (let x = 8; x < 112; x++) data[y * w + x] = 1;
+        continue;
+      }
+      for (let x = 8; x < 52; x++) data[y * w + x] = 1;
+      if (kind === 'two') for (let x = 68; x < 112; x++) data[y * w + x] = 1;
+    }
+    const grid = { w, h, data };
+    return { grid, layout: analyzeLayout(grid) };
+  };
+  const p0 = page('two');
+  const anchors = new Map([[0, [{ num: 1, digits: '1', col: 0, x0: 0.07, x1: 0.08, y0: 0.118, h: 0.015, conf: 100 }]]]);
+  // 'left': 마지막 쪽에 왼쪽 단만 차 있는 해설 끝(단 수는 1 이지만 폭은 같음)
+  for (const [kind, expectPages] of [['two', [0, 0, 1, 1]], ['left', [0, 0, 1]], ['full', [0, 0]]]) {
+    const p1 = page(kind);
+    const items = computeItems([0, 1], anchors, new Map([[0, p0.layout], [1, p1.layout]]), new Map([[0, p0.grid], [1, p1.grid]]), { flow: 'continue' });
+    assert.deepEqual(items[0].rects.map((r) => r.page), expectPages, kind);
+  }
+});
+
+test('selectAnchors: 글자 레이어 번호 크기가 두 무리(예: 유제·Level)면 작은 무리 번호도 깎지 않음 (옆으로 살짝 비켜난 같은 번호보다 우선)', () => {
+  const R = 0.0127;
+  const S = 0.011;
+  const mk = (num, y, h, relX = 0) => ({ num, digits: String(num), style: 'plain', prefix: '', col: 0, x0: 0.07 + relX, x1: 0.08 + relX, y0: y, y1: y + h, h, relX, hRatio: h / 0.0109, conf: 100, padded: false, font: 'F', ocr: false });
+  const pages = [
+    { index: 0, candidates: [mk(1, 0.1, R), mk(2, 0.25, R), mk(3, 0.4, R), mk(4, 0.55, R, 0.011), mk(4, 0.65, S), mk(5, 0.8, R)] },
+    { index: 1, candidates: [mk(6, 0.1, S), mk(7, 0.3, R), mk(8, 0.5, S), mk(9, 0.7, R)] },
+  ];
+  // 개념 쪽 소제목 "3"(같은 글꼴, 15% 넘게 작음)은 번호가 1 이어져도 고르지 않음 → 다음 쪽의 진짜 3번을 고름
+  const concept = [
+    { index: 0, candidates: [mk(1, 0.2, 0.018), mk(2, 0.6, 0.018)] },
+    { index: 1, candidates: [mk(3, 0.1, 0.0138)] },
+    { index: 2, candidates: [mk(3, 0.5, 0.018), mk(4, 0.8, 0.018)] },
+    { index: 3, candidates: [mk(5, 0.3, 0.018), mk(6, 0.7, 0.018)] },
+  ];
+  const c = selectAnchors(concept).anchors;
+  assert.deepEqual([0, 1, 2, 3].map((i) => c.get(i).map((a) => a.num)), [[1, 2], [], [3, 4], [5, 6]]);
+
+  const { anchors } = selectAnchors(pages);
+  const four = anchors.get(0).find((a) => a.num === 4);
+  assert.equal(four.y0, 0.65);
+  assert.deepEqual([0, 1].flatMap((i) => anchors.get(i).map((a) => a.num)), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
 });

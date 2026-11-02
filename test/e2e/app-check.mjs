@@ -1,5 +1,5 @@
-// 확인할 쪽 흐름 E2E: 빠진 번호 표시 → 문제없음 → Gemini(1순위 한도 초과 → 2순위) → Gemini 즉시 취소
-// Gemini 는 실제로 부르지 않고 메인 프로세스의 IPC 처리기를 바꿔 끼워서 흉내냅니다.
+// 확인할 쪽 흐름 E2E: 빠진 번호 표시 → 문제없음 → AI(Gemini, 1순위 한도 초과 → 2순위) → AI 즉시 취소
+// AI 는 실제로 부르지 않고 메인 프로세스의 IPC 처리기(ai:generate)를 바꿔 끼워서 흉내냅니다.
 // 실행: xvfb-run -a node test/e2e/app-check.mjs
 import { _electron as electron } from '../lib/playwright.mjs';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
@@ -83,8 +83,8 @@ try {
   step('Gemini: 1순위 한도 초과 → 2순위로 넘어가 116번 되찾기');
   await app.evaluate(({ ipcMain }) => {
     globalThis.__calls = [];
-    ipcMain.removeHandler('gemini:generate');
-    ipcMain.handle('gemini:generate', async (_e, { model }) => {
+    ipcMain.removeHandler('ai:generate');
+    ipcMain.handle('ai:generate', async (_e, { model }) => {
       globalThis.__calls.push(model);
       await new Promise((r) => setTimeout(r, 200));
       if (model === 'model-a') {
@@ -100,7 +100,7 @@ try {
     });
   });
   const row = win.locator('.cp-row', { hasText: '116' });
-  await row.locator('.cp-actions .btn').nth(2).click(); // Gemini
+  await row.locator('.cp-actions .btn').nth(2).click(); // AI
   await win.waitForSelector('.gem-row[data-state="ok"]', { timeout: 15000 });
   const gemMsg = await win.$eval('.gem-row[data-state="ok"] .gem-msg', (e) => e.textContent);
   const calls = await app.evaluate(() => globalThis.__calls);
@@ -120,19 +120,19 @@ try {
     globalThis.__aborted = 0;
     globalThis.__started = 0;
     const pending = new Map();
-    ipcMain.removeHandler('gemini:generate');
-    ipcMain.removeHandler('gemini:abort');
-    ipcMain.handle('gemini:generate', (_e, { requestId }) => new Promise((resolve) => {
+    ipcMain.removeHandler('ai:generate');
+    ipcMain.removeHandler('ai:abort');
+    ipcMain.handle('ai:generate', (_e, { requestId }) => new Promise((resolve) => {
       globalThis.__started++;
       const t = setTimeout(() => resolve({ ok: true, status: 200, json: { candidates: [] } }), 20000);
       pending.set(requestId, () => { clearTimeout(t); resolve({ ok: false, status: 0, aborted: true, error: '취소됨' }); });
     }));
-    ipcMain.handle('gemini:abort', (_e, id) => { globalThis.__aborted++; pending.get(id)?.(); return true; });
+    ipcMain.handle('ai:abort', (_e, id) => { globalThis.__aborted++; pending.get(id)?.(); return true; });
   });
   await win.click('.tabs-row .seg-tab[data-tab="review"]');
   await win.waitForSelector('.editor-toolbar');
   await win.waitForTimeout(500);
-  await win.click('.editor-toolbar .btn >> text=Gemini');
+  await win.click('.editor-toolbar .btn:has-text("AI")');
   await win.waitForSelector('.gem-row[data-state="run"]', { timeout: 10000 });
   // 분당 요청 수 제한 때문에 잠깐 기다렸다가 실제 요청이 나간 뒤에 취소
   for (let i = 0; i < 100 && !(await app.evaluate(() => globalThis.__started)); i++) await win.waitForTimeout(200);

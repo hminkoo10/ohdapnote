@@ -1,7 +1,7 @@
 // 첫 화면: 학생 오답노트 목록 / 책장(등록한 책)
 
 import { h, clear, toast, modal, confirmDialog, promptDialog, formatDate, icon, countUp, animateOut } from './ui.js';
-import { api, state, nav, dropSources } from './shared.js';
+import { api, state, nav, dropSources, liveBook, stopJobs } from './shared.js';
 import { topbar } from './chrome.js';
 
 const SPINES = [
@@ -181,7 +181,8 @@ async function createBook() {
 async function renameBook(b) {
   const name = await promptDialog('새 이름', { title: '책 이름 바꾸기', value: b.name });
   if (!name) return;
-  const book = await api.getBook(b.id);
+  // 뒤에서 분석 중인 책이면 그 작업이 들고 있는 책을 고침 (작업이 끝나며 저장할 때 이름이 되돌아가지 않게)
+  const book = liveBook(b.id) || (await api.getBook(b.id));
   book.name = name.trim();
   book.updatedAt = Date.now();
   await api.saveBook(book);
@@ -192,6 +193,7 @@ async function deleteBook(b, notes) {
   const using = notes.filter((n) => n.bookIds.includes(b.id));
   const msg = `"${b.name}"을(를) 책장에서 지울까요?\n올린 파일과 분석 결과가 모두 지워집니다.${using.length ? `\n이 책을 쓰는 오답노트 ${using.length}개에서도 이 책의 문항이 빠집니다.` : ''}`;
   if (!(await confirmDialog(msg, { title: '책 삭제', ok: '삭제', danger: true }))) return;
+  await stopJobs((j) => j.bookId === b.id); // 이 책에서 뒤에서 도는 작업은 멈추고 (저장까지) 끝난 뒤에 지움
   dropSources(b.id);
   await api.deleteBook(b.id);
   showHome();

@@ -234,6 +234,9 @@ textarea {
     box-shadow var(--mid) var(--ease),
     transform var(--fast) var(--ease);
 }
+.btn[hidden] {
+  display: none;
+}
 .btn:hover:not(:disabled) {
   background: var(--surface-2);
   border-color: var(--text-4);
@@ -740,6 +743,58 @@ select.input {
   background: none;
   font-weight: 650;
   color: var(--text);
+}
+/* 뒤에서 도는 작업 (누르면 진행 창·그 책 화면) */
+.job-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.job-badge:empty {
+  display: none;
+}
+.job-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  min-width: 0;
+  max-width: 260px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--primary-line);
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-weight: 650;
+  font-size: 12.5px;
+  cursor: pointer;
+  animation: rise-in 260ms var(--ease-out) both;
+  transition:
+    border-color var(--fast),
+    box-shadow var(--mid) var(--ease);
+}
+.job-chip:hover {
+  border-color: var(--primary);
+  box-shadow: var(--sh-sm);
+}
+.job-spin {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--primary);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+.job-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-pct {
+  flex: 0 0 auto;
 }
 .save-status {
   font-size: 12px;
@@ -3129,6 +3184,38 @@ main.sheet {
 }
 .model-chip:active {
   transform: scale(0.95);
+}
+/* AI 세부 설정 (다른 AI · 게이트웨이 · 속도) */
+.set-adv {
+  margin: 2px 0 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line-2);
+}
+.set-adv summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 720;
+  cursor: pointer;
+  list-style: none;
+}
+.set-adv summary::-webkit-details-marker {
+  display: none;
+}
+.set-adv summary .icon {
+  width: 15px;
+  height: 15px;
+  color: var(--primary);
+}
+.set-adv summary .small {
+  font-weight: 500;
+}
+.codex-status {
+  flex: 1;
+  line-height: 1.5;
 }
 .update-card {
   margin: 6px 0 10px;

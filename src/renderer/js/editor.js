@@ -164,7 +164,7 @@ export function createEditor(ctx) {
       ),
       h('div.tb-group.tb-right',
         h('button.btn.btn-small', { onclick: () => ctx.reanalyzePage(st.role, st.page), title: '이 쪽만 고해상도로 한 번 더, 앞뒤 쪽 번호에 맞춰 꼼꼼히 다시 찾아요 (이 쪽에서 직접 고친 내용은 바뀔 수 있어요)' }, icon('search'), '꼼꼼히 다시 찾기'),
-        h('button.btn.btn-small', { onclick: () => ctx.geminiPage(st.role, st.page), title: 'Gemini 로 이 쪽을 인식합니다 (설정에서 API 키 필요)' }, icon('sparkle'), 'Gemini'),
+        h('button.btn.btn-small', { onclick: () => ctx.geminiPage(st.role, st.page), title: 'AI 로 이 쪽을 인식합니다 (설정에서 AI 키 필요)' }, icon('sparkle'), 'AI'),
         h('button.btn.btn-icon.btn-ghost', { title: '축소', onclick: () => setZoom(st.zoom / 1.2) }, icon('zoomOut')),
         h('span.muted.small.tb-zoom', `${Math.round(st.zoom * 100)}%`),
         h('button.btn.btn-icon.btn-ghost', { title: '확대', onclick: () => setZoom(st.zoom * 1.2) }, icon('zoomIn')),
@@ -180,7 +180,7 @@ export function createEditor(ctx) {
     const parts = [];
     if (!info?.analyzed) parts.push(h('span', '이 쪽은 아직 분석 전이에요.'));
     else {
-      const src = { text: 'PDF 글자', ocr: 'OCR(스캔 인식)', gemini: 'Gemini', manual: '직접 편집' }[info.source] || info.source;
+      const src = { text: 'PDF 글자', ocr: 'OCR(스캔 인식)', gemini: 'AI', manual: '직접 편집' }[info.source] || info.source;
       parts.push(h('span.muted', `인식 방법: ${src}`));
       const miss = ctx.missing?.(st.role)?.get(st.page) || [];
       const why = [...(info.ok ? [] : info.flags || []), ...(miss.length ? [`빠진 번호 ${miss.map((m) => m.num).join(', ')}`] : [])];

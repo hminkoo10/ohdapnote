@@ -38,9 +38,11 @@ contextBridge.exposeInMainWorld('ohdap', {
   openDataDir: () => ipcRenderer.invoke('shell:openDataDir'),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
-  geminiGenerate: (args) => ipcRenderer.invoke('gemini:generate', args),
-  geminiAbort: (requestId) => ipcRenderer.invoke('gemini:abort', requestId),
-  geminiListModels: (apiKey) => ipcRenderer.invoke('gemini:listModels', { apiKey }),
+  // AI (Gemini · OpenAI 호환 · Claude · ChatGPT 구독)
+  aiGenerate: (args) => ipcRenderer.invoke('ai:generate', args),
+  aiAbort: (requestId) => ipcRenderer.invoke('ai:abort', requestId),
+  aiListModels: (args) => ipcRenderer.invoke('ai:listModels', args),
+  aiCodexStatus: (path) => ipcRenderer.invoke('ai:codexStatus', { path }),
 
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
   installUpdate: () => ipcRenderer.invoke('update:install'),

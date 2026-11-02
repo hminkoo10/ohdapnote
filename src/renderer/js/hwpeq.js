@@ -566,133 +566,227 @@ function emitScript(n) {
 }
 
 // ---------------------------------------------------------------------------
-// 4) 대략적인 크기 (글자 크기 = 1)
+// 4) 크기: 한글 수식 편집기가 실제로 그리는 크기
+//    한글은 파일을 열 때 수식 크기(hp:sz)를 다시 셈하지 않고 적힌 대로 자리를 잡으므로, 폭이 모자라면
+//    뒤 글자와 겹칩니다. 한글 2024 에서 수식 수백 개를 만들어 잰 값으로 맞춘 규칙입니다.
+//    - 단위: 글자 크기의 1/1000 (10pt 에서 HWPUNIT 과 같음)
+//    - 글자 폭은 화면 화소(10pt 에서 75)로 반올림, 첨자는 0.7배(첨자의 첨자·거듭제곱근 지수는 0.42배) 크기에서 다시 반올림
+//    - 이항 연산자(+ - × …) 양쪽 140, 관계(= < ≤ …) 양쪽 210, 쉼표 뒤 70, 글자 바로 뒤 괄호 70, 영문자 뒤 함수 이름 125
+//    - 분수·근호·꾸밈표·LEFT RIGHT 바로 뒤에서는 연산자 왼쪽 띄움이 없고, 첨자 바로 뒤에서는 1/0.7 배
+//    - 대문자 바로 뒤 위첨자는 150 더 띄움
 // ---------------------------------------------------------------------------
-const AXIS = 0.27; // 분수 선 높이
-const BOX = (w, a = 0.78, d = 0.22) => ({ w, a, d });
+const PX = 75; // 10pt 에서 화소 하나
+const SUB = 0.7; // 첨자 크기
+const WIDE = 1050; // 한글·한자·대부분의 기호
+const SPACE_W = { '~': 500, '`': 125 };
+// 기울인 영문자 폭(화소)
+const LOWER_PX = [7, 6, 6, 8, 6, 8, 6, 7, 5, 6, 7, 4, 11, 8, 6, 7, 6, 6, 6, 5, 8, 6, 10, 8, 7, 6];
+const UPPER_PX = [11, 10, 9, 10, 9, 9, 10, 11, 5, 6, 11, 9, 13, 11, 10, 9, 10, 10, 8, 11, 10, 11, 14, 10, 10, 8];
+// 기호: [폭, 종류]  bin: 이항 연산자, rel: 관계, open/close: 괄호, punct: 뒤를 띄우는 쉼표, ord: 띄움 없음
+const GLYPH = {
+  '+': [825, 'bin'], '-': [825, 'bin'], '+-': [825, 'bin'], '-+': [1050, 'bin'], times: [825, 'bin'], div: [825, 'bin'], circ: [1050, 'bin'], '!=': [1050, 'bin'],
+  '=': [825, 'rel'], '<': [900, 'rel'], '>': [900, 'rel'], '<=': [1050, 'rel'], '>=': [1050, 'rel'], ':': [300, 'rel'],
+  subset: [1050, 'rel'], supset: [1050, 'rel'], subseteq: [1050, 'rel'], supseteq: [1050, 'rel'], cdots: [1050, 'rel'], ldots: [1050, 'rel'], vdots: [1050, 'rel'], ddots: [1050, 'rel'],
+  '(': [375, 'open'], '[': [300, 'open'], lbrace: [600, 'open'], ')': [375, 'close'], ']': [300, 'close'], rbrace: [600, 'close'],
+  ',': [300, 'punct'], '*': [525, 'punct'],
+  '.': [300], ';': [300], '!': [300], "'": [300], '|': [225], '/': [525], '?': [525], '%': [825], $: [525], "''": [450], '‖': [375], '†': [525], 'ℏ': [600], '¬': [825],
+  prime: [300], DEG: [825], ' ': [125],
+};
+for (const c of '⋆∙≈∼≃≡≅≐∉') GLYPH[c] = [WIDE, 'bin'];
+for (const c of '≪≫⊈⊉') GLYPH[c] = [WIDE, 'rel'];
+// 그리스 문자 폭(화소)
+const GREEK_PX = {
+  alpha: 8, beta: 8, gamma: 7, delta: 6, epsilon: 6, zeta: 6, eta: 7, theta: 7, iota: 4, kappa: 8, lambda: 7, mu: 8, nu: 7, xi: 7, omicron: 6, pi: 8,
+  rho: 7, sigma: 7, tau: 6, upsilon: 6, phi: 8, chi: 8, psi: 9, omega: 9, GAMMA: 9, DELTA: 10, THETA: 10, LAMBDA: 11, XI: 10, PI: 11, SIGMA: 11,
+  UPSILON: 8, PHI: 9, PSI: 9, OMEGA: 10,
+};
+// 똑바른 글씨 함수 이름 폭 (앞에 글자가 있으면 125 띄움)
+const FN_W = {
+  sin: 1350, cos: 1500, tan: 1500, cot: 1425, sec: 1500, csc: 1500, arcsin: 2850, arccos: 3000, arctan: 3000, sinh: 1950, cosh: 2100, tanh: 2100,
+  coth: 2025, log: 1425, ln: 900, lg: 900, exp: 1800, max: 2100, min: 1800, det: 1500, gcd: 1725, mod: 2025, arg: 1575, dim: 1800, ker: 1575, hom: 2025,
+};
+// 큰 연산자: [폭, 위, 아래, 한계를 옆에 붙임]
+const BIG_OP = { sum: [1275, 1030, 330], prod: [1350, 1030, 330], lim: [1800, 960, 240], int: [1110, 1265, 650, true], oint: [1110, 1265, 650, true], 'int int': [2220, 1265, 650, true] };
 
-function charWidth(ch) {
-  if (HANGUL_RE.test(ch) || /[　-鿿]/.test(ch)) return 0.92;
-  if (/[ijlft]/.test(ch)) return 0.3;
-  if (/[mw]/.test(ch)) return 0.72;
-  if (/[MW]/.test(ch)) return 0.85;
-  if (/[A-Z]/.test(ch)) return 0.64;
-  if (/[a-z0-9]/.test(ch)) return 0.5;
-  if (ch === ' ') return 0.3;
-  if (/[.,:;'`!|]/.test(ch)) return 0.28;
-  if (/[()[\]]/.test(ch)) return 0.36;
-  return 0.6;
+const ASC = 840; // 보통 글자 위·아래 (기준선에서)
+const DESC = 140;
+const AXIS = 360; // 분수 선 높이
+
+/** 글자 하나 폭 (크기 s 에서 화소로 반올림) */
+const px = (w, s) => (s === 1 ? w : Math.round((w / PX) * s) * PX);
+
+function charW(ch) {
+  const i = 'abcdefghijklmnopqrstuvwxyz'.indexOf(ch);
+  if (i >= 0) return LOWER_PX[i] * PX;
+  const j = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.indexOf(ch);
+  if (j >= 0) return UPPER_PX[j] * PX;
+  if (/[0-9]/.test(ch)) return 7 * PX;
+  return GLYPH[ch]?.[0] ?? WIDE;
 }
 
-const textWidth = (s) => [...s].reduce((w, ch) => w + charWidth(ch), 0);
+const atom = (w, s, cls = 'ord', extra = {}) => ({ w, a: ASC * s, d: DESC * s, cls, k: 1, ...extra });
+/** 영문자: 함수 이름 앞 띄움, 대문자 뒤 위첨자 띄움에 씀 */
+const letterAtom = (ch, s) => atom(px(charW(ch), s), s, 'ord', { letter: true, upper: /[A-Z]/.test(ch) });
+// 따옴표 글자 속 빈칸(125)도 글자처럼 폭을 차지함
+const charAtoms = (str, s) => [...str].map((ch) => (/[A-Za-z]/.test(ch) ? letterAtom(ch, s) : atom(px(charW(ch), s), s, GLYPH[ch]?.[1] || 'ord')));
+const lettersW = (str) => [...str].reduce((w, ch) => w + charW(ch), 0);
 
-function measureSym(n) {
+/** 낱말(기호) 하나 → 조각 목록 */
+function symAtoms(n, s) {
   const v = n.v;
-  if (n.big) return v === 'int' || v === 'oint' || v === 'int int' ? BOX(v === 'int int' ? 1.1 : 0.62, 1.0, 0.42) : BOX(1.1, 0.95, 0.35);
-  if (n.k === 'open' || n.k === 'close') return BOX(0.38, 0.8, 0.25);
-  if (n.k === 'punct') return BOX(v === ',' || v === ';' ? 0.45 : 0.28);
-  if (n.k === 'text') return BOX(textWidth(v.replace(/"/g, '')));
-  if (/^(->|<-|<->|⇒|⇐|⇔)$/.test(v)) return BOX(1.15, 0.7, 0.1);
-  if (/^(cdots|ldots)$/.test(v)) return BOX(1.05, 0.5, 0.05);
-  if (/^(vdots|ddots)$/.test(v)) return BOX(0.6, 0.85, 0.1);
-  if (v === 'prime' || v === 'DEG') return BOX(0.3, 0.8, 0);
-  if (v === 'lbrace' || v === 'rbrace') return BOX(0.45, 0.8, 0.25);
-  if (n.k === 'kw' && FN.has(v)) return BOX(textWidth(v) * 0.92 + 0.18);
-  if (n.k === 'kw' && Object.values(GREEK).includes(v)) return BOX(/^[A-Z]/.test(v) ? 0.66 : 0.56);
-  if (n.k === 'kw' && v === 'inf') return BOX(0.85, 0.55, 0.05);
-  if (n.k === 'kw' || n.k === 'op') return v.length === 1 && /[A-Za-z0-9]/.test(v) ? BOX(0.55) : v === '|' ? BOX(0.3, 0.8, 0.25) : BOX(0.82, 0.62, 0.12);
-  return BOX(textWidth(v));
+  if (n.big && BIG_OP[v]) return [atom(px(BIG_OP[v][0], s), s, 'ord', { a: BIG_OP[v][1] * s, d: BIG_OP[v][2] * s, big: BIG_OP[v] })];
+  if (v === 'lim') return [atom(px(1800, s), s, 'ord', { a: 960 * s, d: 240 * s, big: BIG_OP.lim })];
+  if (n.k === 'text') return charAtoms(v.replace(/^"|"$/g, ''), s);
+  if (FN_W[v]) return [atom(px(FN_W[v], s), s, 'fn')];
+  if (GREEK_PX[v]) return [atom(px(GREEK_PX[v] * PX, s), s, 'ord', { letter: true, upper: /^[A-Z]/.test(v) })];
+  if (GLYPH[v]) return [atom(px(GLYPH[v][0], s), s, GLYPH[v][1] || 'ord')];
+  if (/^[A-Za-z]{2,}$/.test(v) && !['inf', 'angle', 'triangle', 'therefore', 'because', 'in', 'cup', 'cap', 'emptyset', 'cdot'].includes(v)) {
+    return [atom(px(lettersW(v), s), s)]; // 모르는 명령: 기울인 글자로 보임
+  }
+  return [atom(px(v.length === 1 ? charW(v) : WIDE, s), s)];
 }
 
-function hstack(boxes) {
-  if (!boxes.length) return BOX(0, 0.7, 0.2);
-  return { w: boxes.reduce((s, b) => s + b.w, 0), a: Math.max(...boxes.map((b) => b.a)), d: Math.max(...boxes.map((b) => b.d)) };
+/**
+ * 조각 사이 띄움. L: 왼쪽(빈칸 건너뜀), R: 이번 조각
+ * 앞에 받을 것이 없는 이항 연산자(-x, x=-1 의 -)는 단항: 오른쪽만 띄움
+ * 조각 k: 바로 뒤 연산자의 왼쪽 띄움 배율 (분수·근호 등 뒤 0, 첨자 뒤 1/0.7)
+ * 첨자 안의 관계 띄움은 줄지 않는 경우가 있어 그대로 둠(넓게)
+ */
+function gapBefore(L, R, s) {
+  if (!L) return 0;
+  const operand = L.cls === 'ord' || L.cls === 'close' || L.cls === 'fn';
+  const end = R.cls === 'close' || R.cls === 'punct';
+  if (R.cls === 'bin') return operand ? 140 * L.k * s : 0;
+  if (R.cls === 'rel') return operand ? 210 * L.k : 0;
+  if (L.cls === 'bin') return end ? 0 : 140 * s;
+  if (L.cls === 'rel') return end ? 0 : 210;
+  if (L.cls === 'punct') return 70 * s;
+  if (R.cls === 'open' || R.cls === 'close') return L.cls === 'ord' || L.cls === 'fn' ? 70 * L.k * s : 0;
+  if (R.cls === 'fn') return L.letter ? 125 * s : 0;
+  return 0;
 }
 
-const measureSeq = (seq) => hstack(seq.items.map(measure));
+/** 조각들을 옆으로 이어 붙임 */
+function hstack(atoms, s) {
+  let w = 0;
+  let a = ASC * s;
+  let d = DESC * s;
+  let L = null;
+  for (const R of atoms) {
+    if (R.cls === 'space') {
+      w += R.w;
+      continue;
+    }
+    w += gapBefore(L, R, s) + R.w;
+    a = Math.max(a, R.a);
+    d = Math.max(d, R.d);
+    L = R;
+  }
+  return { w, a, d };
+}
 
-function measure(n) {
+const measureSeq = (seq, s) => hstack(seqAtoms(seq, s), s);
+const seqAtoms = (seq, s) => seq.items.flatMap((n) => nodeAtoms(n, s));
+/** 구조(분수·근호 등): 바로 뒤 연산자의 왼쪽 띄움이 없음 */
+const struct = (box) => ({ ...box, cls: 'ord', k: 0 });
+
+function nodeAtoms(n, s) {
   switch (n.t) {
     case 'seq':
+      return seqAtoms(n, s);
     case 'inline':
-      return measureSeq(n.t === 'seq' ? n : seqOf(n.items));
+      return seqAtoms(seqOf(n.items), s);
     case 'letter':
-      return BOX(charWidth(n.v) + 0.04);
+      return [letterAtom(n.v, s)];
     case 'num':
-      return BOX(textWidth(n.v), 0.72, 0.02);
+      return charAtoms(n.v, s);
     case 'text':
-      return BOX(textWidth(n.v) + 0.1);
+      return charAtoms(n.v, s);
     case 'sym':
-      return measureSym(n);
+      return symAtoms(n, s);
     case 'space':
-      return BOX([...n.v].reduce((w, c) => w + (c === '~' ? 0.32 : 0.14), 0), 0, 0);
-    case 'group':
-      return measureSeq(n.body);
+      return [{ w: [...n.v].reduce((w, c) => w + (SPACE_W[c] || 0), 0) * s, a: 0, d: 0, cls: 'space' }];
+    case 'group': {
+      // 묶음은 마지막 조각처럼 띄움 (분수를 묶은 것은 분수처럼)
+      const atoms = seqAtoms(n.body, s);
+      const last = atoms.filter((x) => x.cls !== 'space').pop();
+      return [{ ...hstack(atoms, s), cls: last?.cls === 'fn' ? 'fn' : 'ord', k: last?.k ?? 1, upper: last?.upper }];
+    }
     case 'frac': {
-      const nu = measureSeq(n.num);
-      const de = measureSeq(n.den);
-      return { w: Math.max(nu.w, de.w) + 0.3, a: AXIS + 0.12 + nu.a + nu.d, d: de.a + de.d + 0.12 - AXIS };
+      const nu = measureSeq(n.num, s);
+      const de = measureSeq(n.den, s);
+      return [struct({ w: Math.max(nu.w, de.w) + 500 * s, a: nu.a + nu.d + 510 * s, d: de.a + de.d - 210 * s })];
     }
     case 'binom': {
-      const nu = measureSeq(n.n);
-      const de = measureSeq(n.k);
-      return { w: Math.max(nu.w, de.w) + 1.0, a: AXIS + 0.1 + nu.a + nu.d, d: de.a + de.d + 0.1 - AXIS };
+      const nu = measureSeq(n.n, s);
+      const de = measureSeq(n.k, s);
+      return [struct({ w: Math.max(nu.w, de.w) + 1250 * s, a: nu.a + nu.d + 510 * s, d: de.a + de.d - 210 * s })];
     }
     case 'sqrt': {
-      const b = measureSeq(n.body);
-      const idx = n.index ? measureSeq(n.index).w * 0.62 : 0;
-      return { w: b.w + 0.78 + Math.max(0, idx - 0.25), a: Math.max(b.a, 0.72) + 0.2, d: b.d + 0.06 };
+      const b = measureSeq(n.body, s);
+      const idx = n.index ? Math.max(0, measureSeq(n.index, s * 0.42).w - 337 * s) : 0;
+      return [struct({ w: b.w + 845 * s + idx, a: b.a + 150 * s, d: Math.max(b.d, DESC * s) })];
     }
     case 'accent': {
-      const b = measureSeq(n.body);
-      return { w: b.w + 0.08, a: b.a + 0.28, d: b.d };
+      const b = measureSeq(n.body, s);
+      return [struct({ w: b.w + 105 * s, a: b.a + 200 * s, d: b.d })];
     }
     case 'lr': {
-      const b = measureSeq(n.body);
-      if (!useLR(n)) return hstack([n.l, n.r].map((d) => (d === '.' ? BOX(0) : BOX(0.4, 0.8, 0.25))).concat(b));
-      return { w: b.w + 0.8, a: Math.max(b.a, 0.8) + 0.08, d: Math.max(b.d, 0.25) + 0.08 };
+      const b = measureSeq(n.body, s);
+      if (!useLR(n)) return seqAtoms(seqOf([delimNode(n.l), ...n.body.items, delimNode(n.r)].filter(Boolean)), s);
+      const dw = (c) => (c === '(' || c === ')' ? 375 : 525) * s;
+      return [struct({ w: b.w + dw(n.l) + dw(n.r), a: Math.max(b.a, ASC * s), d: Math.max(b.d, DESC * s) })];
     }
     case 'env':
-      return measureEnv(n);
+      return [struct(measureEnv(n, s))];
     case 'script':
-      return measureScript(n);
+      return scriptAtoms(n, s);
     default:
-      return BOX(0, 0, 0);
+      return []; // amp, rowsep
   }
 }
 
-function measureScript(n) {
-  const b = measure(n.base);
-  if (!n.sub && (onlySym(n.sup, 'circ') || onlySym(n.sup, 'prime'))) return { ...b, w: b.w + 0.32 };
-  const S = 0.7;
-  const sup = n.sup ? measureSeq(n.sup) : null;
-  const sub = n.sub ? measureSeq(n.sub) : null;
-  // 합·곱·극한은 한계를 아래위에
-  if (n.base.t === 'sym' && n.base.limits) {
-    return {
-      w: Math.max(b.w, (sup?.w || 0) * S, (sub?.w || 0) * S) + 0.1,
-      a: b.a + (sup ? (sup.a + sup.d) * S + 0.06 : 0),
-      d: b.d + (sub ? (sub.a + sub.d) * S + 0.06 : 0),
-    };
+function scriptAtoms(n, s) {
+  const baseAtoms = nodeAtoms(n.base, s);
+  // 90^{\circ} → 90 DEG, f^{\prime} → f prime : 뒤에 기호 하나
+  if (!n.sub && (onlySym(n.sup, 'circ') || onlySym(n.sup, 'prime'))) return [...baseAtoms, atom(px(onlySym(n.sup, 'circ') ? 825 : 300, s), s)];
+  const base = baseAtoms.length === 1 ? baseAtoms[0] : { ...hstack(baseAtoms, s), cls: 'ord', upper: baseAtoms[baseAtoms.length - 1].upper };
+  const t = s === 1 ? SUB : s * 0.6; // 첨자의 첨자는 더 작게(0.42)
+  const sup = n.sup ? measureSeq(n.sup, t) : null;
+  const sub = n.sub ? measureSeq(n.sub, t) : null;
+  const out = { cls: base.cls === 'fn' ? 'fn' : 'ord', k: 1 / SUB };
+  const big = base.big;
+  if (big && !big[3]) {
+    // 합·곱·극한: 한계를 아래위에
+    return [{ ...out, w: Math.max(base.w, sup?.w || 0, sub?.w || 0), a: base.a + (sup ? sup.a + sup.d : 0), d: base.d + (sub ? sub.a + sub.d : 0) }];
   }
-  const supTop = sup ? Math.max(0.42, b.a - 0.32) + (sup.a + sup.d) * S : 0;
-  const subBottom = sub ? 0.22 + (sub.a * 0.35 + sub.d) * S : 0;
-  return {
-    w: b.w + Math.max(sup?.w || 0, sub?.w || 0) * S + 0.06,
-    a: Math.max(b.a, supTop),
-    d: Math.max(b.d, subBottom),
-  };
+  if (big) {
+    // 적분: 한계를 옆에
+    return [{ ...out, w: base.w + Math.max(sup?.w || 0, sub?.w || 0), a: base.a + (sup ? (sup.a + sup.d) / 2 : 0), d: base.d + (sub ? (sub.a + sub.d) / 2 : 0) }];
+  }
+  const rise = sup ? Math.max(447 * s, base.a - 430 * s, 350 * s + sup.d) : 0;
+  const drop = sub ? Math.max(235 * s, sub.a - 353 * s) : 0;
+  const supW = sup ? sup.w + (base.upper ? 150 * s : 0) : 0;
+  return [
+    {
+      ...out,
+      w: base.w + Math.max(supW, sub?.w || 0),
+      a: Math.max(base.a, sup ? rise + sup.a : 0),
+      d: Math.max(base.d, sub ? drop + sub.d : 0),
+    },
+  ];
 }
 
-function measureEnv(n) {
-  const cells = n.rows.map((row) => row.map(measureSeq));
-  const cols = Math.max(...cells.map((r) => r.length));
-  const colW = Array.from({ length: cols }, (_, j) => Math.max(0, ...cells.map((r) => r[j]?.w || 0)));
-  const rowH = cells.map((r) => Math.max(0.78, ...r.map((c) => c.a)) + Math.max(0.22, ...r.map((c) => c.d)) + 0.28);
-  const H = rowH.reduce((s, x) => s + x, 0);
+function measureEnv(n, s) {
   const pile = PILES.has(n.kw);
-  const w = (pile ? Math.max(...cells.map((r) => r.reduce((s, c) => s + c.w, 0))) : colW.reduce((s, x) => s + x, 0) + 1.0 * (cols - 1)) + (n.kw === 'matrix' || pile ? 0.2 : 0.9);
-  return { w, a: H / 2 + AXIS, d: H / 2 - AXIS };
+  const rows = n.rows.map((cells) => (pile ? [measureSeq(seqOf(cells.flatMap((c) => c.items)), s)] : cells.map((c) => measureSeq(c, s))));
+  const cols = Math.max(...rows.map((r) => r.length));
+  const colW = Array.from({ length: cols }, (_, j) => Math.max(0, ...rows.map((r) => r[j]?.w || 0)));
+  const rowH = rows.map((r) => Math.max(ASC * s, ...r.map((c) => c.a)) + Math.max(DESC * s, ...r.map((c) => c.d)));
+  const H = rowH.reduce((sum, x) => sum + x, 0) + 150 * s * (rows.length - 1);
+  const fence = { cases: 525, pmatrix: 750, bmatrix: 1050, dmatrix: 1050 }[n.kw] || 0;
+  const w = colW.reduce((sum, x) => sum + x, 0) + 200 * s * (cols - 1) + fence * s;
+  return { w, a: H / 2 + AXIS * s, d: H / 2 - AXIS * s };
 }
 
 // ---------------------------------------------------------------------------
@@ -701,6 +795,11 @@ function measureEnv(n) {
 export function latexToHwpEq(latex) {
   return emitStr(parse(latex)).trim();
 }
+
+// 잰 값과 다를 수 있는 만큼의 여유: 넓은 쪽이 겹치는 것보다 낫습니다
+const SLACK_W = 0.03;
+const SLACK_W_MIN = 90;
+const SLACK_D = 30;
 
 /**
  * LaTeX → 한글 수식 스크립트 + 한글 문서에 넣을 크기
@@ -711,13 +810,14 @@ export function latexToHwpEq(latex) {
 export function convertLatex(latex, { baseUnit = 1000 } = {}) {
   const tree = parse(latex);
   const script = emitStr(tree).trim();
-  const m = measureSeq(tree);
-  const a = Math.max(m.a, 0.7);
-  const d = Math.max(m.d, 0.18);
+  const m = measureSeq(tree, 1);
+  const k = baseUnit / 1000;
+  const a = m.a;
+  const d = m.d + SLACK_D;
   return {
     script,
-    width: Math.max(Math.round(baseUnit * 0.3), Math.round((m.w + 0.12) * baseUnit)),
-    height: Math.round((a + d + 0.08) * baseUnit),
-    baseLine: Math.round(((a + 0.04) / (a + d + 0.08)) * 100),
+    width: Math.ceil((m.w + Math.max(SLACK_W_MIN, m.w * SLACK_W)) * k),
+    height: Math.round((a + d) * k),
+    baseLine: Math.round((a / (a + d)) * 100),
   };
 }

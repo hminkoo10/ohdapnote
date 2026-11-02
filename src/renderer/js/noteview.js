@@ -2,10 +2,11 @@
 
 import { h, clear, toast, modal, confirmDialog, icon, animateOut, countUp } from './ui.js';
 import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS } from './exporter.js';
-import { buildHwpx, renderStack, cropImage } from './hwpx.js';
-import { geminiTranscribe, canvasToBase64Jpeg } from './gemini.js';
+import { buildHwpx, renderStack, cropImage, blockSegs } from './hwpx.js';
+import { geminiTranscribe, geminiTranscribeBatch, canvasToBase64Jpeg } from './gemini.js';
+import { transcribeParts } from './pdfmath.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
-import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, geminiModels } from './shared.js';
+import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiOptions, aiLabel, aiModelText, jobDialog, findJob, holdSource } from './shared.js';
 import { topbar, renderUpdateBadge } from './chrome.js';
 import { spineFor } from './home.js';
 
@@ -545,8 +546,10 @@ function formatHint() {
 function setFormatHint(el) {
   el.hidden = ns.note?.exportOptions.format !== 'hwpx';
   el.textContent = geminiReady()
-    ? '문제·해설을 글자와 수식으로 옮겨 한글 수식 편집기로 고칠 수 있어요 (Gemini 사용)'
-    : 'Gemini 키가 없으면 문항이 그림으로 들어가요 (설정에서 키 입력)';
+    ? `문제·해설을 글자와 수식으로 옮겨 한글 수식 편집기로 고칠 수 있어요 (디지털 PDF 는 PDF 글자 그대로, 나머지는 ${aiLabel()} 사용)`
+    : aiOff()
+      ? '디지털 PDF(EBS 교재 등)는 글자와 수식으로 옮기고, 스캔본은 그림으로 넣어요 (설정에서 AI 꺼짐)'
+      : '디지털 PDF(EBS 교재 등)는 글자와 수식으로 옮겨요. 스캔본은 AI 를 설정하지 않으면 그림으로 들어가요 (설정에서 AI 키 입력)';
 }
 
 export function renderFormatHint() {
@@ -673,17 +676,33 @@ async function doExport(mode) {
     if (!ns.sources.has(e.bookId)) ns.sources.set(e.bookId, await getSources(e.bookObj));
     e.src = ns.sources.get(e.bookId);
   }
-  const label = (role, it, e) => pageLabel(e.bookObj.docs[role], it.page);
   const opts = n.exportOptions;
+  const jobKey = `hwpx:${n.id}`;
+  const label = (role, it, e) => pageLabel(e.bookObj.docs[role], it.page);
   const blocks = makeBlocks(mode, entries, opts, label);
   const modeName = { problems: '문제지', answers: '해설지', 'both-inline': '문제+해설', 'both-end': '문제+해설(해설 뒤)' }[mode];
   const info = examInfo();
+  // 이 오답노트의 한글 문서를 뒤에서 만드는 중: 내용이 같으면 그 창을 보여 주고,
+  // 멈추는 중이거나 그 사이 오답노트를 고쳤으면 그것을 멈추고 고친 내용으로 새로 만듦
+  const sig = exportSig(mode, blocks, opts, info);
+  const old = opts.format === 'hwpx' && findJob(jobKey);
+  if (old) {
+    if (!old.cancelled && old.sig === sig) {
+      old.open();
+      return;
+    }
+    if (!old.cancelled) toast('오답노트가 바뀌어서 만들던 한글 문서를 멈추고 고친 내용으로 다시 만들어요.');
+    old.cancel();
+    await old.finished;
+  }
   const sub = { problems: `문제 ${entries.length}문항`, answers: `해설 ${entries.length}문항`, 'both-inline': `문제·해설 ${entries.length}문항`, 'both-end': `문제 ${entries.length}문항 · 정답 및 해설` }[mode];
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
   const btn = document.querySelector(`.export-btn[data-mode="${mode}"]`);
   const hwpx = opts.format === 'hwpx';
   const kindName = hwpx ? '한글 문서' : 'PDF';
+  const run = String(++exportRuns);
+  if (btn) btn.dataset.run = run;
   btn?.classList.add('working');
   const closeToast = toast(`${modeName} ${kindName} 만드는 중…`, { timeout: 0 });
   try {
@@ -691,25 +710,31 @@ async function doExport(mode) {
     const fname = [safe(info.student), safe(info.title), modeName, ymd].filter(Boolean).join('_');
     let res;
     let note = '';
+    const saved = (r) => {
+      if (r.canceled) return;
+      toast(`저장했어요${note} — ${r.path}`, {
+        type: 'success',
+        timeout: 10000,
+        actions: [
+          { label: '열기', onClick: () => api.openPath(r.path) },
+          { label: '폴더 보기', onClick: () => api.showItemInFolder(r.path) },
+        ],
+      });
+    };
     if (hwpx) {
-      const bytes = await exportHwpx(blocks, entries, opts, { ...info, subtitle: sub });
+      const bytes = await exportHwpx(blocks, entries, opts, { ...info, subtitle: sub }, { key: jobKey, sig });
       closeToast();
       if (bytes.stats?.picture && bytes.stats?.text) note = ` (그림으로 넣은 문항 ${bytes.stats.picture}개)`;
-      res = await api.saveFile({ defaultName: `${fname}.hwpx`, data: bytes, filters: [{ name: '한글 문서', extensions: ['hwpx'] }], title: '한글 문서 저장' });
+      const save = () => api.saveFile({ defaultName: `${fname}.hwpx`, data: bytes, filters: [{ name: '한글 문서', extensions: ['hwpx'] }], title: '한글 문서 저장' });
+      // 옮기기를 뒤로 보내 둔 채 끝났으면 저장 창을 바로 띄우지 않고 알림의 [저장하기]로 (다른 화면을 보고 있을 수 있음)
+      if (bytes.job?.finish({ message: `${info.student ? `${info.student} · ` : ''}${modeName} 한글 문서가 준비됐어요`, actions: [{ label: '저장하기', onClick: async () => saved(await save()) }] })) return;
+      res = await save();
     } else {
       const bytes = await buildPdf({ blocks, options: opts, title: info.title, info: { ...info, subtitle: sub } });
       closeToast();
       res = await api.savePdf(`${fname}.pdf`, bytes);
     }
-    if (res.canceled) return;
-    toast(`저장했어요${note} — ${res.path}`, {
-      type: 'success',
-      timeout: 10000,
-      actions: [
-        { label: '열기', onClick: () => api.openPath(res.path) },
-        { label: '폴더 보기', onClick: () => api.showItemInFolder(res.path) },
-      ],
-    });
+    saved(res);
   } catch (err) {
     closeToast();
     if (err?.name === 'AbortError') {
@@ -719,14 +744,21 @@ async function doExport(mode) {
     console.error(err);
     toast(`${kindName}를 만들지 못했어요: ${err.message}`, { type: 'error', timeout: 10000 });
   } finally {
-    btn?.classList.remove('working');
+    if (btn?.dataset.run === run) btn.classList.remove('working'); // 멈춘 앞 작업이 새로 시작한 작업의 표시를 지우지 않게
   }
 }
 
+let exportRuns = 0;
+
+/** 한글 문서 내용이 같은지 견주는 열쇠 (문항·영역·지문·번호·출처 + 내보내기 설정·시험지 머리) */
+function exportSig(mode, blocks, opts, info) {
+  return JSON.stringify({ mode, opts, info, blocks: blocks.map((b) => [b.kind, b.item?.id, b.item?.rects, b.stem, b.num, b.source, b.text]) });
+}
+
 // ===========================================================================
-// 한글 문서(HWPX): Gemini 로 문항을 글자·수식으로 옮겨 넣음 (키가 없거나 못 옮긴 문항은 그림으로)
+// 한글 문서(HWPX): 문항을 글자·수식으로 옮겨 넣음 — 디지털 PDF 는 PDF 글자로, 나머지는 AI 로 (못 옮긴 문항은 그림으로)
 // ===========================================================================
-const TRANSCRIBE_WIDTH = 1500; // Gemini 에 보내는 그림 폭(px)
+const TRANSCRIBE_WIDTH = 1500; // AI 에 보내는 그림 폭(px)
 const MAX_TRANSCRIPTS = 3000; // 책 하나에 저장해 두는 개수
 const transcripts = new Map(); // 책 id → {items: {열쇠: {blocks, model, at}}, dirty}  (책 폴더의 transcripts.json)
 
@@ -768,26 +800,125 @@ function transcriptKey(block) {
   return `${block.role}|${block.item.id}|${(hash >>> 0).toString(36)}`;
 }
 
-async function exportHwpx(blocks, entries, opts, info) {
+/**
+ * 수식 글꼴로 만든 디지털 PDF 는 AI 없이 쪽의 글자·선을 그대로 읽어 옮김. 못 하면 null
+ * 그림 상자(box)는 renderStack 으로 쌓은 그림 기준 (같은 폭·같은 틈)
+ */
+async function pdfTranscribe(segs) {
+  const scale = TRANSCRIBE_WIDTH / Math.max(...segs.map((s) => s.wPt));
+  const W = Math.max(...segs.map((s) => s.wPt * scale));
+  const H = segs.reduce((sum, s) => sum + s.hPt * scale, 0) + 12 * (segs.length - 1);
+  const parts = [];
+  let y = 0;
+  for (const s of segs) {
+    const layer = await s.src.getMathLayer?.(s.rect.page);
+    if (!layer) return null;
+    parts.push({ layer, rect: s.rect, place: { x: 0, y: y / H, w: (s.wPt * scale) / W, h: (s.hPt * scale) / H } });
+    y += s.hPt * scale + 12;
+  }
+  try {
+    return transcribeParts(parts);
+  } catch (err) {
+    console.warn('PDF 글자로 옮기지 못함', err);
+    return null;
+  }
+}
+
+/**
+ * 0) 디지털 PDF 문항은 PDF 글자로 바로 옮김 (AI 를 쓰지 않음)
+ * 1) 나머지 중 새로 옮길 문항을 먼저 AI 로 옮겨 저장: 문항 여러 개를 한 요청에 묶고(설정 aiBatch), 요청 여러 개를 동시에(aiConcurrency)
+ * 2) buildHwpx 는 문항마다 transcribe 를 부르는데, 미리 옮겨 둔 결과를 그대로 씀
+ */
+async function exportHwpx(blocks, entries, opts, info, job) {
   const bookOf = new Map(); // 원본(DocSource) → 책 id
   for (const e of entries) for (const src of [e.src?.problem, e.src?.answer]) if (src) bookOf.set(src, e.bookId);
-  const work = blocks.filter((b) => (b.kind === 'problem' || b.kind === 'answer') && b.item && bookOf.has(b.src));
-  const useGemini = geminiReady() && work.length > 0;
-  const abort = new AbortController();
-  let ui = null;
-  if (useGemini) {
-    for (const bid of new Set(work.map((b) => bookOf.get(b.src)))) await loadTranscripts(bid);
-    const pending = work.filter((b) => !transcripts.get(bookOf.get(b.src)).items[transcriptKey(b)]);
-    if (pending.length) ui = transcribeDialog(work, pending.length, abort);
+  // buildHwpx 가 글자로 옮기려는 문항 (그릴 영역이 있는 문제·해설)
+  const work = blocks.filter((b) => (b.kind === 'problem' || b.kind === 'answer') && b.item && bookOf.has(b.src) && blockSegs(b).length);
+  const fromPdf = new Map(); // 문항 → PDF 글자로 옮긴 결과
+  for (const b of work) {
+    const list = await pdfTranscribe(blockSegs(b));
+    if (list) fromPdf.set(b, list);
   }
+  const useAi = geminiReady() && work.some((b) => !fromPdf.has(b));
+  const { batch: batchSize, ...ai } = aiOptions();
+  const abort = new AbortController();
+  const storeOf = (block) => transcripts.get(bookOf.get(block.src));
+  const failed = new Set(); // 이번에 미리 옮기지 못한 문항 → 그림으로 (다시 묻지 않음)
   let quota = false; // 한도가 차면 나머지는 묻지 않고 그림으로
+  let ui = null;
+  const releases = [];
+
+  /** 새로 옮길 문항을 묶음으로 동시에 옮겨 저장 (같은 열쇠의 문항은 한 번만) */
+  const prefetch = async (pending) => {
+    const groups = new Map(); // 열쇠 → 블록들
+    for (const b of pending) {
+      const key = transcriptKey(b);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(b);
+    }
+    // 문제와 해설은 지시문이 달라서 따로 묶음
+    const batches = [];
+    for (const role of ['problem', 'answer']) {
+      const keys = [...groups.keys()].filter((k) => groups.get(k)[0].role === role);
+      for (let i = 0; i < keys.length; i += batchSize) batches.push({ role, keys: keys.slice(i, i + batchSize) });
+    }
+    let done = work.length - pending.length;
+    ui.progress(done, work.length);
+    const settle = (key, stateName, msg) => {
+      for (const b of groups.get(key)) ui.row(b).set(stateName, msg);
+      done += groups.get(key).length;
+      ui.progress(done, work.length);
+    };
+    const giveUp = (key, stateName, msg) => {
+      for (const b of groups.get(key)) failed.add(b);
+      settle(key, stateName, msg);
+    };
+
+    let next = 0;
+    const worker = async () => {
+      while (next < batches.length) {
+        if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
+        const { role, keys } = batches[next++];
+        if (quota) {
+          for (const k of keys) giveUp(k, 'empty', '한도 초과 → 그림으로');
+          continue;
+        }
+        for (const k of keys) for (const b of groups.get(k)) ui.row(b).set('run', '옮기는 중…');
+        let results;
+        try {
+          // buildHwpx 가 transcribe 에 넘기는 것과 같은 영역(blockSegs)·같은 폭의 그림
+          const images = [];
+          for (const k of keys) images.push(canvasToBase64Jpeg(await renderStack(blockSegs(groups.get(k)[0]), TRANSCRIBE_WIDTH), 0.85));
+          results = await geminiTranscribeBatch(images, { role, ...ai, signal: abort.signal, onStatus: (msg) => ui.status(msg) });
+        } catch (err) {
+          if (err?.name === 'AbortError') throw err;
+          results = keys.map(() => err);
+        }
+        if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
+        keys.forEach((k, i) => {
+          const r = results[i];
+          if (r instanceof Error) {
+            if (/한도/.test(r.message)) {
+              quota = true;
+              ui.status(r.message);
+            }
+            giveUp(k, 'err', `${r.message} → 그림으로`);
+          } else if (!r.length) {
+            giveUp(k, 'empty', '읽은 내용이 없음 → 그림으로');
+          } else {
+            const store = storeOf(groups.get(k)[0]);
+            store.items[k] = { blocks: [...r], model: r.model, at: Date.now() };
+            store.dirty = true;
+            settle(k, 'ok', `글자·수식으로 옮김 · ${r.model || '기본 모델'}`);
+          }
+        });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(ai.concurrency, batches.length) }, worker));
+  };
 
   const transcribe = async (block, segs) => {
     if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
-    const store = transcripts.get(bookOf.get(block.src));
-    if (!store) return null;
-    const key = transcriptKey(block);
-    const row = ui?.row(block);
     let stack = null;
     const getStack = async () => (stack ||= await renderStack(segs, TRANSCRIBE_WIDTH));
     // 그림(그래프·도형)은 바로 잘라 두고 큰 canvas 는 버림
@@ -803,21 +934,24 @@ async function exportHwpx(blocks, entries, opts, info) {
         },
       };
     };
+    if (fromPdf.has(block)) return finish(fromPdf.get(block));
+    const store = useAi && storeOf(block);
+    if (!store) return null;
+    const key = transcriptKey(block);
+    const row = ui?.row(block);
     const cached = store.items[key];
-    if (cached?.blocks?.length) {
-      row?.set('ok', '저장해 둔 결과');
-      return finish(cached.blocks);
-    }
+    if (cached?.blocks?.length) return finish(cached.blocks);
+    if (failed.has(block)) return null;
     if (quota) {
       row?.set('empty', '한도 초과 → 그림으로');
       return null;
     }
+    // 미리 옮기기에서 빠진 문항만 여기서 하나씩
     row?.set('run', '옮기는 중…');
     try {
       const result = await geminiTranscribe(canvasToBase64Jpeg(await getStack(), 0.85), {
         role: block.role,
-        models: geminiModels(),
-        rpm: state.settings.geminiRpm,
+        ...ai,
         signal: abort.signal,
         onStatus: (msg) => ui?.status(msg),
       });
@@ -827,7 +961,7 @@ async function exportHwpx(blocks, entries, opts, info) {
       }
       store.items[key] = { blocks: [...result], model: result.model, at: Date.now() };
       store.dirty = true;
-      row?.set('ok', `글자·수식으로 옮김 · ${result.model}`);
+      row?.set('ok', `글자·수식으로 옮김 · ${result.model || '기본 모델'}`);
       return finish(store.items[key].blocks);
     } catch (err) {
       if (err?.name === 'AbortError') throw err;
@@ -841,25 +975,32 @@ async function exportHwpx(blocks, entries, opts, info) {
   };
 
   try {
-    return await buildHwpx({
-      blocks,
-      options: opts,
-      title: info.title,
-      info,
-      transcribe: useGemini ? transcribe : null,
-      onProgress: (done, total) => {
-        ui?.progress(done, total);
-        if (done === total) ui?.close(); // 옮기기가 끝나면 창을 닫고 문서를 마저 만듦
-      },
-    });
+    if (useAi) {
+      for (const bid of new Set(work.map((b) => bookOf.get(b.src)))) await loadTranscripts(bid);
+      const pending = work.filter((b) => !fromPdf.has(b) && !storeOf(b).items[transcriptKey(b)]?.blocks?.length);
+      if (pending.length) {
+        ui = transcribeDialog(work, pending.length, abort, { ...job, jobTitle: `${info.student ? `${info.student} · ` : ''}한글 문서 (문항 ${work.length}개)` });
+        // 뒤에서 도는 동안 다른 책을 열어도 이 원본들은 닫히지 않게
+        for (const e of entries) for (const role of ['problem', 'answer']) releases.push(holdSource(e.bookObj, role));
+        for (const b of work) if (!pending.includes(b)) ui.row(b).set('ok', fromPdf.has(b) ? 'PDF 글자로 옮김' : '저장해 둔 결과');
+        await prefetch(pending);
+        ui.status('한글 문서를 만드는 중…');
+      }
+    }
+    const bytes = await buildHwpx({ blocks, options: opts, title: info.title, info, transcribe: useAi || fromPdf.size ? transcribe : null });
+    bytes.job = ui; // 옮기기 창을 띄웠으면 부른 쪽이 finish() — 앞에 보이면 창을 닫고, 뒤로 보내 두었으면 [저장하기] 알림
+    return bytes;
+  } catch (err) {
+    ui?.finish();
+    throw err;
   } finally {
-    ui?.close();
+    releases.forEach((release) => release());
     await saveTranscripts();
   }
 }
 
-/** 옮기는 동안 보이는 창 (문항별 상태, 진행 막대, 취소하면 바로 요청을 끊음) */
-function transcribeDialog(work, pendingCount, abort) {
+/** 옮기는 동안 보이는 창 (문항별 상태, 진행 막대). [취소]하면 바로 요청을 끊고, [백그라운드에서 계속]이면 창만 닫고 계속 */
+function transcribeDialog(work, pendingCount, abort, { key, sig, jobTitle }) {
   const rows = new Map();
   const list = h(
     'div.gem-list',
@@ -869,24 +1010,24 @@ function transcribeDialog(work, pendingCount, abort) {
       return row;
     }),
   );
-  const status = h('div.small.muted.gem-status', `모델: ${geminiModels().join(' → ')}`);
+  const status = h('div.small.muted.gem-status', `모델: ${aiModelText()}`);
   const bar = h('div.progress-bar');
-  let finished = false;
-  modal({
+  const jd = jobDialog({
+    key,
+    sig,
+    abort,
+    jobTitle,
+    total: work.length,
     title: `문항 ${work.length}개를 글자·수식으로`,
     body: h(
       'div.gem-run',
-      h('p.small.muted', `새로 옮길 문항 ${pendingCount}개를 Gemini에게 보내요. 한 문항에 몇 초~수십 초 걸려요. 옮기지 못한 문항은 그림으로 넣어요. 옮긴 결과는 저장해 두어 다음에는 다시 묻지 않아요.`),
+      h('p.small.muted', `새로 옮길 문항 ${pendingCount}개를 AI(${aiLabel()})에게 보내요. 여러 문항을 한 요청에 묶어 동시에 보내요. 옮기지 못한 문항은 그림으로 넣어요. 옮긴 결과는 저장해 두어 다음에는 다시 묻지 않아요.`),
       h('div.progress', bar),
       status,
       list,
     ),
     width: 480,
     className: 'gem-modal',
-    buttons: [{ label: '취소', value: 'cancel' }],
-    onClose: () => {
-      if (!finished) abort.abort();
-    },
   });
   return {
     row: (block) => ({
@@ -900,14 +1041,17 @@ function transcribeDialog(work, pendingCount, abort) {
     }),
     status: (msg) => {
       status.textContent = msg;
+      jd.job.progress({ label: msg });
     },
     progress: (done, total) => {
       bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
+      jd.job.progress({ done, total });
     },
-    close: () => {
-      if (finished) return;
-      finished = true;
-      document.querySelector('.gem-modal')?.close?.('done');
+    /** 끝: 창이 앞에 있으면 닫고 false, 뒤로 보내 두었고 r.message 가 있으면 알림(토스트·윈도우)을 띄우고 true */
+    finish(r) {
+      const bg = jd.finish(r);
+      if (!bg) jd.close();
+      return bg;
     },
   };
 }
