@@ -1,4 +1,4 @@
-// 설정 창의 AI 카드: 키 · 1·2순위 모델 · 분당 요청 수 + 세부 설정(AI 종류 · 게이트웨이 주소 · 속도)
+// 설정 창의 AI 카드: 켜기/끄기 · 키 · 1·2순위 모델 · 분당 요청 수 + 세부 설정(AI 종류 · 게이트웨이 주소 · 속도)
 // 기본은 Google Gemini. 세부 설정에서 OpenAI 호환(로컬 서버 포함) · Claude · ChatGPT 구독(Codex CLI)으로 바꿀 수 있음
 
 import { h, clear, icon } from './ui.js';
@@ -176,21 +176,30 @@ export function aiSettingsCard(s) {
     h('label.field', h('span', '묶음 크기'), h('div.field-row', batchInput, h('span.small.muted', '한글 내보내기에서 한 요청에 담는 문항 수 (기본 4, 1이면 하나씩)'))),
   );
 
+  // 끄면 AI 를 전혀 쓰지 않음 (넣어 둔 키·모델은 그대로 남음)
+  const onInput = h('input', { type: 'checkbox', checked: s.aiEnabled !== false });
+  const offNote = h('p.small.muted', 'AI 를 쓰지 않아요. 디지털 PDF 는 PDF 글자 그대로 옮기고, 스캔본 문항은 그림으로 넣어요. 넣어 둔 키·모델은 그대로 남아요.');
+
   const show = () => {
-    for (const [id, el] of Object.entries(panels)) el.hidden = id !== provider;
+    const on = onInput.checked;
+    offNote.hidden = on;
+    adv.hidden = !on;
+    for (const [id, el] of Object.entries(panels)) el.hidden = !on || id !== provider;
     for (const el of adv.querySelectorAll('.ai-only')) el.hidden = el.dataset.provider !== provider;
-    if (provider === 'codex' && !codexChecked) checkCodex();
+    if (on && provider === 'codex' && !codexChecked) checkCodex();
   };
+  onInput.addEventListener('change', show);
   select.addEventListener('change', () => {
     provider = select.value;
     show();
   });
-  const card = h('section.set-card', h('h4', icon('sparkle'), 'AI 보조 인식 (선택)'), Object.values(panels), adv);
+  const card = h('section.set-card', h('h4', icon('sparkle'), 'AI 보조 인식 (선택)', h('span.spacer'), h('label.switch.small', onInput, h('span.sw'), 'AI 쓰기')), offNote, Object.values(panels), adv);
   show();
 
   return {
     card,
     values: () => ({
+      aiEnabled: onInput.checked,
       aiProvider: provider,
       geminiApiKey: gem.key.value.trim(),
       geminiModel: gem.models.m1.value.trim() || PROVIDERS.gemini.defaultModel,

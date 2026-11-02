@@ -117,6 +117,7 @@ function writeJsonAtomicSync(file, value) {
 }
 
 const DEFAULT_SETTINGS = {
+  aiEnabled: true, // false 면 AI 를 전혀 쓰지 않음 (디지털 PDF 는 PDF 글자로, 나머지는 그림으로)
   aiProvider: 'gemini', // gemini | openai(OpenAI 호환) | anthropic(Claude) | codex(ChatGPT 구독)
   geminiApiKey: '',
   geminiModel: 'gemini-flash-latest', // 1순위

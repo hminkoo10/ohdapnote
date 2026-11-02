@@ -633,9 +633,13 @@ export function aiProvider() {
 /** 화면에 보이는 AI 이름 (Gemini, Claude …) */
 export const aiLabel = () => providerOf(aiProvider()).label;
 
-/** 고른 AI 를 쓸 준비가 됐는지 (이름은 예전 그대로) */
+/** 설정에서 AI 를 껐는지 */
+export const aiOff = () => state.settings?.aiEnabled === false;
+
+/** 고른 AI 를 쓸 준비가 됐는지 (이름은 예전 그대로) — 꺼 두었으면 false */
 export function geminiReady() {
   const s = state.settings || {};
+  if (aiOff()) return false;
   const p = aiProvider();
   if (p === 'openai') return !!String(s.openaiModel || '').trim(); // 로컬 서버는 키 없이도 됨
   if (p === 'anthropic') return !!s.anthropicApiKey;
@@ -677,7 +681,7 @@ export const aiModelText = () => `${aiLabel()} · ${geminiModels().map((m) => m 
  */
 export async function runGeminiPages(book, role, pages, hooks = {}) {
   if (!geminiReady()) {
-    toast('설정에서 AI(API 키·모델)를 먼저 정해 주세요.', { type: 'error', actions: [{ label: '설정 열기', onClick: () => nav.settings() }] });
+    toast(aiOff() ? '설정에서 AI 가 꺼져 있어요.' : '설정에서 AI(API 키·모델)를 먼저 정해 주세요.', { type: 'error', actions: [{ label: '설정 열기', onClick: () => nav.settings() }] });
     return;
   }
   const key = `gemini:${book.id}:${role}`;

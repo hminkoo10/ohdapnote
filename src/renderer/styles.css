@@ -234,6 +234,9 @@ textarea {
     box-shadow var(--mid) var(--ease),
     transform var(--fast) var(--ease);
 }
+.btn[hidden] {
+  display: none;
+}
 .btn:hover:not(:disabled) {
   background: var(--surface-2);
   border-color: var(--text-4);

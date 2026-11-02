@@ -250,7 +250,7 @@ try {
       const images = body.contents[0].parts.filter((p) => p.inlineData).length;
       globalThis.gemCalls.push({ provider, images });
       globalThis.maxInFlight = Math.max(globalThis.maxInFlight, ++globalThis.inFlight);
-      await new Promise((r) => setTimeout(r, 1500));
+      await new Promise((r) => setTimeout(r, globalThis.gemDelay || 1500));
       globalThis.inFlight--;
       const blocks = [
         { type: 'para', text: '함수 $f(x)=\\frac{1}{2}x^{2}$ 에 대하여 $\\sqrt[3]{8}$ 의 값은?' },
@@ -270,6 +270,37 @@ try {
   await win.fill('.settings .set-adv input[type="number"] >> nth=1', '2');
   await win.click('.modal-footer .btn-primary');
   await win.waitForSelector('.export-hint:has-text("Gemini 사용")', { timeout: 10000 });
+
+  // 뒤에서 옮기는 중에 오답노트를 고치고 다시 내보내면 앞 작업을 멈추고 고친 내용으로 새로 (예전에는 앞 창을 다시 보여 줘서 고친 게 빠졌음)
+  step('한글: 뒤에서 옮기는 중에 문항 하나를 빼고 다시 → 고친 내용으로 새로 / [취소] 뒤 다시 → 새로');
+  await app.evaluate(() => (globalThis.gemDelay = 8000)); // 이 사이에 옮긴 결과가 저장되지 않게
+  await win.click('.export-btn[data-mode="problems"]');
+  await win.click('.gem-modal .modal-footer .btn >> text=백그라운드에서 계속');
+  await win.waitForSelector('.job-chip', { timeout: 5000 });
+  const dropId = await win.getAttribute('.qtable .chip.on >> nth=0', 'data-id');
+  await win.click(`.qtable .chip[data-id="${dropId}"]`);
+  await win.click('.export-btn[data-mode="problems"]');
+  await waitToast('고친 내용으로 다시 만들어요', 10000);
+  await win.waitForSelector('.gem-modal:has-text("문항 3개를")', { timeout: 10000 });
+  await clearToasts();
+  await win.click('.gem-modal .modal-footer .btn >> text=취소');
+  await waitToast('멈췄어요', 10000);
+  await clearToasts();
+  await win.click(`.qtable .chip[data-id="${dropId}"]`);
+  await win.click('.export-btn[data-mode="problems"]');
+  await win.waitForSelector('.gem-modal:has-text("문항 4개를")', { timeout: 10000 });
+  await win.click('.gem-modal .modal-footer .btn >> text=취소');
+  await waitToast('멈췄어요', 10000);
+  await clearToasts();
+  if (await win.$('.job-chip')) throw new Error('멈춘 작업이 위쪽 막대에 남아 있습니다');
+  // 끊긴 가짜 요청이 메인 프로세스에서 다 끝난 뒤 세기 다시
+  for (let k = 0; k < 40 && (await app.evaluate(() => globalThis.inFlight)); k++) await win.waitForTimeout(500);
+  await app.evaluate(() => {
+    globalThis.gemDelay = 0;
+    globalThis.gemCalls = [];
+    globalThis.maxInFlight = 0;
+  });
+
   const rich = await exportHwpx('app-export-text.hwpx', { background: true });
   if (count(rich, 'hp:equation') < 4 * 7 || !rich.includes('root {3} of {8}') || count(rich, 'hp:pic') !== 4) throw new Error('Gemini 결과가 글자·수식으로 들어가지 않았습니다');
   const calls1 = await app.evaluate(() => globalThis.gemCalls);
@@ -282,6 +313,22 @@ try {
   await exportHwpx('app-export-text2.hwpx');
   const calls2 = await app.evaluate(() => globalThis.gemCalls.length);
   if (calls2 !== calls1.length) throw new Error('다시 내보낼 때 Gemini 를 또 불렀습니다');
+
+  step('AI 끄기: 키가 있어도 AI 를 부르지 않고 그림으로 → 다시 켜기');
+  const setAi = async (on) => {
+    await win.click('#settings-btn');
+    await win.waitForSelector('.modal .settings');
+    if ((await win.isChecked('.settings h4 .switch input')) !== on) await win.click('.settings h4 .switch');
+    if ((await win.isVisible('.settings .set-adv')) !== on) throw new Error('AI 를 끄고 켤 때 세부 설정이 숨거나 보이지 않습니다');
+    await win.click('.modal-footer .btn-primary');
+  };
+  await setAi(false);
+  await win.waitForSelector('.export-hint:has-text("AI 꺼짐")', { timeout: 10000 });
+  const off = await exportHwpx('app-export-ai-off.hwpx');
+  if (count(off, 'hp:equation') !== 0 || count(off, 'hp:pic') < 4) throw new Error('AI 를 껐는데 AI 결과가 들어갔습니다');
+  if ((await app.evaluate(() => globalThis.gemCalls.length)) !== calls2) throw new Error('AI 를 껐는데 AI 를 불렀습니다');
+  await setAi(true);
+  await win.waitForSelector('.export-hint:has-text("Gemini 사용")', { timeout: 10000 });
 
   step('다른 AI: 세부 설정에서 Claude 로 바꿔 해설지 한글 내보내기 / OpenAI 호환 (내 컴퓨터의 가짜 서버로, 메인 프로세스·SDK 그대로)');
   const fakeSeen = [];

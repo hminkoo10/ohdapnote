@@ -3,7 +3,7 @@
 import { h, clear, toast, confirmDialog, debounce, formatDate, icon, animateOut } from './ui.js';
 import { analyzeDocument, parsePageRange, reanalyzeSinglePage, replacePageItems } from './analyze.js';
 import { ROLES, ROLE_NAME, newDoc, pageLabel, bookPage, computeMatches, normalizeDoc, findItem, flaggedPages, missingNumbers, missingCount } from './store.js';
-import { api, state, nav, leaveHooks, makeSaver, getSource, getSources, dropSources, clearPreviewCache, renderPreview, renderQTable, runGeminiPages, geminiReady, jobs, findJob, startJob, holdBook, holdSource, liveBook } from './shared.js';
+import { api, state, nav, leaveHooks, makeSaver, getSource, getSources, dropSources, clearPreviewCache, renderPreview, renderQTable, runGeminiPages, geminiReady, aiOff, jobs, findJob, startJob, holdBook, holdSource, liveBook } from './shared.js';
 import { topbar, renderUpdateBadge } from './chrome.js';
 import { createEditor } from './editor.js';
 import { placeSegThumb } from './home.js';
@@ -593,7 +593,7 @@ function checkPanel(role, doc, pages, missing) {
     h('span.spacer'),
     h('button.btn.btn-small', { onclick: () => dismissPages(role, pages), title: '모두 이대로 괜찮다고 표시' }, icon('checkAll'), '모두 문제없음'),
   );
-  const gemBtn = h('button.btn.btn-small', { disabled: true, onclick: () => sendToGemini(role, [...picked]) }, icon('sparkle'), 'AI로 보내기');
+  const gemBtn = h('button.btn.btn-small', { disabled: true, hidden: aiOff(), onclick: () => sendToGemini(role, [...picked]) }, icon('sparkle'), 'AI로 보내기');
   const updateGem = () => {
     gemBtn.disabled = !picked.size;
     gemBtn.lastChild.textContent = picked.size ? `고른 ${picked.size}쪽 AI로` : 'AI로 보내기';
@@ -607,20 +607,20 @@ function checkPanel(role, doc, pages, missing) {
       return h(
         'div.cp-row',
         { style: { '--i': Math.min(i, 12) }, dataset: { page: String(p) } },
-        h('label.cp-pick', { title: 'AI로 보낼 쪽 고르기' }, h('input', { type: 'checkbox', onchange: (e) => { if (e.target.checked) picked.add(p); else picked.delete(p); updateGem(); } })),
+        h('label.cp-pick', { title: 'AI로 보낼 쪽 고르기', hidden: aiOff() }, h('input', { type: 'checkbox', onchange: (e) => { if (e.target.checked) picked.add(p); else picked.delete(p); updateGem(); } })),
         h('button.cp-page', { onclick: () => switchTab('review', { role, page: p }) }, pageLabel(doc, p)),
         h('span.cp-why', [...new Set(flags)].join(' · ')),
         h(
           'div.cp-actions',
           h('button.btn.btn-small.btn-ghost', { onclick: () => switchTab('review', { role, page: p }), title: '페이지 검토에서 직접 보고 고치기' }, icon('eye'), '검토'),
           h('button.btn.btn-small.btn-ghost', { onclick: () => deepPage(role, p), title: '이 쪽만 더 꼼꼼하게(고해상도 OCR + 앞뒤 번호에 맞춰) 다시 찾기' }, icon('search'), '꼼꼼히 다시 찾기'),
-          h('button.btn.btn-small.btn-ghost', { onclick: () => sendToGemini(role, [p]), title: 'AI로 이 쪽 인식' }, icon('sparkle')),
+          h('button.btn.btn-small.btn-ghost', { onclick: () => sendToGemini(role, [p]), title: 'AI로 이 쪽 인식', hidden: aiOff() }, icon('sparkle')),
           h('button.btn.btn-small.btn-ok', { onclick: () => dismissPages(role, [p]), title: '이대로 괜찮아요' }, icon('check'), '문제없음'),
         ),
       );
     }),
   );
-  panel.append(head, list, h('div.cp-foot', h('span.small.muted', geminiReady() ? '애매한 쪽은 골라서 AI에게 맡길 수 있어요.' : '설정에서 AI 키를 넣으면 애매한 쪽을 AI에게 맡길 수 있어요.'), h('span.spacer'), gemBtn));
+  panel.append(head, list, h('div.cp-foot', h('span.small.muted', geminiReady() ? '애매한 쪽은 골라서 AI에게 맡길 수 있어요.' : aiOff() ? 'AI 는 꺼져 있어요 (설정에서 켤 수 있어요).' : '설정에서 AI 키를 넣으면 애매한 쪽을 AI에게 맡길 수 있어요.'), h('span.spacer'), gemBtn));
   return panel;
 }
 
