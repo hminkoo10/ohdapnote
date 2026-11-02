@@ -44,6 +44,18 @@ contextBridge.exposeInMainWorld('ohdap', {
   aiListModels: (args) => ipcRenderer.invoke('ai:listModels', args),
   aiCodexStatus: (path) => ipcRenderer.invoke('ai:codexStatus', { path }),
 
+  // 수식 인식 (AI 없이 내 컴퓨터에서 — 모델을 한 번 받아 둠)
+  mathocrStatus: () => ipcRenderer.invoke('mathocr:status'),
+  mathocrInstall: () => ipcRenderer.invoke('mathocr:install'),
+  mathocrCancelInstall: () => ipcRenderer.invoke('mathocr:cancelInstall'),
+  mathocrRecognize: ({ images, requestId, maxTokens } = {}) => ipcRenderer.invoke('mathocr:recognize', { images, requestId, maxTokens }),
+  mathocrAbort: (requestId) => ipcRenderer.invoke('mathocr:abort', requestId),
+  onMathocrProgress: (callback) => {
+    const listener = (_e, progress) => callback(progress);
+    ipcRenderer.on('mathocr:progress', listener);
+    return () => ipcRenderer.removeListener('mathocr:progress', listener);
+  },
+
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
   installUpdate: () => ipcRenderer.invoke('update:install'),
   getUpdateState: () => ipcRenderer.invoke('update:getState'),

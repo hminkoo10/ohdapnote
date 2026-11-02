@@ -70,6 +70,80 @@ export function onUpdateStatus(s) {
   }
 }
 
+// 수식 인식 모델 받기 — 설정 창을 닫아도 계속 받고, 다시 열면 진행이 이어서 보임
+const mathocrDl = { running: false, percent: 0, render: null };
+
+/**
+ * 설정: 스캔본 수식 인식 (AI 없이). 켜고 끄는 스위치는 없음 — 쓸지는 한글로 내보낼 때 고름
+ * 모델 상태 · [모델 받기] (진행 막대 · 취소)
+ */
+function mathOcrCard() {
+  const status = h('span.small.muted', '확인하는 중…');
+  const getBtn = h('button.btn.btn-small', { onclick: () => install() }, icon('download'), '모델 받기 (약 120MB)');
+  const cancelBtn = h('button.btn.btn-small.btn-ghost', { hidden: true, onclick: () => api.mathocrCancelInstall() }, '취소');
+  const bar = h('div.progress-bar');
+  const progress = h('div.progress.mathocr-progress', { hidden: true }, bar);
+  const card = h(
+    'section.set-card',
+    h('h4', icon('scan'), '스캔본 수식 인식 (AI 없이)'),
+    h('p.small.muted', '모델을 한 번 받아 두면 스캔본 문제를 이 컴퓨터에서 글자·한글 수식으로 옮겨요. 쓸지는 한글(HWPX)로 내보낼 때 고를 수 있어요.'),
+    h('div.field-row', getBtn, cancelBtn, status),
+    progress,
+  );
+  const render = async () => {
+    if (!card.isConnected && card.dataset.mounted) {
+      if (mathocrDl.render === render) mathocrDl.render = null;
+      return;
+    }
+    if (mathocrDl.running) {
+      getBtn.hidden = true;
+      cancelBtn.hidden = false;
+      progress.hidden = false;
+      bar.style.width = `${mathocrDl.percent}%`;
+      status.textContent = `받는 중… ${mathocrDl.percent}%`;
+      return;
+    }
+    cancelBtn.hidden = true;
+    progress.hidden = true;
+    let st = null;
+    try {
+      st = await api.mathocrStatus();
+    } catch (err) {
+      console.warn('수식 인식 모델 상태를 알지 못함', err);
+    }
+    if (mathocrDl.running) return render();
+    getBtn.hidden = !!st?.installed;
+    status.textContent = st?.installed ? `받아 둠 (${fmtMB(st.bytes)})` : st?.bytes ? '받다 만 파일이 있어요 — 다시 받으면 이어서 받아요' : '아직 받지 않았어요';
+  };
+  const install = async () => {
+    if (mathocrDl.running) return;
+    mathocrDl.running = true;
+    mathocrDl.percent = 0;
+    mathocrDl.render?.();
+    const off = api.onMathocrProgress((p) => {
+      mathocrDl.percent = Math.max(0, Math.min(100, p.percent || 0));
+      mathocrDl.render?.();
+    });
+    let r;
+    try {
+      r = await api.mathocrInstall();
+    } catch (err) {
+      r = { ok: false, error: err.message };
+    } finally {
+      off();
+      mathocrDl.running = false;
+    }
+    if (r?.ok) toast('수식 인식 모델을 받았어요. 이제 스캔본도 이 컴퓨터에서 옮길 수 있어요.', { type: 'success' });
+    else if (!r?.aborted) toast(`수식 인식 모델을 받지 못했어요: ${r?.error || '알 수 없는 오류'}`, { type: 'error', timeout: 8000 });
+    await mathocrDl.render?.();
+    document.dispatchEvent(new Event('mathocr:changed')); // 오답노트 화면의 한글 내보내기 안내도
+  };
+  mathocrDl.render = render;
+  card.dataset.mounted = '';
+  render().then(() => (card.dataset.mounted = '1'));
+  return card;
+}
+
 /** 설정 화면의 업데이트 카드 (상태에 따라 실시간으로 바뀜) */
 function updateCard() {
   const card = h('div.update-card');
@@ -160,6 +234,7 @@ export async function openSettings() {
       h('h4', icon('scan'), '스캔본 글자 인식 (OCR)'),
       h('label.field', h('span', '언어'), ocrSelect),
     ),
+    mathOcrCard(),
     h('section.set-card',
       h('h4', icon('gear'), '프로그램'),
       h('label.field', h('span', '애니메이션'), motionSelect),

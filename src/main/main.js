@@ -4,15 +4,17 @@
 // - app:// 프로토콜로 화면(renderer)과 프로젝트 파일을 제공
 // - 책(문제집/답지 파일 + 분석 결과)과 오답노트(학생별 선택) 저장소
 // - AI 호출(선택 기능): Gemini(기본) · OpenAI 호환 · Claude · ChatGPT 구독(Codex CLI) — src/main/ai.js
+// - 수식 인식(선택 기능, AI 없이 내 컴퓨터에서): Pix2Text MFR — src/main/mathocr.js 를 utilityProcess(mathocr-worker.js)에서
 // - GitHub Releases 기반 자동 업데이트
 
-const { app, BrowserWindow, protocol, ipcMain, dialog, shell, Menu, net } = require('electron');
+const { app, BrowserWindow, protocol, ipcMain, dialog, shell, Menu, net, utilityProcess } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const crypto = require('node:crypto');
 const log = require('electron-log/main');
 const ai = require('./ai');
+const mathocr = require('./mathocr');
 
 log.initialize();
 log.transports.file.level = 'info';
@@ -348,6 +350,47 @@ async function migrateProjects() {
 
 const aiRequests = new Map(); // requestId → AbortController
 
+// 수식 인식: 모델 폴더, 일꾼(utilityProcess — 처음 인식할 때 띄우고 2분 쉬면 끔), 진행 중인 설치·인식
+const mathocrDir = () => path.join(app.getPath('userData'), 'models', 'pix2text-mfr-1.5');
+const MATHOCR_IDLE_MS = 2 * 60 * 1000;
+let mathocrWorker = null; // { proc, pending: Map<일꾼 요청 id, resolve>, idle }
+let mathocrInstall = null; // AbortController
+let mathocrSeq = 0;
+const mathocrRequests = new Map(); // 화면의 requestId → 일꾼 요청 id
+
+function startMathocrWorker() {
+  if (mathocrWorker) return mathocrWorker;
+  const proc = utilityProcess.fork(path.join(__dirname, 'mathocr-worker.js'), [], { serviceName: 'OhdapNote 수식 인식' });
+  const w = { proc, pending: new Map(), idle: null };
+  proc.on('message', (msg) => {
+    if (msg?.type !== 'done') return;
+    const resolve = w.pending.get(msg.id);
+    w.pending.delete(msg.id);
+    resolve?.(msg);
+    if (!w.pending.size) {
+      clearTimeout(w.idle);
+      w.idle = setTimeout(() => mathocrWorker === w && stopMathocrWorker(), MATHOCR_IDLE_MS);
+    }
+  });
+  proc.on('exit', (code) => {
+    if (mathocrWorker === w) mathocrWorker = null;
+    clearTimeout(w.idle);
+    for (const resolve of w.pending.values()) resolve({ ok: false, error: `수식 인식이 멈췄어요 (코드 ${code}).` });
+    w.pending.clear();
+    if (code) log.warn('[mathocr] worker exit', code);
+  });
+  mathocrWorker = w;
+  return w;
+}
+
+function stopMathocrWorker() {
+  const w = mathocrWorker;
+  if (!w) return;
+  mathocrWorker = null;
+  clearTimeout(w.idle);
+  w.proc.kill(); // 남은 요청은 'exit' 에서 실패로 끝남
+}
+
 function registerIpc() {
   ipcMain.handle('app:info', () => ({
     version: app.getVersion(),
@@ -608,6 +651,63 @@ function registerIpc() {
   );
   ipcMain.handle('ai:codexStatus', async (_e, { path: exe } = {}) => ai.codexStatus(exe ?? (await loadSettings()).codexPath));
 
+  // ---- 수식 인식 (선택 기능, 모델을 한 번 받아 두면 인터넷 없이) ----
+  ipcMain.handle('mathocr:status', () => mathocr.modelStatus(mathocrDir()));
+  ipcMain.handle('mathocr:install', async () => {
+    if (mathocrInstall) return { ok: false, error: '이미 받고 있어요.' };
+    const ctrl = new AbortController();
+    mathocrInstall = ctrl;
+    try {
+      // 새로 받은 파일을 쓰도록 모델을 열어 둔 일꾼은 끔
+      stopMathocrWorker();
+      await mathocr.installModel({
+        dir: mathocrDir(),
+        signal: ctrl.signal,
+        fetch: (...a) => net.fetch(...a),
+        onProgress: (p) => send('mathocr:progress', p),
+      });
+      return { ok: true };
+    } catch (err) {
+      if (err.name === 'AbortError') return { ok: false, aborted: true, error: err.message };
+      log.error('[mathocr] install', err);
+      return { ok: false, error: err.message };
+    } finally {
+      mathocrInstall = null;
+    }
+  });
+  ipcMain.handle('mathocr:cancelInstall', () => {
+    if (mathocrInstall) mathocrInstall.abort();
+    return !!mathocrInstall;
+  });
+  ipcMain.handle('mathocr:abort', (_e, requestId) => {
+    const id = mathocrRequests.get(requestId);
+    if (id && mathocrWorker) mathocrWorker.proc.postMessage({ type: 'abort', id });
+    return !!id;
+  });
+  ipcMain.handle('mathocr:recognize', async (_e, { images, requestId, maxTokens } = {}) => {
+    if (mathocrInstall) return { ok: false, error: '모델을 받는 중이에요.' };
+    if (!mathocr.modelStatus(mathocrDir()).installed) return { ok: false, error: '수식 인식 모델이 아직 설치되지 않았어요.' };
+    const id = ++mathocrSeq;
+    if (requestId) mathocrRequests.set(requestId, id);
+    try {
+      const w = startMathocrWorker();
+      clearTimeout(w.idle);
+      const msg = await new Promise((resolve) => {
+        w.pending.set(id, resolve);
+        w.proc.postMessage({ type: 'recognize', id, modelDir: mathocrDir(), images: images || [], maxTokens });
+      });
+      if (msg.ok) return { ok: true, results: msg.results };
+      if (msg.aborted) return { ok: false, aborted: true, error: msg.error };
+      log.error('[mathocr] recognize', msg.error);
+      return { ok: false, error: msg.error };
+    } catch (err) {
+      log.error('[mathocr] recognize', err);
+      return { ok: false, error: err.message };
+    } finally {
+      if (requestId) mathocrRequests.delete(requestId);
+    }
+  });
+
   // ---- 업데이트 ----
   ipcMain.handle('update:check', () => checkForUpdates(true));
   ipcMain.handle('update:install', () => {
@@ -764,5 +864,8 @@ if (!isSmokeTest && !app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {
     app.quit();
   });
-  app.on('will-quit', () => ai.killAll()); // 돌고 있던 codex 도 같이 끔
+  app.on('will-quit', () => {
+    ai.killAll(); // 돌고 있던 codex 도 같이 끔
+    stopMathocrWorker();
+  });
 }

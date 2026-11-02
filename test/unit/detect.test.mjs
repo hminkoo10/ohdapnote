@@ -388,6 +388,9 @@ test('extractCandidates: 같은 단 한 줄에 번호가 셋 이상 커지며 �
   const { candidates, answerBoxes } = extractCandidates(tokens, one);
   assert.deepEqual(candidates.map((c) => c.num), [7]);
   assert.equal(answerBoxes.length, 1);
+  // 동그라미 답이 붙지 않은 줄(문제 속 표 "n 1 2 4")은 그대로
+  const table = [t('1', 0.1, 0.5), t('n', 0.13, 0.5), t('2', 0.2, 0.5), t('ㄱ', 0.216, 0.5), t('4', 0.34, 0.5), t('ㄴ', 0.356, 0.5)];
+  assert.deepEqual(extractCandidates(table, one).candidates.map((c) => c.num), [1, 2, 4]);
 });
 
 test('extractCandidates: 공통 지문 머리는 괄호가 있거나 단 왼쪽 끝일 때만 (줄 가운데 "3−27" 같은 수식은 아님)', () => {
