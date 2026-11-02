@@ -172,3 +172,18 @@ test('snapUpToGap: 제목 장식(동그라미)에 걸린 자리를 그 위 빈 �
   assert.equal(snapUpToGap(grid, 0.05, 0.85, 30 / 200), 30 / 200);
   assert.equal(snapUpToGap(grid, 0.05, 0.85, 55 / 200, 0.02), 55 / 200);
 });
+
+test('analyzeLayout: 단 사이 긴 세로선 양옆에 글자가 바싹 붙어 있어도 그 선에서 단을 나눔 (오른쪽 단 번호와 본문 사이 틈이 아님)', () => {
+  const W = 480;
+  const H = 600;
+  const { rgba, fill } = paper(W, H);
+  fill(239, 40, 241, 560, 0); // 단 구분 세로선
+  for (let y = 60; y < 540; y += 24) {
+    fill(40, y, 236, y + 10, 0); // 왼쪽 단 글줄 (선 바로 앞까지)
+    fill(244, y, 252, y + 10, 0); // 오른쪽 단 번호 열
+    fill(272, y, 440, y + 10, 0); // 오른쪽 단 본문 (번호와 사이에 빈 띠)
+  }
+  const L = analyzeLayout(inkGridFromRgba(rgba, W, H));
+  assert.equal(L.columns.length, 2);
+  assert.ok(L.columns[0].x1 <= 240 / W && L.columns[1].x0 >= 240 / W && L.columns[1].x0 < 252 / W, JSON.stringify(L.columns));
+});

@@ -381,6 +381,16 @@ export function analyzeLayout(grid) {
     }
     x = e;
   }
+  // 쪽 가운데에서 본문 줄 대부분에 걸친 긴 세로선은 양옆에 글자가 바싹 붙어 있어도(빈 칸이 없어도) 단 구분선 (만렙 PM 등)
+  // (가운데가 아닌 긴 선은 예전처럼 빈 띠로만 판단 — 목차 쪽의 번호·제목 사이 선 같은 것)
+  const vcov = new Uint16Array(w);
+  for (let x = 0; x < w; x++) for (let y = bodyTopRow; y < bodyBottomRow; y++) if (lines[y * w + x] & 2) vcov[x]++;
+  const longRule = (x) => vcov[x] >= 0.6 * bodyRows && Math.abs(x - w / 2) <= 0.06 * w;
+  for (let x = cx0; x < cx1; x++) {
+    if (!longRule(x)) continue;
+    rule[x] = 2;
+    empty[x] = 1;
+  }
 
   const minColW = 0.2 * w;
   const innerLo = cx0 + Math.round(0.12 * w);
@@ -408,6 +418,7 @@ export function analyzeLayout(grid) {
         // 실제로 잉크가 없는 구간들 중 본문 가운데에 가장 가까운 것을 거터로 봄
         // (세로선 바로 옆의 번진 잉크 몇 점은 선의 일부로 봄 — 거터가 선 양쪽으로 쪼개지지 않게)
         const isGap = (k) => colInk[k] < 2 || rule[k] || (empty[k] && (rule[k - 1] || rule[k + 1]));
+        // 긴 세로선이 든 구간이 있으면 그것 (빈 띠가 넓어 가운데에 더 가까운 다른 틈이 있어도)
         const center = (cx0 + cx1) / 2;
         let best = null;
         for (let k = x; k < e; ) {
@@ -416,8 +427,9 @@ export function analyzeLayout(grid) {
             continue;
           }
           let q = k;
-          while (q < e && isGap(q)) q++;
-          const d = Math.abs((k + q) / 2 - center);
+          let long = false;
+          for (; q < e && isGap(q); q++) if (rule[q] === 2) long = true;
+          const d = Math.abs((k + q) / 2 - center) - (long ? w : 0);
           if (!best || d < best.d) best = { g0: k, g1: q, d };
           k = q;
         }
@@ -429,6 +441,21 @@ export function analyzeLayout(grid) {
         }
         splits.push({ ...(best ? { g0: best.g0, g1: best.g1 } : { g0: x, g1: e }), rule: hasRule, strong, width: e - x });
       }
+    }
+    x = e;
+  }
+  // 빈 띠가 거터 폭에 못 미쳐도 긴 세로선 자리는 단 구분 후보
+  for (let x = innerLo; x < innerHi; ) {
+    if (!longRule(x)) {
+      x++;
+      continue;
+    }
+    let e = x;
+    while (e < innerHi && longRule(e)) e++;
+    if (!splits.some((s) => s.g0 <= x && s.g1 >= e)) {
+      const leftRows = rowsWithInk(at, Math.max(cx0, x - probe), x, bodyTopRow, bodyBottomRow, rowInk, spanning);
+      const rightRows = rowsWithInk(at, e, Math.min(cx1, e + probe), bodyTopRow, bodyBottomRow, rowInk, spanning);
+      if (leftRows / bodyRows >= 0.02 && rightRows / bodyRows >= 0.1) splits.push({ g0: x, g1: e, rule: true, strong: true, width: e - x });
     }
     x = e;
   }
@@ -485,10 +512,11 @@ function rowsWithInk(at, xa, xb, y0, y1, rowInk, spanning) {
  */
 export function trimRect(grid, rect, pad = 0.008) {
   const { w, h, data } = grid;
-  const gx0 = Math.max(0, Math.floor(rect.x * w));
-  const gx1 = Math.min(w, Math.ceil((rect.x + rect.w) * w));
-  const gy0 = Math.max(0, Math.floor(rect.y * h));
-  const gy1 = Math.min(h, Math.ceil((rect.y + rect.h) * h));
+  // (칸 경계에 딱 맞는 값이 계산 오차로 옆 칸까지 넘지 않게)
+  const gx0 = Math.max(0, Math.floor(rect.x * w + 1e-6));
+  const gx1 = Math.min(w, Math.ceil((rect.x + rect.w) * w - 1e-6));
+  const gy0 = Math.max(0, Math.floor(rect.y * h + 1e-6));
+  const gy1 = Math.min(h, Math.ceil((rect.y + rect.h) * h - 1e-6));
   let minX = Infinity;
   let maxX = -1;
   let minY = Infinity;

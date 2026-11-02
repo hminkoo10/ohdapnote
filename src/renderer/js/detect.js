@@ -302,6 +302,75 @@ export function extractCandidates(tokens, layout, opts = {}) {
   const inRangeHeader = (w) => ranges.some((r) => w.y0 < r.y1 && w.y1 > r.y0 && w.x0 >= r.x0 - 0.001 && w.x1 <= r.x1 + 0.001);
 
   const candidates = [];
+  const make = (parsed, prefix, w, numWord) => {
+    const col = colOf((w.x0 + w.x1) / 2);
+    return {
+      ...parsed,
+      prefix,
+      x0: w.x0,
+      x1: Math.max(w.x1, numWord.x1),
+      y0: Math.min(w.y0, numWord.y0),
+      y1: Math.max(w.y1, numWord.y1),
+      h: numWord.y1 - numWord.y0,
+      col,
+      relX: lineStartX(w) - cols[col].x0,
+      hRatio: (numWord.y1 - numWord.y0) / bodyH,
+      conf: Math.min(w.conf ?? 100, numWord.conf ?? 100),
+      padded: parsed.digits.length >= 2 && parsed.digits[0] === '0',
+      font: numWord.font || '',
+      ocr: !!opts.ocr,
+    };
+  };
+  const inBody = (w) => {
+    const cy = (w.y0 + w.y1) / 2;
+    return !(layout?.hasHeader && cy < bodyTop) && !(layout?.hasFooter && cy > bodyBottom);
+  };
+  // "유형 01" 머리 (만렙 PM 등). 답지에서는 해설 머리("유형 02 답 65/4")라 문항이고,
+  // 문제집에서는 제목("유형 01 구분구적법")이라 그 뒤 "대표 문제" 가 이 번호의 문항.
+  // (쎈처럼 유형 제목 아래 문제마다 번호가 붙은 책은 "대표 문제" 가 없어서 해당 없음)
+  // 한 줄에 여럿 있는 것("유형01 ④ 유형02 65/4 …" 빠른 정답표)은 뺌
+  const str0 = (w) => (opts.ocr ? normalizeOcrWord(w.str) : w.str);
+  // 바로 오른쪽 글자 (작은 "유형" 옆의 큰 "01" 처럼 기준선이 달라 다른 줄로 묶인 것까지)
+  const rightOf = (w) => nextWord(w) || words.filter((u) => u.x0 >= w.x1 - 0.002 && u.x0 - w.x1 < 2 * (w.y1 - w.y0) && u.y0 < w.y1 && u.y1 > w.y0).sort((a, b) => a.x0 - b.x0)[0];
+  const typeHeads = [];
+  for (const w of words) {
+    let digits = /^유형(\d{1,2})$/.exec(str0(w))?.[1];
+    let numWord = w;
+    if (!digits && str0(w) === '유형') {
+      numWord = rightOf(w);
+      digits = numWord && /^\d{1,2}$/.test(str0(numWord)) ? str0(numWord) : null;
+    }
+    if (!digits || !inBody(w)) continue;
+    const after = rightOf(numWord);
+    // titled: 제목("유형 01 구분구적법"), answered: 해설 머리("유형 01 답 ④"). 둘 다 아니면 해설 속 참고 표시("유형03")
+    const next = after ? str0(after) : '';
+    typeHeads.push({ w, numWord, digits, col: colOf((w.x0 + w.x1) / 2), titled: /^[가-힣]/.test(next) && next !== '답', answered: next === '답' });
+  }
+  // "유형 10" 은 "유형 01" 과 같은 두 자리 체계
+  const typeCand = (digits, w, numWord) => ({ ...make(parseNumberWord(digits), '유형', w, numWord), fixedWidth: digits.length === 2 });
+  const oneLine = (a, b) => a !== b && a.col === b.col && Math.abs(a.w.y0 - b.w.y0) < 0.5 * (a.w.y1 - a.w.y0);
+  // 정답표 줄(한 줄에 여럿) 바로 아래·위의 줄은 혼자 있어도 정답표 ("유형15 ⑤" 만 남은 마지막 줄)
+  const tableRows = typeHeads.filter((t) => typeHeads.some((u) => oneLine(t, u)));
+  const inTable = (t) => tableRows.some((u) => u.col === t.col && Math.abs(u.w.y0 - t.w.y0) < 2.5 * (t.w.y1 - t.w.y0));
+  for (const t of typeHeads) {
+    if (!t.answered || hasLeftNeighbor(t.w) || inTable(t)) continue;
+    candidates.push(typeCand(t.digits, t.w, t.numWord));
+  }
+  for (const w of words) {
+    const s = str0(w);
+    const label = s === '대표문제' || s === '대표 문제' ? w : s === '대표' && nextWord(w) && str0(nextWord(w)) === '문제' ? nextWord(w) : null;
+    if (!label || !inBody(w) || hasLeftNeighbor(w)) continue;
+    if (nextWord(label) && /^[[(]?\d/.test(str0(nextWord(label)))) continue; // "대표문제 12" 는 아래에서 말머리 번호로
+    // 바로 위(또는 옆 단의 같은 높이)에 있는 가장 가까운 유형 제목의 번호 (왼쪽 단 "유형 01 …" 설명 옆 오른쪽 단 "대표 문제")
+    const col = colOf((w.x0 + w.x1) / 2);
+    // (제목이 수식으로 시작하는 "유형 03 lim aₙ=α 의 이용" 도 제목)
+    const above = typeHeads.filter((t) => !t.answered && !inTable(t) && t.col <= col && t.w.y0 <= w.y1);
+    if (!above.length) continue;
+    const head = above.reduce((a, b) => (b.w.y0 > a.w.y0 ? b : a));
+    // 번호 크기는 유형 번호 글자로 (이름표 글자는 작아서 번호 크기 비교에서 밀려남)
+    const h = head.numWord.y1 - head.numWord.y0;
+    candidates.push({ ...typeCand(head.digits, w, label), h, hRatio: h / bodyH, font: head.numWord.font || '' });
+  }
   // 번호 없이 말머리만 있는 줄 맨 앞 이름표("유제" 띠 등): 그 아래부터 새 묶음이라 앞 문항 영역을 여기서 끊음
   const sectionLabels = [];
   for (const w of words) {
@@ -339,23 +408,7 @@ export function extractCandidates(tokens, layout, opts = {}) {
     if (layout?.hasHeader && cy < bodyTop) continue;
     if (layout?.hasFooter && cy > bodyBottom) continue;
     if (hasLeftNeighbor(w)) continue;
-    const col = colOf((w.x0 + w.x1) / 2);
-    candidates.push({
-      ...parsed,
-      prefix,
-      x0: w.x0,
-      x1: Math.max(w.x1, numWord.x1),
-      y0: Math.min(w.y0, numWord.y0),
-      y1: Math.max(w.y1, numWord.y1),
-      h: numWord.y1 - numWord.y0,
-      col,
-      relX: lineStartX(w) - cols[col].x0,
-      hRatio: (numWord.y1 - numWord.y0) / bodyH,
-      conf: Math.min(w.conf ?? 100, numWord.conf ?? 100),
-      padded: parsed.digits.length >= 2 && parsed.digits[0] === '0',
-      font: numWord.font || '',
-      ocr: !!opts.ocr,
-    });
+    candidates.push(make(parsed, prefix, w, numWord));
   }
   candidates.sort(byReadingOrder);
   const { kept, boxes } = dropAnswerRows(candidates);
@@ -427,7 +480,10 @@ function dropAnswerRows(cands) {
     const continued = row.some((c) => drop.has(c)); // 앞 줄에서 이어진 줄 (상자는 이미 기록함)
     let run = longestRun(row, 0.09);
     if (run.length < 4) run = longestRun(row, 0.075);
-    if (run.length < 3) return;
+    // 같은 단 한 줄에 번호가 셋 이상 커지며 나란하면(답이 앞 번호에 붙어 몇 개는 후보에서 빠진 "1 ① 2 … 4 …") 정답표
+    const rising = row.length >= 3 && row.every((c, k) => !k || (c.col === row[0].col && c.num > row[k - 1].num && c.x0 - row[k - 1].x0 <= 0.16));
+    if (run.length < 3 && !rising) return;
+    if (run.length < 3) run = row;
     const group = [...row];
     row.forEach((c) => drop.add(c));
     let last = run[run.length - 1];
@@ -435,10 +491,12 @@ function dropAnswerRows(cands) {
     for (let j = i + 1; j < rows.length; j++) {
       const next = rows[j];
       if (next[0].col !== row[0].col || next[0].y0 - prev[0].y0 > 3 * hOf(prev[0])) break;
-      if (!next.some((c) => c.num === last.num + 1)) break;
+      // 바로 다음 번호(빠진 번호가 있으면 몇 개 건너뛴 번호)로 이어지는 줄
+      const step = (c) => c.num > last.num && c.num <= last.num + (rising ? 6 : 1);
+      if (!next.some(step)) break;
       next.forEach((c) => drop.add(c));
       group.push(...next);
-      for (const c of next) if (c.num === last.num + 1) last = c;
+      for (const c of next) if (step(c) && c.num > last.num) last = c;
       prev = next;
     }
     // 정답 상자 자리 (문항 영역을 여기서 끊으려고)
@@ -1122,8 +1180,10 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
       const bottom = zone.y1;
       for (let c = 0; c < cols.length; c++) {
         const col = cols[c];
-        const x0 = Math.max(0, col.x0 - 0.006);
-        const x1 = Math.min(1, col.x1 + 0.006);
+        // 단 사이 거터로는 넓히지 않음 (단 구분 세로선이 영역에 들어가면 위아래 여백을 못 잘라 다음 문항 앞까지 늘어남)
+        const gut = L.gutters || [];
+        const x0 = Math.max(0, col.x0 - 0.006, ...gut.filter((g) => g.x1 <= col.x0 + 0.002).map((g) => g.x1));
+        const x1 = Math.min(1, col.x1 + 0.006, ...gut.filter((g) => g.x0 >= col.x1 - 0.002).map((g) => g.x0));
         const inCol = chain.filter((a) => a.col === c && a.y0 >= top - 0.01 && (a.y0 < bottom || z === zones.length - 1)).sort(byReadingOrder);
         // 한 줄에 나란히 놓인 번호들은 한 줄로 묶음 (세로는 다음 줄 번호까지, 가로는 오른쪽 번호 앞까지)
         const rows = [];

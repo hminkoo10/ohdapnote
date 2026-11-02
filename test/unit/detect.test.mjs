@@ -354,6 +354,42 @@ test('extractCandidates: 줄 맨 앞 수식("1 + 2 = 3", "8 = 2³")·앞 줄에�
   assert.ok(Math.abs(sectionLabels[0].y0 - 0.3) < 1e-9);
 });
 
+test('extractCandidates: 해설 머리 "유형 01 답 ④" 와 문제집 "유형 02 …" 옆 "대표 문제" 는 유형 번호 문항 (빠른 정답표 줄·해설 속 "유형03" 표시는 아님)', () => {
+  const t = (str, x, y, h = 0.012) => ({ str, x0: x, x1: x + 0.012 * Math.max(1, [...str].length), y0: y, y1: y + h });
+  const one = { columns: [{ x0: 0.1, x1: 0.9 }], bodyTop: 0.05, bodyBottom: 0.95 };
+  const answer = [
+    t('유형', 0.1, 0.1), t('01', 0.126, 0.1), t('답', 0.152, 0.1), t('④', 0.166, 0.1), // 해설 머리
+    t('유형', 0.1, 0.3), t('02', 0.126, 0.3), t('④', 0.152, 0.3), t('유형', 0.3, 0.3), t('03', 0.326, 0.3), t('5', 0.352, 0.3), // 빠른 정답표 줄
+    t('유형', 0.1, 0.32), t('04', 0.126, 0.32), t('①', 0.152, 0.32), // 정답표 마지막 줄 (하나뿐)
+    t('유형', 0.1, 0.6), t('03', 0.126, 0.6), t('에서', 0.152, 0.6, 0.012), // 해설 속 참고 표시 아님: 뒤가 "답" 이 아니면 제목으로 봄
+  ];
+  assert.deepEqual(extractCandidates(answer, one).candidates.map((c) => `${c.prefix}${c.digits}`), ['유형01']);
+  // 문제집: 왼쪽 단 유형 제목(작은 "유형" 옆 큰 번호, 제목이 수식으로 시작하기도), 오른쪽 단 같은 높이의 "대표 문제"
+  const two = { columns: [{ x0: 0.1, x1: 0.48 }, { x0: 0.52, x1: 0.9 }], bodyTop: 0.05, bodyBottom: 0.95 };
+  const problem = [
+    t('유형', 0.1, 0.1, 0.009), t('01', 0.126, 0.1, 0.016), t('구분구적법', 0.16, 0.1),
+    t('대표', 0.55, 0.11), t('문제', 0.58, 0.11),
+    t('유형', 0.1, 0.5, 0.009), t('02', 0.126, 0.5, 0.016), t('lim', 0.16, 0.5),
+    t('대표', 0.55, 0.51), t('문제', 0.58, 0.51),
+  ];
+  const got = extractCandidates(problem, two).candidates;
+  assert.deepEqual(got.map((c) => `${c.prefix}${c.digits}:${c.col}`), ['유형01:1', '유형02:1']);
+  assert.ok(Math.abs(got[0].h - 0.016) < 1e-9, '번호 크기는 유형 번호 글자');
+});
+
+test('extractCandidates: 같은 단 한 줄에 번호가 셋 이상 커지며 나란하면(몇 개는 답에 붙어 후보에서 빠져도) 정답표', () => {
+  const t = (str, x, y) => ({ str, x0: x, x1: x + 0.012 * [...str].length, y0: y, y1: y + 0.012 });
+  const one = { columns: [{ x0: 0.1, x1: 0.5 }], bodyTop: 0.05, bodyBottom: 0.95 };
+  const tokens = [
+    t('1', 0.1, 0.5), t('①', 0.116, 0.5), t('2', 0.2, 0.5), t('③', 0.216, 0.5), t('3①', 0.26, 0.5), t('4', 0.34, 0.5), t('①', 0.356, 0.5), // 3 은 답에 붙어 후보가 아님
+    t('6', 0.1, 0.522), t('④', 0.116, 0.522),
+    t('7', 0.1, 0.8), t('함수', 0.13, 0.8),
+  ];
+  const { candidates, answerBoxes } = extractCandidates(tokens, one);
+  assert.deepEqual(candidates.map((c) => c.num), [7]);
+  assert.equal(answerBoxes.length, 1);
+});
+
 test('extractCandidates: 공통 지문 머리는 괄호가 있거나 단 왼쪽 끝일 때만 (줄 가운데 "3−27" 같은 수식은 아님)', () => {
   const t = (str, x, y) => ({ str, x0: x, x1: x + 0.01 * str.length, y0: y, y1: y + 0.012 });
   const layout = { columns: [{ x0: 0.07, x1: 0.47 }, { x0: 0.42, x1: 0.93 }], bodyTop: 0.05, bodyBottom: 0.95 };
