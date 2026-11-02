@@ -61,6 +61,15 @@ jobs:
 
       - run: npm test
 
+      # 수식 인식 모델(약 120MB)은 저장소에 없어서 빌드 전에 받아 설치 파일에 넣음 (받은 파일은 캐시에 둠).
+      # 못 받으면 버전을 올리고 태그를 만들기 전에 멈추도록 여기서 받음
+      - uses: actions/cache@v4
+        with:
+          path: build/models
+          key: mathocr-model-${{ hashFiles('src/main/mathocr.js') }}
+          restore-keys: mathocr-model-
+      - run: node scripts/fetch-model.mjs
+
       - name: 버전 정하기 + 태그
         if: github.ref_type != 'tag'
         shell: bash
@@ -125,14 +134,6 @@ jobs:
           export NOTES
           node -e "const v=require('./package.json').version; const n=(process.env.NOTES||'').replace(/-----BEGIN PGP SIGNATURE-----[\\s\\S]*$/, '').trim(); require('fs').writeFileSync('release-notes.md', n || ('오답노트 ' + v + ' 업데이트'))"
           cat release-notes.md
-
-      # 수식 인식 모델(약 120MB)은 저장소에 없어서 빌드 전에 받아 설치 파일에 넣음 (받은 파일은 캐시에 둠)
-      - uses: actions/cache@v4
-        with:
-          path: build/models
-          key: mathocr-model-${{ hashFiles('src/main/mathocr.js') }}
-          restore-keys: mathocr-model-
-      - run: node scripts/fetch-model.mjs
 
       # electron-builder 가 직접 올리게 하면(--publish always) 설치 파일과 blockmap 을 동시에 올리다가
       # 같은 태그에 릴리스를 두 개 만들고 파일이 나뉘어 latest.yml 을 못 찾는 문제가 있어서,
