@@ -1,8 +1,8 @@
 // 위쪽 막대, 뒤에서 도는 작업·업데이트 표시, 설정 창
 
 import { h, clear, toast, modal, icon } from './ui.js';
-import { api, state, nav, runLeaveHooks, jobs, jobListeners, findJob, confirmStopJobs } from './shared.js';
-import { aiSettingsCard } from './aisettings.js';
+import { api, state, nav, runLeaveHooks, jobs, jobListeners, findJob, confirmStopJobs, errMsg } from './shared.js';
+import { aiSettingsCard, academyAiCard } from './aisettings.js';
 
 export const updateListeners = new Set();
 const fmtMB = (b) => (b ? `${(b / 1048576).toFixed(1)}MB` : '');
@@ -46,9 +46,7 @@ export function renderUpdateBadge() {
   if (!el) return;
   clear(el);
   const s = state.update || {};
-  if (s.status === 'downloading') el.append(h('span.badge', icon('download'), `업데이트 받는 중 ${s.percent || 0}%`));
-  else if (s.status === 'available') el.append(h('span.badge', icon('download'), `새 버전 ${s.version}`));
-  else if (s.status === 'downloaded') el.append(h('button.btn.btn-small.btn-primary', { onclick: installUpdate }, icon('refresh'), `재시작하고 ${s.version} 설치`));
+  if (s.status === 'downloaded') el.append(h('button.btn.btn-small.btn-primary', { onclick: installUpdate }, icon('refresh'), `재시작하고 ${s.version} 설치`));
 }
 
 export async function installUpdate() {
@@ -144,7 +142,7 @@ function mathOcrCard() {
   return card;
 }
 
-/** 설정 화면의 업데이트 카드 (상태에 따라 실시간으로 바뀜) */
+/** 설정 화면의 업데이트 카드 (상태에 따라 실시간으로 바뀜) — 새 버전은 통합 클라우드가 받아 둠 */
 function updateCard() {
   const card = h('div.update-card');
   const render = (u = state.update || {}) => {
@@ -154,17 +152,12 @@ function updateCard() {
     }
     card.dataset.mounted = '1';
     clear(card);
-    const packaged = state.appInfo.isPackaged;
     const statusText =
       {
-        disabled: '개발 모드에서는 자동 업데이트가 꺼져 있어요.',
-        checking: '새 버전이 있는지 확인하는 중…',
+        disabled: '개발 실행에서는 업데이트를 확인하지 않아요.',
         latest: '최신 버전을 쓰고 있어요.',
-        available: `새 버전 ${u.version}을(를) 받기 시작했어요.`,
-        downloading: `새 버전 ${u.version} 받는 중 · ${u.percent || 0}% ${u.total ? `(${fmtMB(u.transferred)} / ${fmtMB(u.total)})` : ''}`,
-        downloaded: `새 버전 ${u.version} 준비 완료 — 다시 시작하면 설치돼요.`,
-        error: `업데이트 확인 실패: ${u.message || ''}`,
-        idle: packaged ? '프로그램을 켤 때와 4시간마다 자동으로 확인해요.' : '설치한 프로그램에서만 업데이트를 확인할 수 있어요.',
+        downloaded: `새 버전 ${u.version} 준비 완료 — 다시 시작하면 바뀌어요.`,
+        idle: '통합 클라우드가 새 버전을 받아 두면 여기에서 알려 드려요.',
       }[u.status] || '';
     const parts = [
       h(
@@ -177,7 +170,7 @@ function updateCard() {
           : h(
               'button.btn.btn-small',
               {
-                disabled: !packaged || ['checking', 'downloading', 'available'].includes(u.status),
+                disabled: u.status === 'disabled',
                 onclick: async () => {
                   state.update = await api.checkForUpdates();
                   render(state.update);
@@ -186,8 +179,7 @@ function updateCard() {
               '업데이트 확인',
             ),
       ),
-      h(`div.uc-status${u.status === 'error' ? '.warn-text' : ''}`, statusText),
-      u.status === 'downloading' || u.status === 'available' ? h('div.progress', h('div.progress-bar', { style: { width: `${u.percent || 0}%` } })) : null,
+      h('div.uc-status', statusText),
       u.notes ? h('div.uc-notes', h('div.small.muted', `${u.version} 에서 바뀐 점`), h('pre', u.notes)) : null,
     ];
     card.append(...parts.filter(Boolean));
@@ -204,6 +196,7 @@ export function applyMotion(motion) {
 export async function openSettings() {
   const s = { ...state.settings };
   const ai = aiSettingsCard(s); // AI 보조 인식 (기본 Gemini, 세부 설정에서 다른 AI)
+  const academyAi = academyAiCard(s); // 학원 공용 AI 키 (학원 공간에서만, 고치기는 원장만)
   const ocrSelect = h(
     'select.input',
     [
@@ -230,6 +223,7 @@ export async function openSettings() {
       h('label.field', h('span', '선생님 이름'), teacherInput),
     ),
     ai.card,
+    academyAi?.card,
     h('section.set-card',
       h('h4', icon('scan'), '스캔본 글자 인식 (OCR)'),
       h('label.field', h('span', '언어'), ocrSelect),
@@ -239,7 +233,7 @@ export async function openSettings() {
       h('h4', icon('gear'), '프로그램'),
       h('label.field', h('span', '애니메이션'), motionSelect),
       updateCard(),
-      h('div.field-row', h('button.btn.btn-small', { onclick: () => api.openDataDir() }, icon('folder'), '데이터 폴더 열기'), h('span.small.muted', '올린 파일과 분석 결과가 저장되는 곳')),
+      h('div.field-row', h('button.btn.btn-small', { onclick: () => api.openDataDir() }, icon('folder'), '데이터 폴더 열기'), h('span.small.muted', '교재와 오답노트가 저장되는 곳')),
       h('div.credit', h('span', `오답노트 ${state.appInfo.version}`), h('span.dot'), h('span', `개발 ${state.appInfo.developer || '구현민'}`)),
     ),
   );
@@ -254,6 +248,13 @@ export async function openSettings() {
         label: '저장',
         primary: true,
         onClick: async () => {
+          // 학원 키 먼저 (그래야 아래에서 돌려받는 설정의 academyAi 가 새 키 기준)
+          try {
+            await academyAi?.save();
+          } catch (err) {
+            toast(`학원 공용 AI 키를 저장하지 못했어요: ${errMsg(err)}`, { type: 'error', timeout: 8000 });
+            return false;
+          }
           state.settings = await api.setSettings({
             ...ai.values(),
             ocrLang: ocrSelect.value,

@@ -1,7 +1,7 @@
 {
   "name": "ohdapnote",
   "productName": "OhdapNote",
-  "version": "0.2.7",
+  "version": "0.3.0",
   "description": "문제집과 답지 PDF를 스캔해 틀린 문제만 모아 PDF로 만들어 주는 수학 오답노트 프로그램",
   "main": "src/main/main.js",
   "author": {
@@ -23,7 +23,7 @@
     "test:books": "node test/e2e/books-test.mjs",
     "test:scan": "node test/e2e/scan-check.mjs",
     "test:e2e": "node test/e2e/app-e2e.mjs && node test/e2e/app-check.mjs && node test/e2e/app-background.mjs",
-    "dist": "node scripts/fetch-model.mjs && electron-builder --win --x64 --publish never",
+    "dist": "node scripts/fetch-model.mjs && electron-builder --win dir --x64 --publish never && node scripts/write-manifest.mjs",
     "release:patch": "npm version patch -m \"v%s 배포\" && git push --follow-tags",
     "release:minor": "npm version minor -m \"v%s 배포\" && git push --follow-tags",
     "release:major": "npm version major -m \"v%s 배포\" && git push --follow-tags"
@@ -31,7 +31,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "1.3.0",
     "electron-log": "5.4.4",
-    "electron-updater": "6.8.10",
     "onnxruntime-node": "1.31.1"
   },
   "devDependencies": {
@@ -79,7 +78,7 @@
     "win": {
       "target": [
         {
-          "target": "nsis",
+          "target": "dir",
           "arch": [
             "x64"
           ]
@@ -87,30 +86,6 @@
       ],
       "icon": "build/icon.ico",
       "executableName": "OhdapNote"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "오답노트",
-      "uninstallDisplayName": "오답노트",
-      "artifactName": "OhdapNote-Setup-${version}.${ext}",
-      "installerLanguages": [
-        "ko_KR",
-        "en_US"
-      ],
-      "language": "1042",
-      "deleteAppDataOnUninstall": false
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "hminkoo10",
-        "repo": "ohdapnote",
-        "releaseType": "release"
-      }
-    ]
+    }
   }
 }

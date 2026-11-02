@@ -19,9 +19,10 @@ mkdirSync(OUT, { recursive: true });
 const userData = mkdtempSync(join(tmpdir(), 'ohdap-e2e-'));
 const electronPath = require('electron');
 
-// 예전 버전(책+선택이 한 파일) 데이터 하나 만들어 두기 → 처음 켤 때 책 + 오답노트로 옮겨져야 함
+// 따로 깔아 쓰던 예전 버전(책+선택이 한 파일) 데이터 하나 → 통합 클라우드가 legacy/ 로 복사해 준 것처럼 두면
+// 처음 켤 때 책(학원 공간) + 오답노트(내 것)로 옮겨져야 함. 개발 실행에서 userData = 이 컴퓨터 폴더, userData/data = 동기화 폴더
 const oldId = '11111111-2222-3333-4444-555555555555';
-const oldDir = join(userData, 'data', 'projects', oldId);
+const oldDir = join(userData, 'legacy', 'projects', oldId);
 mkdirSync(oldDir, { recursive: true });
 copyFileSync(join(FIX, 'book-serial.pdf'), join(oldDir, 'problem-old-000.pdf'));
 writeFileSync(
@@ -76,8 +77,8 @@ try {
   await shot('1-home-notes');
   const migratedNotes = await win.$$eval('.note-card .nc-title', (els) => els.map((e) => e.textContent));
   if (!migratedNotes.includes('예전 오답노트')) throw new Error('예전 오답노트가 옮겨지지 않았습니다: ' + migratedNotes);
-  if (existsSync(join(userData, 'data', 'projects', oldId))) throw new Error('예전 폴더가 남아 있습니다');
-  if (!existsSync(join(userData, 'data', 'books', oldId, 'problem-old-000.pdf'))) throw new Error('예전 파일이 책 폴더로 옮겨지지 않았습니다');
+  if (existsSync(join(userData, 'legacy'))) throw new Error('예전 폴더가 남아 있습니다');
+  if (!existsSync(join(userData, 'data', 'shared', 'books', oldId, 'problem-old-000.pdf'))) throw new Error('예전 파일이 책 폴더로 옮겨지지 않았습니다');
 
   step('책장 → 새 책 등록');
   await win.click('.seg-tab[data-tab="books"]');
@@ -309,7 +310,7 @@ try {
   console.log(`    요청 ${calls1.length}개 (그림 ${calls1.map((c) => c.images).join('+')}장), 동시에 최대 ${maxInFlight}개`);
   if (calls1.length !== 2 || calls1.some((c) => c.images !== 2 || c.provider !== 'gemini')) throw new Error(`Gemini 호출: ${JSON.stringify(calls1)}`);
   if (maxInFlight < 2) throw new Error('요청이 동시에 나가지 않았습니다');
-  const bookDirs = readdirSync(join(userData, 'data', 'books')).filter((d) => existsSync(join(userData, 'data', 'books', d, 'transcripts.json')));
+  const bookDirs = readdirSync(join(userData, 'data', 'shared', 'books')).filter((d) => existsSync(join(userData, 'data', 'shared', 'books', d, 'transcripts.json')));
   if (bookDirs.length !== 1) throw new Error('옮긴 결과가 책 폴더에 저장되지 않았습니다');
   await exportHwpx('app-export-text2.hwpx');
   const calls2 = await app.evaluate(() => globalThis.gemCalls.length);
@@ -485,8 +486,8 @@ try {
   if (mathCalls1.length !== 3) throw new Error(`수식 인식 요청 수 (문항마다 한 번): ${mathCalls1.length}`);
   if (count(scanOcr, 'hp:equation') < mathCalls1.reduce((s, c) => s + c.images, 0)) throw new Error('OCR만: 인식한 수식이 한글 수식으로 들어가지 않았습니다');
   if ((await app.evaluate(() => globalThis.aiCalls)).length) throw new Error('OCR만인데 AI 를 불렀습니다');
-  const localSaved = readdirSync(join(userData, 'data', 'books'))
-    .map((d) => join(userData, 'data', 'books', d, 'transcripts.json'))
+  const localSaved = readdirSync(join(userData, 'data', 'shared', 'books'))
+    .map((d) => join(userData, 'data', 'shared', 'books', d, 'transcripts.json'))
     .filter((f) => existsSync(f))
     .flatMap((f) => Object.entries(JSON.parse(readFileSync(f, 'utf8')).items || {}))
     .filter(([k, v]) => k.endsWith('|local') && v.model === 'ocr');

@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('ohdap', {
   saveBookSync: (book) => ipcRenderer.sendSync('books:saveSync', book),
   deleteBook: (id) => ipcRenderer.invoke('books:delete', id),
   renameBookItems: (bookId, renames, removed) => ipcRenderer.invoke('books:renameItems', { bookId, renames, removed }),
+  copyBook: (id) => ipcRenderer.invoke('books:copy', id), // 남의 책을 내 책으로
+  ensureBookFiles: (id) => ipcRenderer.invoke('books:ensureFiles', id), // 아직 받지 않은 원본 받기
 
   // 학생 오답노트 (책에서 고른 문항)
   listNotes: () => ipcRenderer.invoke('notes:list'),
@@ -24,6 +26,33 @@ contextBridge.exposeInMainWorld('ohdap', {
   saveNote: (note) => ipcRenderer.invoke('notes:save', note),
   saveNoteSync: (note) => ipcRenderer.sendSync('notes:saveSync', note),
   deleteNote: (id) => ipcRenderer.invoke('notes:delete', id),
+
+  // 학원 공용 학생 명단
+  listStudents: () => ipcRenderer.invoke('students:list'),
+  saveStudent: (student) => ipcRenderer.invoke('students:save', student),
+  deleteStudent: (id) => ipcRenderer.invoke('students:delete', id),
+
+  // 학원 공용 AI 키 (원장만)
+  getAcademyAi: () => ipcRenderer.invoke('academy:getAi'),
+  setAcademyAi: (ai) => ipcRenderer.invoke('academy:setAi', ai),
+
+  // 다른 컴퓨터·선생님이 바꾼 데이터가 들어옴 { books, notes, students, academy, settings }
+  onDataChanged: (callback) => {
+    const listener = (_e, change) => callback(change);
+    ipcRenderer.on('data:changed', listener);
+    return () => ipcRenderer.removeListener('data:changed', listener);
+  },
+  // 아직 받지 않은 교재 원본을 받는 중 / 다 받음
+  onFilesFetching: (callback) => {
+    const on = (_e, info) => callback({ ...info, done: false });
+    const off = (_e, info) => callback({ ...info, done: true });
+    ipcRenderer.on('files:fetching', on);
+    ipcRenderer.on('files:fetched', off);
+    return () => {
+      ipcRenderer.removeListener('files:fetching', on);
+      ipcRenderer.removeListener('files:fetched', off);
+    };
+  },
 
   pickFiles: (title) => ipcRenderer.invoke('files:pick', { title }),
   importFiles: (bookId, role, paths) => ipcRenderer.invoke('files:import', { bookId, role, paths }),

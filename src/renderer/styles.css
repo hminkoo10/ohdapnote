@@ -1255,6 +1255,53 @@ main.home {
   width: 13px;
   height: 13px;
 }
+
+/* 만든 사람 · 다른 선생님 이름 (책 카드 · 오답노트 카드 · 위쪽 막대) */
+.creator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.creator .icon {
+  width: 13px;
+  height: 13px;
+}
+.book-card .creator {
+  margin-top: -6px;
+}
+
+/* 학생 명단 카드 (오답노트 카드와 같은 모양) */
+.student-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 150px;
+}
+.student-card:not(.can-edit) {
+  cursor: default;
+}
+.student-card:not(.can-edit):active {
+  transform: translateY(-3px);
+}
+.sc-memo {
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .home-foot {
   max-width: 1240px;
   margin: 34px auto 0;
@@ -1288,6 +1335,29 @@ main.home {
 }
 .field-v .input {
   width: 100%;
+}
+.form-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+textarea.input {
+  height: auto;
+  padding: 10px 12px;
+  line-height: 1.55;
+  resize: vertical;
+}
+/* 학생 이름 + 학생 명단에서 고르기 */
+.student-pick {
+  display: flex;
+  gap: 8px;
+}
+.field-v .student-pick .input {
+  flex: 1;
+  width: auto;
+}
+.field-v .student-pick select.input {
+  flex: 0 0 46%;
 }
 .book-pick {
   display: grid;
@@ -1379,6 +1449,35 @@ main.sheet {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+/* 보기만 할 수 있는 책·오답노트 안내 (오른쪽에 버튼 하나를 둘 수 있음) */
+.readonly-banner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.readonly-banner > .icon {
+  width: 17px;
+  height: 17px;
+  color: var(--text-3);
+}
+.readonly-banner > span:not(.spacer) {
+  flex: 1;
+  min-width: 0;
+}
+.readonly-banner > .btn {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 .doc-row {
   display: grid;

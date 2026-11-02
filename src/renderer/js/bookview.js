@@ -3,15 +3,27 @@
 import { h, clear, toast, confirmDialog, debounce, formatDate, icon, animateOut } from './ui.js';
 import { analyzeDocument, parsePageRange, reanalyzeSinglePage, replacePageItems } from './analyze.js';
 import { ROLES, ROLE_NAME, newDoc, pageLabel, bookPage, computeMatches, normalizeDoc, findItem, flaggedPages, missingNumbers, missingCount } from './store.js';
-import { api, state, nav, leaveHooks, makeSaver, getSource, getSources, dropSources, clearPreviewCache, renderPreview, renderQTable, runGeminiPages, geminiReady, aiOff, jobs, findJob, startJob, holdBook, holdSource, liveBook } from './shared.js';
+import { api, state, nav, leaveHooks, makeSaver, getSource, getSources, dropSources, clearPreviewCache, renderPreview, renderQTable, runGeminiPages, geminiReady, aiOff, jobs, findJob, startJob, holdBook, holdSource, liveBook, errMsg } from './shared.js';
 import { topbar, renderUpdateBadge } from './chrome.js';
 import { createEditor } from './editor.js';
 import { placeSegThumb } from './home.js';
 
-const saver = makeSaver((b) => api.saveBook(b));
+/** 고칠 수 있는 책인지 — 학원 공간에서 남이 만든 책은 절대 저장하지 않음 (통합 클라우드가 되돌리고 충돌 사본을 남김) */
+const canSave = (b) => !!b && b.$canEdit !== false;
+
+// 바뀐 횟수 / 저장할 때의 횟수 — 실시간으로 다시 읽을 때 고치는 중인지 보려고 (makeSaver 는 알려 주지 않음)
+let dirtySeq = 0;
+let savedSeq = 0;
+const saver = makeSaver(async (b) => {
+  if (!canSave(b)) return;
+  const seq = dirtySeq;
+  await api.saveBook(b);
+  savedSeq = seq;
+});
 
 const bs = {
   book: null,
+  readonly: false, // 보기만 (만든 사람과 원장만 고칠 수 있음)
   sources: { problem: null, answer: null },
   matches: new Map(),
   tab: 'result', // result | review
@@ -19,11 +31,12 @@ const bs = {
   focus: null,
   pendingRenames: {},
   pendingRemoved: [],
+  working: 0, // 꼼꼼히 다시 찾는 중 — 그동안은 실시간으로 다시 읽지 않음
 };
 let editor = null;
 
 window.addEventListener('beforeunload', () => {
-  if (bs.book && state.view === 'book') {
+  if (bs.book && state.view === 'book' && canSave(bs.book)) {
     saver.cancel();
     bs.book.updatedAt = Date.now();
     api.saveBookSync(bs.book);
@@ -43,6 +56,7 @@ const onBook = (b) => state.view === 'book' && !!b && bs.book === b;
 
 /** 작업 결과 저장: 그 책 화면이면 화면과 같이, 떠났으면 그 책만 (지금 열린 다른 화면은 건드리지 않음) */
 async function saveJobBook(b) {
+  if (!canSave(b)) return;
   if (bs.book === b) {
     rematch();
     await saver.flush();
@@ -54,6 +68,7 @@ async function saveJobBook(b) {
 
 /** 작업이 바꾼 문항 ID 를 오답노트에도 (그 책 화면이면 평소처럼 모아서) */
 function noteRenamesFor(b, renames, removed = []) {
+  if (!canSave(b)) return;
   if (bs.book === b) return noteRenames(renames, removed);
   if (!Object.keys(renames || {}).length && !removed.length) return;
   const run = () => api.renameBookItems(b.id, renames || {}, removed).catch((err) => console.error(err));
@@ -63,6 +78,8 @@ function noteRenamesFor(b, renames, removed = []) {
 }
 
 function markDirty() {
+  if (!canSave(bs.book)) return;
+  dirtySeq++;
   saver.dirty();
 }
 
@@ -78,7 +95,7 @@ async function flushRenames() {
   const removed = bs.pendingRemoved;
   bs.pendingRenames = {};
   bs.pendingRemoved = [];
-  if (!bs.book || (!Object.keys(renames).length && !removed.length)) return;
+  if (!canSave(bs.book) || (!Object.keys(renames).length && !removed.length)) return;
   await api.renameBookItems(bs.book.id, renames, removed).catch((err) => console.error(err));
 }
 
@@ -92,10 +109,13 @@ export async function openBook(id, { tab, role, page, itemId } = {}) {
   book.docs ||= { problem: null, answer: null };
   book.answerOverrides ||= {};
   bs.book = book;
-  bs.tab = tab || 'result';
+  bs.readonly = !canSave(book);
+  bs.tab = bs.readonly ? 'result' : tab || 'result';
   bs.role = role || (book.docs.problem ? 'problem' : book.docs.answer ? 'answer' : 'problem');
-  bs.focus = null;
+  // 보기만 하는 책은 페이지 검토 대신 인식 결과에서 그 문항을 보여 줌
+  bs.focus = bs.readonly && itemId ? itemId : null;
   saver.set(book);
+  savedSeq = dirtySeq;
   state.view = 'book';
   leaveHooks.add(async () => {
     const job = analysisJob(book);
@@ -111,9 +131,84 @@ export async function openBook(id, { tab, role, page, itemId } = {}) {
   bs.sources = await getSources(book);
   rematch();
   render();
-  if (page != null) {
+  if (page != null && !bs.readonly) {
     switchTab('review', { role: role || 'problem', page, itemId, instant: true });
   }
+}
+
+/** 보기만 하는 책: 누가 만들었는지 + 내 책으로 복사 */
+function readonlyBanner(b) {
+  return h(
+    'div.readonly-banner',
+    icon('eye'),
+    h('span', `생성자: ${b.createdBy?.name || '알 수 없음'} · 보기만 할 수 있어요 (만든 사람과 원장만 고칠 수 있어요)`),
+    h('button.btn.btn-small.btn-primary', { onclick: (e) => copyToMine(b, e.currentTarget) }, icon('bookPlus'), '내 책으로 복사'),
+  );
+}
+
+async function copyToMine(b, btn) {
+  const label = btn.lastChild;
+  btn.disabled = true;
+  label.textContent = '복사하는 중…';
+  try {
+    // 원본 파일을 먼저 받아서 복사 (못 받으면 오류)
+    const copy = await api.copyBook(b.id);
+    toast(`내 책으로 복사했어요: ${copy.name}`, { type: 'success' });
+    nav.book(copy.id);
+  } catch (err) {
+    toast(errMsg(err), { type: 'error', timeout: 8000 });
+    btn.disabled = false;
+    label.textContent = '내 책으로 복사';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 실시간: 다른 컴퓨터·선생님이 이 책을 바꾸면 (app.js 가 책 화면에서 부름)
+// ---------------------------------------------------------------------------
+/** 다시 읽은 것으로 바꿔 끼움 (같은 책 객체를 붙잡고 있는 저장·작업이 그대로 쓰게) */
+function replaceInPlace(target, fresh) {
+  for (const k of Object.keys(target)) if (!(k in fresh)) delete target[k];
+  return Object.assign(target, fresh);
+}
+
+/** 다시 읽어도 되는지: 이 책에 도는 작업, 고치고 아직 저장하지 않은 내용, 열린 확인 창이 없을 때만 */
+const canReload = (b) =>
+  !bookBusy(b) && !bs.working && dirtySeq === savedSeq && !Object.keys(bs.pendingRenames).length && !bs.pendingRemoved.length && !document.querySelector('.modal-overlay:not(.closing)');
+
+let changeQueue = Promise.resolve();
+
+/** change: {books: [책 id], notes, students, academy, settings} */
+export function bookDataChanged(change) {
+  changeQueue = changeQueue.then(() => reloadBook(change)).catch((err) => console.error(err));
+  return changeQueue;
+}
+
+async function reloadBook(change) {
+  const b = bs.book;
+  if (!b || state.view !== 'book' || !change?.books?.includes(b.id) || !canReload(b)) return;
+  let fresh;
+  try {
+    fresh = await api.getBook(b.id);
+  } catch {
+    if (bs.book !== b || !canReload(b)) return;
+    // 지워진 책: 나가면서 저장해 되살리지 않게
+    saver.set(null);
+    toast('다른 곳에서 이 책을 지웠어요');
+    nav.home({ tab: 'books' });
+    return;
+  }
+  // 저장된 내용이 그대로면(원본 파일만 받았거나 옮긴 결과만 바뀜) 다시 그리지 않음
+  if (fresh.updatedAt === b.updatedAt && fresh.$canEdit === b.$canEdit) return;
+  fresh.docs ||= { problem: null, answer: null };
+  fresh.answerOverrides ||= {};
+  const sources = await getSources(fresh);
+  if (bs.book !== b || state.view !== 'book' || !canReload(b)) return;
+  replaceInPlace(b, fresh);
+  bs.readonly = !canSave(b);
+  if (bs.readonly) bs.tab = 'result';
+  bs.sources = sources;
+  rematch();
+  render();
 }
 
 // ===========================================================================
@@ -122,21 +217,29 @@ function render({ enter = false, tabAnim = null, thumbFrom = null } = {}) {
   if (!b) return;
   const root = document.getElementById('app');
   clear(root);
+  const ro = bs.readonly;
   const nameInput = h('input.title-input', {
     value: b.name,
-    title: '책 이름 바꾸기',
-    onchange: (e) => {
-      b.name = e.target.value.trim() || b.name;
-      markDirty();
-    },
+    title: ro ? b.name : '책 이름 바꾸기',
+    readOnly: ro,
+    onchange: ro
+      ? null
+      : (e) => {
+          b.name = e.target.value.trim() || b.name;
+          markDirty();
+        },
   });
+  // 학원 공간에서는 누가 만든 책인지 (내 책도)
+  const creator = state.appInfo?.academy && b.createdBy ? h('span.creator', `생성자: ${b.createdBy.name || '알 수 없음'}`) : null;
   const tab = (key, ic, label, extra) => h(`button.seg-tab${bs.tab === key ? '.active' : ''}`, { dataset: { tab: key }, onclick: () => switchTab(key) }, icon(ic), h('span', label), extra);
   const flaggedN = ROLES.reduce((s, r) => s + flaggedPages(b.docs[r]).length, 0);
-  const tabs = h('nav.seg-tabs', h('span.seg-thumb'), tab('result', 'list', '인식 결과', flaggedN ? h('span.seg-count.warn', String(flaggedN)) : null), tab('review', 'scan', '페이지 검토·수정'));
+  // 보기만 하는 책은 페이지 검토(고치는 화면) 없이 인식 결과만
+  const tabs = h('nav.seg-tabs', h('span.seg-thumb'), tab('result', 'list', '인식 결과', flaggedN ? h('span.seg-count.warn', String(flaggedN)) : null), ro ? null : tab('review', 'scan', '페이지 검토·수정'));
   root.append(
-    topbar(h('div.topbar-crumb', h('button.btn.btn-ghost.btn-round#back-btn', { onclick: () => nav.home({ tab: 'books' }), title: '책장으로' }, icon('back')), h('span.crumb-kind', icon('library'), '책장'), h('span.crumb-sep', '/'), nameInput, h('span.save-status', ''))),
+    topbar(h('div.topbar-crumb', h('button.btn.btn-ghost.btn-round#back-btn', { onclick: () => nav.home({ tab: 'books' }), title: '책장으로' }, icon('back')), h('span.crumb-kind', icon('library'), '책장'), h('span.crumb-sep', '/'), nameInput, creator, ro ? null : h('span.save-status', ''))),
     h(
       `main.sheet${enter ? '.view-enter' : ''}`,
+      ro ? readonlyBanner(b) : null,
       h(`section.doc-row${bs.tab === 'review' ? '.compact' : ''}`, ROLES.map((role, i) => docCard(role, i))),
       h('div.tabs-row', tabs),
       h(`section.tab-body${tabAnim ? `.enter-${tabAnim}` : ''}`, bs.tab === 'result' ? resultView() : reviewView()),
@@ -147,6 +250,7 @@ function render({ enter = false, tabAnim = null, thumbFrom = null } = {}) {
 }
 
 async function switchTab(tab, { role, page, itemId, instant = false } = {}) {
+  if (tab === 'review' && bs.readonly) return; // 보기만 하는 책은 페이지 검토 없음
   if (bs.tab === tab && !instant) {
     if (tab === 'review' && role) getEditor().show(role, page, itemId);
     return;
@@ -180,6 +284,7 @@ function docCard(role, i) {
   const job = analysisJob();
   const busy = job?.role === role;
   const locked = bookBusy();
+  const ro = bs.readonly; // 보기만: 파일 바꾸기·끌어 놓기·설정·분석 없음
   const card = h(`div.doc-card${doc ? '' : '.empty'}${role === 'answer' ? '.teal' : ''}`, { dataset: { role }, style: { '--i': i } });
 
   const pick = async () => {
@@ -187,11 +292,13 @@ function docCard(role, i) {
     if (paths.length) await importFiles(role, paths);
   };
   card.addEventListener('dragover', (e) => {
+    if (ro) return;
     e.preventDefault();
     card.classList.add('drop');
   });
   card.addEventListener('dragleave', () => card.classList.remove('drop'));
   card.addEventListener('drop', async (e) => {
+    if (ro) return;
     e.preventDefault();
     card.classList.remove('drop');
     const paths = [...e.dataTransfer.files].map((f) => api.pathForFile(f)).filter(Boolean);
@@ -203,11 +310,12 @@ function docCard(role, i) {
       'div.doc-head',
       h('span.doc-icon', icon(role === 'problem' ? 'book' : 'bookCheck')),
       h('div.doc-titles', h('div.doc-title', ROLE_NAME[role]), doc ? h('div.doc-file', { title: doc.originalName }, doc.originalName, h('span.muted', src ? ` · ${src.numPages}쪽` : ' · 여는 중…')) : h('div.doc-file.muted', '아직 파일이 없어요')),
-      doc ? h('button.btn.btn-ghost.btn-small', { onclick: pick, disabled: locked }, icon('refresh'), '파일 바꾸기') : null,
+      doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pick, disabled: locked }, icon('refresh'), '파일 바꾸기') : null,
     ),
   );
 
   if (!doc) {
+    if (ro) return card;
     card.append(
       h(
         'button.drop-zone',
@@ -224,6 +332,7 @@ function docCard(role, i) {
     value: doc.range || '',
     placeholder: '전체',
     title: '분석할 쪽 (PDF 쪽 번호). 예: 5-120 또는 3-10, 15. 답지는 "빠른 정답" 쪽을 빼면 좋아요.',
+    disabled: ro,
     onchange: (e) => {
       doc.range = e.target.value.trim();
       markDirty();
@@ -233,6 +342,7 @@ function docCard(role, i) {
     'select.input.input-small',
     {
       title: '문제 번호 모양. 자동으로 잘 안 잡히면 직접 고르세요.',
+      disabled: ro,
       onchange: (e) => {
         doc.options.numberStyle = e.target.value;
         markDirty();
@@ -249,6 +359,7 @@ function docCard(role, i) {
   const flowCheck = h('input', {
     type: 'checkbox',
     checked: doc.options.flow === 'continue',
+    disabled: ro,
     onchange: (e) => {
       doc.options.flow = e.target.checked ? 'continue' : 'column';
       markDirty();
@@ -258,6 +369,7 @@ function docCard(role, i) {
     type: 'number',
     value: String(bookPage(doc, 0)),
     title: 'PDF 1쪽이 책의 몇 쪽인지 (쪽 번호 표시용)',
+    disabled: ro,
     onchange: (e) => {
       const v = parseInt(e.target.value, 10);
       if (Number.isFinite(v)) {
@@ -306,12 +418,14 @@ function docCard(role, i) {
             h('span.muted.small', formatDate(doc.analyzedAt)),
           )
         : h('div.doc-summary.muted', '아직 분석 전이에요.'),
-      h(
-        `button.btn${doc.analyzedAt ? '' : '.btn-primary'}`,
-        { onclick: () => analyzeRole(role), disabled: locked || !src },
-        icon('scan'),
-        doc.analyzedAt ? '다시 분석' : `${ROLE_NAME[role]} 분석`,
-      ),
+      ro
+        ? null
+        : h(
+            `button.btn${doc.analyzedAt ? '' : '.btn-primary'}`,
+            { onclick: () => analyzeRole(role), disabled: locked || !src },
+            icon('scan'),
+            doc.analyzedAt ? '다시 분석' : `${ROLE_NAME[role]} 분석`,
+          ),
     );
   }
   card.append(foot);
@@ -326,6 +440,7 @@ function showResult(role) {
 
 async function importFiles(role, paths) {
   const b = bs.book;
+  if (!canSave(b)) return;
   if (bookBusy(b)) {
     toast('이 책의 작업이 끝난 뒤에 파일을 바꿔 주세요.');
     return;
@@ -359,7 +474,7 @@ async function analyzeRole(role) {
   const b = bs.book;
   const doc = b.docs[role];
   const src = bs.sources[role];
-  if (!doc || !src) return;
+  if (!doc || !src || !canSave(b)) return;
   const running = analysisJob(b) || [...jobs.values()].find((j) => j.bookId === b.id);
   if (running) {
     // 이 책에서 도는 작업이 있으면 새로 시작하지 않고 그것을 보여 줌 (분석은 이 카드, AI 인식은 그 창)
@@ -468,7 +583,8 @@ function resultView() {
   const role = b.docs[bs.role] ? bs.role : b.docs.problem ? 'problem' : 'answer';
   const doc = b.docs[role];
   if (!doc) {
-    view.append(h('div.empty-state', h('div.empty-art', icon('upload')), h('h3', '문제집부터 올려 주세요'), h('p.muted', '위 칸에 PDF나 사진을 끌어다 놓고 [분석]을 누르면 쪽마다 문제 번호를 찾아 보여 줘요.')));
+    if (bs.readonly) view.append(h('div.empty-state', h('div.empty-art', icon('upload')), h('h3', '아직 올린 파일이 없어요'), h('p.muted', '만든 사람이 문제집을 올리고 분석하면 여기서 볼 수 있어요.')));
+    else view.append(h('div.empty-state', h('div.empty-art', icon('upload')), h('h3', '문제집부터 올려 주세요'), h('p.muted', '위 칸에 PDF나 사진을 끌어다 놓고 [분석]을 누르면 쪽마다 문제 번호를 찾아 보여 줘요.')));
     return view;
   }
   const left = h('div.result-main');
@@ -501,7 +617,7 @@ function resultView() {
   left.append(h('div.result-toolbar', roleSeg, h('span.spacer'), h('span.small.muted', '번호를 누르면 오른쪽에서 볼 수 있어요')));
 
   if (!doc.analyzedAt) {
-    left.append(h('div.empty-state', h('div.empty-art', icon('scan')), h('h3', '아직 분석 전이에요'), h('p.muted', `위 ${ROLE_NAME[role]} 카드에서 [분석]을 눌러 주세요.`)));
+    left.append(h('div.empty-state', h('div.empty-art', icon('scan')), h('h3', '아직 분석 전이에요'), h('p.muted', bs.readonly ? '만든 사람이 분석하면 여기서 볼 수 있어요.' : `위 ${ROLE_NAME[role]} 카드에서 [분석]을 눌러 주세요.`)));
     return view;
   }
 
@@ -553,6 +669,7 @@ function resultView() {
 function showPreview(role, it) {
   const box = document.querySelector('.result-side .preview-box');
   const b = bs.book;
+  const ro = bs.readonly; // 보기만: 페이지 검토로 가기·해설 짝 바꾸기 없음
   if (role === 'answer') {
     // 답지 문항: 해설만
     renderPreview(box, {
@@ -561,7 +678,7 @@ function showPreview(role, it) {
       item: it,
       matches: null,
       emptyText: ['번호 위에 마우스를 올리면', h('br'), '해설을 여기서 볼 수 있어요.'],
-      onShow: (_r, page, id) => switchTab('review', { role: 'answer', page, itemId: id }),
+      onShow: ro ? null : (_r, page, id) => switchTab('review', { role: 'answer', page, itemId: id }),
     });
     return;
   }
@@ -570,8 +687,8 @@ function showPreview(role, it) {
     sources: bs.sources,
     item: it,
     matches: bs.matches,
-    onShow: (r, page, id) => switchTab('review', { role: r, page, itemId: id }),
-    onOverride: (item, value) => {
+    onShow: ro ? null : (r, page, id) => switchTab('review', { role: r, page, itemId: id }),
+    onOverride: ro ? null : (item, value) => {
       if (value === '__auto') delete b.answerOverrides[item.id];
       else b.answerOverrides[item.id] = value;
       markDirty();
@@ -585,13 +702,14 @@ function showPreview(role, it) {
 /** 확인할 쪽 목록: 사용자가 먼저 보고 → 문제없음 / 직접 고치기 / 꼼꼼히 다시 찾기 / AI */
 function checkPanel(role, doc, pages, missing) {
   const picked = new Set();
+  const ro = bs.readonly; // 보기만: 어느 쪽인지만 보여 주고 고치는 버튼은 없음
   const panel = h('section.check-panel');
   const head = h(
     'div.cp-head',
     h('span.cp-icon', icon('warn')),
-    h('div', h('strong', `확인이 필요한 쪽 ${pages.length}곳`), h('div.small.muted', '번호가 건너뛰었거나 인식이 애매한 쪽이에요. 직접 보고 판단해 주세요.')),
+    h('div', h('strong', `확인이 필요한 쪽 ${pages.length}곳`), h('div.small.muted', ro ? '번호가 건너뛰었거나 인식이 애매한 쪽이에요.' : '번호가 건너뛰었거나 인식이 애매한 쪽이에요. 직접 보고 판단해 주세요.')),
     h('span.spacer'),
-    h('button.btn.btn-small', { onclick: () => dismissPages(role, pages), title: '모두 이대로 괜찮다고 표시' }, icon('checkAll'), '모두 문제없음'),
+    ro ? null : h('button.btn.btn-small', { onclick: () => dismissPages(role, pages), title: '모두 이대로 괜찮다고 표시' }, icon('checkAll'), '모두 문제없음'),
   );
   const gemBtn = h('button.btn.btn-small', { disabled: true, hidden: aiOff(), onclick: () => sendToGemini(role, [...picked]) }, icon('sparkle'), 'AI로 보내기');
   const updateGem = () => {
@@ -607,24 +725,28 @@ function checkPanel(role, doc, pages, missing) {
       return h(
         'div.cp-row',
         { style: { '--i': Math.min(i, 12) }, dataset: { page: String(p) } },
-        h('label.cp-pick', { title: 'AI로 보낼 쪽 고르기', hidden: aiOff() }, h('input', { type: 'checkbox', onchange: (e) => { if (e.target.checked) picked.add(p); else picked.delete(p); updateGem(); } })),
+        ro ? null : h('label.cp-pick', { title: 'AI로 보낼 쪽 고르기', hidden: aiOff() }, h('input', { type: 'checkbox', onchange: (e) => { if (e.target.checked) picked.add(p); else picked.delete(p); updateGem(); } })),
         h('button.cp-page', { onclick: () => switchTab('review', { role, page: p }) }, pageLabel(doc, p)),
         h('span.cp-why', [...new Set(flags)].join(' · ')),
-        h(
-          'div.cp-actions',
-          h('button.btn.btn-small.btn-ghost', { onclick: () => switchTab('review', { role, page: p }), title: '페이지 검토에서 직접 보고 고치기' }, icon('eye'), '검토'),
-          h('button.btn.btn-small.btn-ghost', { onclick: () => deepPage(role, p), title: '이 쪽만 더 꼼꼼하게(고해상도 OCR + 앞뒤 번호에 맞춰) 다시 찾기' }, icon('search'), '꼼꼼히 다시 찾기'),
-          h('button.btn.btn-small.btn-ghost', { onclick: () => sendToGemini(role, [p]), title: 'AI로 이 쪽 인식', hidden: aiOff() }, icon('sparkle')),
-          h('button.btn.btn-small.btn-ok', { onclick: () => dismissPages(role, [p]), title: '이대로 괜찮아요' }, icon('check'), '문제없음'),
-        ),
+        ro
+          ? null
+          : h(
+              'div.cp-actions',
+              h('button.btn.btn-small.btn-ghost', { onclick: () => switchTab('review', { role, page: p }), title: '페이지 검토에서 직접 보고 고치기' }, icon('eye'), '검토'),
+              h('button.btn.btn-small.btn-ghost', { onclick: () => deepPage(role, p), title: '이 쪽만 더 꼼꼼하게(고해상도 OCR + 앞뒤 번호에 맞춰) 다시 찾기' }, icon('search'), '꼼꼼히 다시 찾기'),
+              h('button.btn.btn-small.btn-ghost', { onclick: () => sendToGemini(role, [p]), title: 'AI로 이 쪽 인식', hidden: aiOff() }, icon('sparkle')),
+              h('button.btn.btn-small.btn-ok', { onclick: () => dismissPages(role, [p]), title: '이대로 괜찮아요' }, icon('check'), '문제없음'),
+            ),
       );
     }),
   );
-  panel.append(head, list, h('div.cp-foot', h('span.small.muted', geminiReady() ? '애매한 쪽은 골라서 AI에게 맡길 수 있어요.' : aiOff() ? 'AI 는 꺼져 있어요 (설정에서 켤 수 있어요).' : '설정에서 AI 키를 넣으면 애매한 쪽을 AI에게 맡길 수 있어요.'), h('span.spacer'), gemBtn));
+  panel.append(head, list);
+  if (!ro) panel.append(h('div.cp-foot', h('span.small.muted', geminiReady() ? '애매한 쪽은 골라서 AI에게 맡길 수 있어요.' : aiOff() ? 'AI 는 꺼져 있어요 (설정에서 켤 수 있어요).' : '설정에서 AI 키를 넣으면 애매한 쪽을 AI에게 맡길 수 있어요.'), h('span.spacer'), gemBtn));
   return panel;
 }
 
 async function dismissPages(role, pages) {
+  if (!canSave(bs.book)) return;
   const doc = bs.book.docs[role];
   for (const p of pages) {
     doc.pageInfo[p] = { ...(doc.pageInfo[p] || {}), ok: true };
@@ -639,6 +761,7 @@ async function dismissPages(role, pages) {
 
 async function sendToGemini(role, pages) {
   const b = bs.book;
+  if (!canSave(b)) return;
   // 진행 창을 닫고(백그라운드에서 계속) 다른 화면으로 가도 결과는 이 책(b)에 저장
   await runGeminiPages(b, role, pages, {
     onDone: async (changed, renames) => {
@@ -659,8 +782,9 @@ async function deepPage(role, page) {
   const b = bs.book;
   const doc = b.docs[role];
   const src = bs.sources[role];
-  if (!doc || !src) return;
+  if (!doc || !src || !canSave(b)) return;
   const close = toast(`${pageLabel(doc, page)} 꼼꼼히 다시 찾는 중… (고해상도로 한 번 더 읽어요)`, { timeout: 0 });
+  bs.working++;
   try {
     const before = (doc.items || []).filter((it) => it.page === page);
     const { items, page: info, meta } = await reanalyzeSinglePage(src, doc, page, { ocrLang: state.settings.ocrLang, deep: true, role });
@@ -703,6 +827,8 @@ async function deepPage(role, page) {
     close();
     console.error(err);
     toast(`다시 찾기 실패: ${err.message}`, { type: 'error' });
+  } finally {
+    bs.working--;
   }
 }
 

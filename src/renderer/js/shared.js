@@ -636,16 +636,19 @@ export const aiLabel = () => providerOf(aiProvider()).label;
 /** 설정에서 AI 를 껐는지 */
 export const aiOff = () => state.settings?.aiEnabled === false;
 
-/** 고른 AI 를 쓸 준비가 됐는지 (이름은 예전 그대로) — 꺼 두었으면 false */
+/** 고른 AI 를 쓸 준비가 됐는지 (이름은 예전 그대로) — 꺼 두었으면 false. 내 키가 없어도 학원 공용 키가 있으면 됨 */
 export function geminiReady() {
   const s = state.settings || {};
   if (aiOff()) return false;
   const p = aiProvider();
   if (p === 'openai') return !!String(s.openaiModel || '').trim(); // 로컬 서버는 키 없이도 됨
-  if (p === 'anthropic') return !!s.anthropicApiKey;
+  if (p === 'anthropic') return !!s.anthropicApiKey || !!s.academyAi?.anthropic;
   if (p === 'codex') return true; // CLI·로그인은 설정 화면에서 확인, 안 되면 요청할 때 알려 줌
-  return !!s.geminiApiKey;
+  return !!s.geminiApiKey || !!s.academyAi?.gemini;
 }
+
+/** 메인 프로세스가 던진 오류에서 "Error invoking remote method '…': Error: " 를 떼고 우리 말만 */
+export const errMsg = (err) => String(err?.message || err || '').replace(/^Error invoking remote method '[^']*': (?:\w*Error: )?/, '');
 
 /** 1순위·2순위 모델 (Codex 는 '' = CLI 기본 모델) */
 export function geminiModels() {

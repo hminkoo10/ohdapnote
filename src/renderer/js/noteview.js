@@ -11,11 +11,20 @@ import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, rend
 import { topbar, renderUpdateBadge } from './chrome.js';
 import { spineFor } from './home.js';
 
-const saver = makeSaver((n) => api.saveNote(n));
+// 바뀐 횟수 / 저장할 때의 횟수 — 실시간으로 다시 읽을 때 고치는 중인지 보려고 (makeSaver 는 알려 주지 않음)
+let dirtySeq = 0;
+let savedSeq = 0;
+const saver = makeSaver(async (n) => {
+  if (n.$readonly) return; // 다른 선생님의 오답노트는 저장하지 않음 (main 도 받지 않음)
+  const seq = dirtySeq;
+  await api.saveNote(n);
+  savedSeq = seq;
+});
 
 const ns = {
   note: null,
-  books: new Map(), // id → book
+  readonly: false, // 다른 선생님의 오답노트(원장이 봄) — 보기와 내보내기만
+  books: new Map(), // id → book (읽지 못한 책은 없음 → '지워진 책')
   sources: new Map(), // id → {problem, answer}
   matches: new Map(), // id → Map
   active: null, // 지금 보고 있는 책 id
@@ -24,60 +33,93 @@ const ns = {
 };
 
 window.addEventListener('beforeunload', () => {
-  if (ns.note && state.view === 'note') {
+  if (ns.note && state.view === 'note' && !ns.note.$readonly) {
     saver.cancel();
     ns.note.updatedAt = Date.now();
     api.saveNoteSync(ns.note);
   }
 });
 
-const markDirty = () => saver.dirty();
+const markDirty = () => {
+  if (ns.note?.$readonly) return; // 보기만: 내보내기 설정 등은 이 화면에서만 바뀜
+  dirtySeq++;
+  saver.dirty();
+};
 
-export async function openNote(id) {
-  const note = await api.getNote(id);
+/** 읽어 온 오답노트를 화면에서 쓰는 모양으로 */
+function prepareNote(note) {
   note.bookIds ||= [];
   note.selected ||= {};
   note.exportOptions = { ...DEFAULT_EXPORT_OPTIONS, ...(note.exportOptions || {}) };
+  return note;
+}
+
+/** 처음 보여 줄 책: 읽은 책 먼저 */
+const firstBook = (n) => n.bookIds.find((bid) => ns.books.has(bid)) || n.bookIds[0] || null;
+
+/**
+ * 책 읽기 → 바뀐 게 있으면 true. 읽지 못한 책(다른 선생님이 지움 등)은 ns.books 에서 빠져 '지워진 책'으로 보이고 문항은 빠짐.
+ * 저장된 내용이 그대로인 책(원본 파일만 받은 경우 등)은 그대로 둠
+ */
+async function loadBooks(ids) {
+  const { books, matches, sources } = ns; // 읽는 사이 다른 오답노트를 열어도 그쪽에 쓰지 않게
+  let changed = false;
+  for (const bid of ids) {
+    let b = null;
+    let m = null;
+    try {
+      b = await api.getBook(bid);
+      b.docs ||= { problem: null, answer: null };
+      m = computeMatches(b);
+    } catch {
+      b = null;
+    }
+    const old = books.get(bid);
+    if (!b) {
+      if (books.delete(bid)) changed = true;
+      matches.delete(bid);
+      continue;
+    }
+    if (old && old.updatedAt === b.updatedAt && old.$canEdit === b.$canEdit) continue;
+    books.set(bid, b);
+    matches.set(bid, m);
+    sources.delete(bid); // 파일을 바꿨을 수 있음 → 볼 때 다시 엶 (같은 파일이면 열어 둔 것을 씀)
+    changed = true;
+  }
+  return changed;
+}
+
+export async function openNote(id) {
+  const note = prepareNote(await api.getNote(id));
   ns.note = note;
+  ns.readonly = !!note.$readonly;
   ns.books = new Map();
   ns.sources = new Map();
   ns.matches = new Map();
   ns.focus = null;
   ns.onlySelected = false;
   saver.set(note);
+  savedSeq = dirtySeq;
   state.view = 'note';
   leaveHooks.add(async () => {
     saver.cancel();
     await saver.flush();
     ns.note = null;
   });
-  // 책 읽기 (지워진 책은 빼기)
-  const missingBooks = [];
-  for (const bid of note.bookIds) {
-    try {
-      const b = await api.getBook(bid);
-      ns.books.set(bid, b);
-      ns.matches.set(bid, computeMatches(b));
-    } catch {
-      missingBooks.push(bid);
-    }
-  }
-  if (missingBooks.length) {
-    note.bookIds = note.bookIds.filter((b) => !missingBooks.includes(b));
-    markDirty();
-  }
-  // 책에서 사라진 문항은 선택에서 정리
+  // 책 읽기 (지워진 책은 '지워진 책'으로 남기고 문항은 빼고 보여 줌)
+  await loadBooks(note.bookIds);
+  // 책에서 사라진 문항은 선택에서 정리 (보기만 하는 오답노트는 그대로)
   for (const [bid, b] of ns.books) {
     const ids = new Set((b.docs.problem?.items || []).map((it) => it.id));
     const sel = noteSelection(note, bid);
     const kept = sel.filter((x) => ids.has(x));
-    if (kept.length !== sel.length) {
+    if (kept.length !== sel.length && !ns.readonly) {
       setNoteSelection(note, bid, kept);
       markDirty();
       toast(`${b.name}: 책에서 바뀌거나 지워진 문항 ${sel.length - kept.length}개를 선택에서 뺐어요.`, { timeout: 6000 });
     }
   }
-  ns.active = note.bookIds.includes(ns.active) ? ns.active : note.bookIds[0] || null;
+  ns.active = note.bookIds.includes(ns.active) ? ns.active : firstBook(note);
   render({ enter: true });
   await loadActiveSources();
 }
@@ -95,9 +137,11 @@ function render({ enter = false } = {}) {
   if (!n) return;
   const root = document.getElementById('app');
   clear(root);
+  const ro = ns.readonly; // 보기만: 제목·학생 이름도 그대로
   const titleInput = h('input.title-input', {
     value: n.title,
     title: '오답노트 제목',
+    readOnly: ro,
     onchange: (e) => {
       n.title = e.target.value.trim() || n.title;
       markDirty();
@@ -108,6 +152,7 @@ function render({ enter = false } = {}) {
     value: n.student || '',
     placeholder: '학생 이름',
     title: '학생 이름',
+    readOnly: ro,
     onchange: (e) => {
       n.student = e.target.value.trim();
       markDirty();
@@ -123,10 +168,15 @@ function render({ enter = false } = {}) {
         h('span.crumb-sep', '/'),
         titleInput,
         h('label.student-chip', icon('user'), studentInput),
-        h('span.save-status', ''),
+        ro ? null : h('span.save-status', ''),
       ),
     ),
-    h(`main.sheet.note-sheet${enter ? '.view-enter' : ''}`, bookBar(), h('section.note-body', noteBody())),
+    h(
+      `main.sheet.note-sheet${enter ? '.view-enter' : ''}`,
+      ro ? h('div.readonly-banner', icon('eye'), h('span', `${n.$ownerName || '다른'} 선생님의 오답노트 · 보기와 내보내기만 할 수 있어요`)) : null,
+      bookBar(),
+      h('section.note-body', noteBody()),
+    ),
   );
   renderUpdateBadge();
 }
@@ -136,22 +186,22 @@ function bookBar() {
   const n = ns.note;
   const bar = h('section.book-bar');
   n.bookIds.forEach((bid, i) => {
+    // 읽지 못한 책(다른 선생님이 지움 등)은 '지워진 책'으로 — 고른 문항은 보이지 않고 내보내기에서도 빠짐
     const b = ns.books.get(bid);
-    if (!b) return;
-    const cnt = noteSelection(n, bid).length;
+    const cnt = b ? noteSelection(n, bid).length : 0;
     bar.append(
       h(
         `button.book-tab${ns.active === bid ? '.active' : ''}`,
-        { style: { '--spine': spineFor(bid), '--i': i }, onclick: () => switchBook(bid), dataset: { book: bid } },
+        { style: { '--spine': spineFor(bid), '--i': i }, onclick: () => switchBook(bid), dataset: { book: bid }, title: b ? null : '책장에서 지워진 책이에요' },
         h('span.bt-spine'),
-        h('span.bt-name', b.name),
+        h('span.bt-name', b ? b.name : '지워진 책'),
         h('span.bt-count', cnt ? String(cnt) : ''),
-        h('span.bt-x', { title: '이 오답노트에서 책 빼기', onclick: (e) => { e.stopPropagation(); removeBook(bid); } }, icon('x')),
+        ns.readonly ? null : h('span.bt-x', { title: '이 오답노트에서 책 빼기', onclick: (e) => { e.stopPropagation(); removeBook(bid); } }, icon('x')),
       ),
     );
   });
-  bar.append(h('button.btn.btn-small.btn-ghost.add-book', { onclick: addBook }, icon('plus'), '책 추가'));
-  bar.append(h('span.spacer'), h('button.btn.btn-small.btn-ghost', { onclick: () => ns.active && nav.book(ns.active), disabled: !ns.active, title: '이 책의 인식 결과를 고치러 책 화면으로' }, icon('edit'), '책 인식 고치기'));
+  if (!ns.readonly) bar.append(h('button.btn.btn-small.btn-ghost.add-book', { onclick: addBook }, icon('plus'), '책 추가'));
+  bar.append(h('span.spacer'), h('button.btn.btn-small.btn-ghost', { onclick: () => ns.books.has(ns.active) && nav.book(ns.active), disabled: !ns.active, title: '이 책의 인식 결과를 고치러 책 화면으로' }, icon('edit'), '책 인식 고치기'));
   return bar;
 }
 
@@ -194,14 +244,16 @@ async function addBook() {
   );
   const r = await modal({ title: '책 추가', body: list, width: 480, buttons: [{ label: '취소', value: null }, { label: '추가', primary: true, onClick: () => [...picked] }] });
   if (!r?.length) return;
-  for (const bid of r) {
-    const b = await api.getBook(bid);
-    ns.books.set(bid, b);
-    ns.matches.set(bid, computeMatches(b));
+  // 고르는 사이 지워진 책은 넣지 않음
+  await loadBooks(r);
+  const added = r.filter((bid) => ns.books.has(bid) && !n.bookIds.includes(bid));
+  if (added.length < r.length) toast('지워졌거나 열 수 없는 책은 넣지 못했어요.', { type: 'error' });
+  if (!added.length) return;
+  for (const bid of added) {
     n.bookIds.push(bid);
     noteSelection(n, bid);
   }
-  ns.active = r[0];
+  ns.active = added[0];
   markDirty();
   render();
   await loadActiveSources();
@@ -211,7 +263,7 @@ async function removeBook(bid) {
   const n = ns.note;
   const b = ns.books.get(bid);
   const cnt = noteSelection(n, bid).length;
-  if (cnt && !(await confirmDialog(`"${b?.name}"에서 고른 ${cnt}문항이 이 오답노트에서 빠져요. 계속할까요?`, { ok: '빼기', danger: true }))) return;
+  if (cnt && !(await confirmDialog(`"${b?.name || '지워진 책'}"에서 고른 ${cnt}문항이 이 오답노트에서 빠져요. 계속할까요?`, { ok: '빼기', danger: true }))) return;
   n.bookIds = n.bookIds.filter((x) => x !== bid);
   delete n.selected[bid];
   if (ns.active === bid) ns.active = n.bookIds[0] || null;
@@ -229,8 +281,21 @@ function noteBody() {
   view.append(left, right);
   const b = ns.books.get(ns.active);
   const doc = b?.docs?.problem;
+  const ro = ns.readonly; // 보기만: 문항 고르기·빼기 없음 (누르면 미리보기만)
   if (!b) {
-    left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '책을 추가해 주세요'), h('p.muted', '위의 [책 추가]를 눌러 책장에 등록한 책을 고르세요.')));
+    if (ns.active) {
+      // 다른 선생님이 지운 책 (읽지 못한 책)
+      left.append(
+        h(
+          'div.empty-state',
+          h('div.empty-art', icon('trash')),
+          h('h3', '지워진 책이에요'),
+          h('p.muted', '책장에서 지워져서 이 책에서 고른 문항은 보이지 않고 내보내기에서도 빠져요.'),
+          ro ? null : h('button.btn', { onclick: () => removeBook(ns.active) }, icon('x'), '이 오답노트에서 빼기'),
+        ),
+      );
+    } else if (ro) left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '아직 책이 없어요')));
+    else left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '책을 추가해 주세요'), h('p.muted', '위의 [책 추가]를 눌러 책장에 등록한 책을 고르세요.')));
     setTimeout(renderExportSummary, 0);
     return view;
   }
@@ -264,17 +329,17 @@ function noteBody() {
   left.append(
     h(
       'div.select-toolbar',
-      h('div.search', icon('search'), quick),
-      h('button.btn', { onclick: applyQuick }, '고르기'),
+      ro ? null : h('div.search', icon('search'), quick),
+      ro ? null : h('button.btn', { onclick: applyQuick }, '고르기'),
       h('label.switch.small', h('input', { type: 'checkbox', checked: ns.onlySelected, onchange: (e) => { ns.onlySelected = e.target.checked; drawTable(); } }), h('span.sw'), '고른 것만'),
-      h('button.btn.btn-ghost.btn-small', { onclick: async () => { if (noteSelection(n, b.id).length && (await confirmDialog(`${b.name}에서 고른 문항을 모두 해제할까요?`))) { setNoteSelection(n, b.id, []); markDirty(); refresh(); } } }, '모두 해제'),
+      ro ? null : h('button.btn.btn-ghost.btn-small', { onclick: async () => { if (noteSelection(n, b.id).length && (await confirmDialog(`${b.name}에서 고른 문항을 모두 해제할까요?`))) { setNoteSelection(n, b.id, []); markDirty(); refresh(); } } }, '모두 해제'),
     ),
     h(
       'div.legend.small',
       h('span', h('span.chip.demo.on', '3'), '고른 문제'),
       h('span', h('span.chip.demo.noans', '3'), '해설 짝 없음'),
       h('span', h('span.chip.demo.missing', '4', h('span.chip-q', '?')), '인식 못한 번호'),
-      h('span', '쪽 번호를 누르면 그 쪽 전체 선택'),
+      ro ? null : h('span', '쪽 번호를 누르면 그 쪽 전체 선택'),
     ),
   );
   const table = h('div.qtable');
@@ -290,10 +355,15 @@ function noteBody() {
       missing,
       onlySelected: ns.onlySelected,
       focusId: ns.focus,
-      onChip: (it, page, items) => toggleOne(it, page, items),
+      onChip: ro ? (it) => schedulePreview(it) : (it, page, items) => toggleOne(it, page, items),
       onHover: (it) => schedulePreview(it),
-      onPage: (page, items, el) => togglePage(page, items, el),
+      onPage: ro ? null : (page, items, el) => togglePage(page, items, el),
       onMissing: async (page, m) => {
+        // 남이 만든 책은 그 책 화면에서도 고칠 수 없음
+        if (b.$canEdit === false) {
+          toast(`${pageLabel(doc, page)}에서 ${m.prefix ? `${m.prefix} ` : ''}${m.num}번을 찾지 못했어요. 이 책은 만든 사람과 원장만 고칠 수 있어요.`, { timeout: 6000 });
+          return;
+        }
         const go = await confirmDialog(`${pageLabel(doc, page)}에서 ${m.prefix ? `${m.prefix} ` : ''}${m.num}번을 찾지 못했어요.\n책 화면에서 그 쪽을 열어 직접 추가할까요?`, { ok: '책 화면에서 열기', title: '인식 못한 번호' });
         if (go) nav.book(b.id, { tab: 'review', role: 'problem', page });
       },
@@ -376,7 +446,7 @@ function updateBookCount() {
   const n = ns.note;
   for (const el of document.querySelectorAll('.book-tab')) {
     const c = el.querySelector('.bt-count');
-    const cnt = noteSelection(n, el.dataset.book).length;
+    const cnt = ns.books.has(el.dataset.book) ? noteSelection(n, el.dataset.book).length : 0; // 지워진 책은 세지 않음
     if (c && c.textContent !== String(cnt || '')) {
       c.textContent = cnt ? String(cnt) : '';
       c.classList.remove('bump');
@@ -402,7 +472,7 @@ function renderPreviewBox() {
     matches: ns.matches.get(b.id),
     selected,
     onShow: (role, page, id) => nav.book(b.id, { tab: 'review', role, page, itemId: id }),
-    onToggleSelect: (it) => {
+    onToggleSelect: ns.readonly ? null : (it) => {
       const set = new Set(noteSelection(n, b.id));
       if (set.has(it.id)) set.delete(it.id);
       else set.add(it.id);
@@ -466,6 +536,7 @@ function exportPanel() {
         value: info[key] || '',
         placeholder,
         dataset: { key },
+        readOnly: ns.readonly, // 보기만: 시험지 머리는 저장된 그대로
         oninput: (e) => {
           const v = e.target.value;
           if (key === 'title') n.title = v.trim() || n.title;
@@ -685,7 +756,7 @@ function renderExportSummary() {
             title: `${e.bookObj.name} — 미리보기`,
           },
           `${pageLabel(e.bookObj.docs.problem, e.problem.page)} ${itemName(e.problem)}`,
-          h(
+          ns.readonly ? null : h(
             'button.sel-x',
             {
               title: '빼기',
@@ -752,6 +823,7 @@ async function doExport(mode) {
   if (btn) btn.dataset.run = run;
   btn?.classList.add('working');
   const closeToast = toast(`${modeName} ${kindName} 만드는 중…`, { timeout: 0 });
+  exporting.set(n.id, (exporting.get(n.id) || 0) + 1);
   try {
     const safe = (s) => String(s || '').replace(/[\\/:*?"<>|]/g, '_').trim();
     const fname = [safe(info.student), safe(info.title), modeName, ymd].filter(Boolean).join('_');
@@ -792,10 +864,90 @@ async function doExport(mode) {
     toast(`${kindName}를 만들지 못했어요: ${err.message}`, { type: 'error', timeout: 10000 });
   } finally {
     if (btn?.dataset.run === run) btn.classList.remove('working'); // 멈춘 앞 작업이 새로 시작한 작업의 표시를 지우지 않게
+    exportDone(n.id);
   }
 }
 
 let exportRuns = 0;
+
+// ===========================================================================
+// 실시간: 다른 컴퓨터·선생님이 바꾼 데이터 (app.js 가 오답노트 화면에서 부름)
+// ===========================================================================
+const exporting = new Map(); // 오답노트 id → 내보내는 중인 수 (그동안은 다시 읽지 않고 끝난 뒤에)
+let deferred = null; // 내보내는 동안 들어온 변경 {id, books, notes}
+let changeQueue = Promise.resolve();
+
+function exportDone(id) {
+  const left = (exporting.get(id) || 1) - 1;
+  if (left > 0) {
+    exporting.set(id, left);
+    return;
+  }
+  exporting.delete(id);
+  if (deferred?.id !== id) return;
+  const change = deferred;
+  deferred = null;
+  noteDataChanged(change);
+}
+
+/** 다시 읽은 것으로 바꿔 끼움 (같은 오답노트 객체를 붙잡고 있는 저장·화면 처리가 그대로 쓰게) */
+function replaceInPlace(target, fresh) {
+  for (const k of Object.keys(target)) if (!(k in fresh)) delete target[k];
+  return Object.assign(target, fresh);
+}
+
+/** change: {books: [책 id], notes: [오답노트 id | '*'], students, academy, settings} */
+export function noteDataChanged(change) {
+  changeQueue = changeQueue.then(() => applyChange(change)).catch((err) => console.error(err));
+  return changeQueue;
+}
+
+async function applyChange(change) {
+  const n = ns.note;
+  if (!n || state.view !== 'note' || !change) return;
+  const hit = (list, id) => Array.isArray(list) && (list.includes(id) || list.includes('*'));
+  const bookIds = n.bookIds.filter((bid) => hit(change.books, bid));
+  const noteHit = hit(change.notes, n.id);
+  if (!bookIds.length && !noteHit) return;
+  if (exporting.get(n.id)) {
+    const merge = (a, b) => [...new Set([...(a || []), ...(b || [])])];
+    const prev = deferred?.id === n.id ? deferred : {};
+    deferred = { id: n.id, books: merge(prev.books, change.books), notes: merge(prev.notes, change.notes) };
+    return;
+  }
+  // 책: 저장된 내용이 바뀐 것만 다시 읽음 (지워졌으면 '지워진 책')
+  let changed = await loadBooks(bookIds);
+  if (ns.note !== n) return;
+  // 오답노트: 고치는 중이 아니면(보기만이면 늘) 다시 읽음. 책이 바뀌었을 때도 — 책에서 바뀐 문항 ID 는 오답노트를 읽을 때 따라 바뀜
+  const canReload = () => ns.readonly || dirtySeq === savedSeq;
+  if (canReload()) {
+    let fresh = null;
+    try {
+      fresh = prepareNote(await api.getNote(n.id));
+    } catch {
+      if (ns.note === n && noteHit) {
+        // 지워진 오답노트: 나가면서 저장해 되살리지 않게
+        saver.set(null);
+        toast('다른 곳에서 이 오답노트를 지웠어요');
+        nav.home({ tab: 'notes' });
+        return;
+      }
+    }
+    if (ns.note !== n) return;
+    if (fresh && ns.readonly) fresh.exportOptions = n.exportOptions; // 보기만: 이 화면에서 고른 내보내기 설정은 그대로
+    if (fresh && canReload() && JSON.stringify(fresh) !== JSON.stringify(n)) {
+      replaceInPlace(n, fresh);
+      ns.readonly = !!n.$readonly;
+      await loadBooks(n.bookIds.filter((bid) => !ns.books.has(bid)));
+      if (ns.note !== n) return;
+      if (!n.bookIds.includes(ns.active)) ns.active = firstBook(n);
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  render();
+  await loadActiveSources();
+}
 
 /** 한글 문서 내용이 같은지 견주는 열쇠 (문항·영역·지문·번호·출처 + 내보내기 설정·시험지 머리) */
 function exportSig(mode, blocks, opts, info) {

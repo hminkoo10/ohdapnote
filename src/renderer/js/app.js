@@ -1,11 +1,11 @@
 // 오답노트 화면 시작점: 화면 이동(첫 화면 ↔ 책 ↔ 오답노트), 설정, 업데이트 알림
 
-import { h, ripple, animateOut } from './ui.js';
+import { h, toast, ripple, animateOut } from './ui.js';
 import { api, state, nav, runLeaveHooks } from './shared.js';
 import { onUpdateStatus, openSettings, applyMotion } from './chrome.js';
 import { showHome } from './home.js';
-import { openBook } from './bookview.js';
-import { openNote, renderFormatHint } from './noteview.js';
+import { openBook, bookDataChanged } from './bookview.js';
+import { openNote, renderFormatHint, noteDataChanged } from './noteview.js';
 
 const root = document.getElementById('app');
 let current = { view: 'home', args: [] };
@@ -40,6 +40,48 @@ nav.refresh = () => {
   return null;
 };
 
+/** 다른 컴퓨터·선생님이 바꾼 데이터가 들어오면 지금 화면에 반영 */
+async function onDataChanged(change) {
+  if (change.settings || change.academy) {
+    state.settings = await api.getSettings(); // 학원 공용 AI 키가 생기거나 없어졌을 수도
+    if (state.view === 'note') renderFormatHint();
+  }
+  // 화면 이동이 끝난 뒤에 (이동 중인 화면을 덮어쓰지 않게)
+  navigating = navigating.then(async () => {
+    try {
+      if (state.view === 'home') {
+        if (!(change.books?.length || change.notes?.length || change.students || change.academy)) return;
+        if (document.querySelector('.modal-overlay:not(.closing)')) return; // 창이 열려 있으면 그대로 둠
+        const top = root.querySelector('main.home')?.scrollTop || 0;
+        await showHome(); // 보던 탭 그대로
+        const main = root.querySelector('main.home');
+        if (main) main.scrollTop = top;
+      } else if (state.view === 'book') {
+        // 기다리지 않음: 책 화면이 첫 화면으로 돌아가면(지워진 책) 그 이동이 이 뒤에 줄을 섬
+        Promise.resolve(bookDataChanged(change)).catch((err) => console.error(err));
+      } else if (state.view === 'note') {
+        Promise.resolve(noteDataChanged(change)).catch((err) => console.error(err));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  });
+}
+
+// 아직 받지 않은 교재 원본을 받는 동안 알림 하나 (책마다 받는 중인 묶음 수)
+const fetching = new Map();
+let closeFetchToast = null;
+function onFilesFetching({ bookId, done }) {
+  const n = (fetching.get(bookId) || 0) + (done ? -1 : 1);
+  if (n > 0) fetching.set(bookId, n);
+  else fetching.delete(bookId);
+  if (fetching.size && !closeFetchToast) closeFetchToast = toast('교재 파일 받는 중…', { timeout: 0 });
+  else if (!fetching.size && closeFetchToast) {
+    closeFetchToast();
+    closeFetchToast = null;
+  }
+}
+
 async function boot() {
   if (!api) {
     root.append(h('div.fatal', '이 화면은 오답노트 프로그램 안에서 실행해야 합니다.'));
@@ -49,6 +91,8 @@ async function boot() {
   applyMotion(state.settings.motion);
   document.fonts?.load('600 14px "Pretendard Variable"').catch(() => {});
   api.onUpdateStatus(onUpdateStatus);
+  api.onDataChanged((change) => onDataChanged(change).catch((err) => console.error(err)));
+  api.onFilesFetching(onFilesFetching);
   // 누른 자리에서 퍼지는 물결
   document.addEventListener('pointerdown', (e) => {
     const el = e.target.closest('.btn, .export-btn, .card, .seg-tab, .book-tab');

@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "id": "ohdapnote",
+  "version": "0.0.0",
+  "exe": "OhdapNote.exe",
+  "sync": {
+    "include": ["settings.json", "shared/**"],
+    "exclude": ["**/*.tmp"]
+  },
+  "shared": {
+    "include": ["**"],
+    "exclude": ["**/*.tmp"],
+    "lazy": ["books/*/problem-*", "books/*/answer-*"]
+  },
+  "legacy": [
+    { "id": "standalone", "label": "따로 설치해서 쓰던 오답노트", "from": "{APPDATA}/OhdapNote/data", "to": "local/legacy" }
+  ]
+}

@@ -2,7 +2,7 @@
 // 기본은 Google Gemini. 세부 설정에서 OpenAI 호환(로컬 서버 포함) · Claude · ChatGPT 구독(Codex CLI)으로 바꿀 수 있음
 
 import { h, clear, icon } from './ui.js';
-import { api } from './shared.js';
+import { api, state, errMsg } from './shared.js';
 import { PROVIDERS } from './aiproviders.js';
 
 const num = (input, min, max, d) => Math.max(min, Math.min(max, parseInt(input.value, 10) || d));
@@ -221,5 +221,64 @@ export function aiSettingsCard(s) {
       aiConcurrency: num(concInput, 1, 8, 3),
       aiBatch: num(batchInput, 1, 8, 4),
     }),
+  };
+}
+
+// 학원 공용 키: AI 종류 · 설정 이름
+const ACADEMY_KEYS = [
+  ['gemini', 'geminiApiKey'],
+  ['openai', 'openaiApiKey'],
+  ['anthropic', 'anthropicApiKey'],
+];
+
+/**
+ * 설정 창의 학원 공용 AI 키 카드 (학원 공간에서만)
+ * 원장: 키를 넣고 [저장] 때 save() / 선생님: AI 종류마다 어떤 키를 쓰는지만 (키는 보이지 않음)
+ * @param {object} s 지금 설정 (academyAi = 학원 키가 있는지)
+ * @returns {{card: HTMLElement, save: () => Promise<void>} | null}
+ */
+export function academyAiCard(s) {
+  if (!state.appInfo?.academy) return null;
+  const head = h('h4', icon('school'), '학원 공용 AI 키');
+  if (!state.appInfo.manager) {
+    const has = s.academyAi || {};
+    return {
+      card: h(
+        'section.set-card',
+        head,
+        h('p.small.muted', '원장님이 넣어 둔 학원 키예요. 내 키를 넣지 않으면 이 키를 써요.'),
+        ACADEMY_KEYS.map(([p, k]) =>
+          h('div.field', h('span', PROVIDERS[p].label), !has[p] ? h('span.small.muted', '학원 키 없음') : s[k] ? h('span.small', '내 키 사용 중') : h('span.small.ok-text', '학원 키 사용 중')),
+        ),
+      ),
+      save: async () => {},
+    };
+  }
+  const inputs = Object.fromEntries(ACADEMY_KEYS.map(([, k]) => [k, h('input.input', { type: 'password', autocomplete: 'off', spellcheck: false, placeholder: '(없음)' })]));
+  const msg = h('p.small.muted', '불러오는 중…');
+  let loaded = null; // 불러온 키 — 불러오기 전에는 저장하지 않음 (빈 칸으로 덮어쓰지 않게)
+  api
+    .getAcademyAi()
+    .then((ai) => {
+      loaded = ai || {};
+      for (const [k, input] of Object.entries(inputs)) if (!input.value) input.value = loaded[k] || '';
+      msg.textContent = '';
+      msg.hidden = true;
+    })
+    .catch((err) => (msg.textContent = `학원 키를 불러오지 못했어요: ${errMsg(err)}`));
+  return {
+    card: h(
+      'section.set-card',
+      head,
+      h('p.small.muted', '선생님이 자기 키를 넣지 않으면 이 키를 써요. 같은 학원 선생님들에게는 키가 보이지 않아요.'),
+      ACADEMY_KEYS.map(([p, k]) => h('label.field', h('span', PROVIDERS[p].label), inputs[k])),
+      msg,
+    ),
+    save: async () => {
+      if (!loaded) return;
+      const next = Object.fromEntries(Object.entries(inputs).map(([k, input]) => [k, input.value.trim()]));
+      if (ACADEMY_KEYS.every(([, k]) => (loaded[k] || '') === next[k])) return; // 그대로면 쓰지 않음 (다른 선생님들에게 바뀜 알림이 가지 않게)
+      await api.setAcademyAi(next);
+    },
   };
 }

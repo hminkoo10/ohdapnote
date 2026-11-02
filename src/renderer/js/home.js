@@ -1,7 +1,7 @@
-// 첫 화면: 학생 오답노트 목록 / 책장(등록한 책)
+// 첫 화면: 학생 오답노트 목록 / 책장(등록한 책) / 학생 명단
 
 import { h, clear, toast, modal, confirmDialog, promptDialog, formatDate, icon, countUp, animateOut } from './ui.js';
-import { api, state, nav, dropSources, liveBook, stopJobs } from './shared.js';
+import { api, state, nav, dropSources, liveBook, stopJobs, errMsg } from './shared.js';
 import { topbar } from './chrome.js';
 
 const SPINES = [
@@ -20,9 +20,16 @@ export function spineFor(id) {
 
 let homeTab = 'notes';
 
+/** 탭마다 위쪽 제목·설명 */
+function heroText(key) {
+  if (key === 'books') return ['책장', '문제집과 답지를 한 번만 올려 두면, 여러 학생 오답노트에서 같이 써요.'];
+  if (key === 'students') return ['학생 명단', state.appInfo.academy ? '학원 선생님들이 함께 쓰는 학생 명단이에요. 오답노트를 만들 때 골라 쓸 수 있어요.' : '학생을 적어 두면 오답노트를 만들 때 골라 쓸 수 있어요.'];
+  return ['학생 오답노트', '책장에 등록한 책에서 틀린 문제만 골라 시험지처럼 묶어 드려요.'];
+}
+
 export async function showHome({ tab } = {}) {
   if (tab) homeTab = tab;
-  const [notes, books] = await Promise.all([api.listNotes(), api.listBooks()]);
+  const [notes, books, students] = await Promise.all([api.listNotes(), api.listBooks(), api.listStudents()]);
   const bookById = new Map(books.map((b) => [b.id, b]));
   const root = document.getElementById('app');
   clear(root);
@@ -32,7 +39,8 @@ export async function showHome({ tab } = {}) {
   const segBtn = (key, ic, label, n) =>
     h(`button.seg-tab${homeTab === key ? '.active' : ''}`, { dataset: { tab: key }, onclick: () => switchTab(key) }, icon(ic), h('span', label), h('span.seg-count', String(n)));
   const thumb = h('span.seg-thumb');
-  const tabs = h('nav.seg-tabs', thumb, segBtn('notes', 'notebook', '학생 오답노트', notes.length), segBtn('books', 'library', '책장', books.length));
+  const tabs = h('nav.seg-tabs', thumb, segBtn('notes', 'notebook', '학생 오답노트', notes.length),segBtn('books', 'library', '책장', books.length), segBtn('students', 'user', '학생 명단', students.length));
+  const [heroTitle, heroSub] = heroText(homeTab);
 
   root.append(
     topbar(h('div.brand', h('span.brand-mark'), h('span.brand-name', '오답노트'))),
@@ -40,7 +48,7 @@ export async function showHome({ tab } = {}) {
       'main.home.view-enter',
       h(
         'div.home-hero',
-        h('div.hero-text', h('h1', homeTab === 'notes' ? '학생 오답노트' : '책장'), h('p', homeTab === 'notes' ? '책장에 등록한 책에서 틀린 문제만 골라 시험지처럼 묶어 드려요.' : '문제집과 답지를 한 번만 올려 두면, 여러 학생 오답노트에서 같이 써요.')),
+        h('div.hero-text', h('h1', heroTitle), h('p', heroSub)),
         tabs,
       ),
       body,
@@ -57,8 +65,7 @@ export async function showHome({ tab } = {}) {
     placeSegThumb(tabs);
     const hero = root.querySelector('.hero-text');
     await animateOut(body, 'leave-fade', 160);
-    hero.querySelector('h1').textContent = key === 'notes' ? '학생 오답노트' : '책장';
-    hero.querySelector('p').textContent = key === 'notes' ? '책장에 등록한 책에서 틀린 문제만 골라 시험지처럼 묶어 드려요.' : '문제집과 답지를 한 번만 올려 두면, 여러 학생 오답노트에서 같이 써요.';
+    [hero.querySelector('h1').textContent, hero.querySelector('p').textContent] = heroText(key);
     body.classList.remove('leave-fade');
     renderBody();
   }
@@ -69,6 +76,7 @@ export async function showHome({ tab } = {}) {
     void body.offsetWidth;
     body.classList.add('swap-in');
     if (homeTab === 'notes') body.append(notesGrid());
+    else if (homeTab === 'students') body.append(studentsGrid());
     else body.append(booksGrid());
   }
 
@@ -94,6 +102,8 @@ export async function showHome({ tab } = {}) {
             style: { '--i': Math.min(i + 1, 14) },
           },
           h('div.nc-top', h('span.nc-avatar', (n.student || n.title || '?').trim().slice(0, 1)), h('div.nc-who', h('div.nc-title', n.title), h('div.nc-student', n.student ? `${n.student} 학생` : '학생 이름 없음'))),
+          // 원장이 보는 다른 선생님 오답노트: 누구 것인지 (열면 보기·내보내기만)
+          n.mine === false ? h('div.creator', icon('user'), `${n.ownerName || '다른'} 선생님`) : null,
           h(
             'div.nc-books',
             n.bookIds.length
@@ -101,13 +111,49 @@ export async function showHome({ tab } = {}) {
               : h('span.muted.small', '책 없음'),
           ),
           h('div.nc-foot', h('span.nc-count', statNum, '문항 고름'), h('span.nc-date', formatDate(n.updatedAt))),
-          h(
-            'div.card-actions',
-            h('button.btn.btn-ghost.btn-icon', { title: '이름 바꾸기', onclick: (e) => { e.stopPropagation(); renameNote(n); } }, icon('edit')),
-            h('button.btn.btn-ghost.btn-icon', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteNote(n); } }, icon('trash')),
-          ),
+          n.mine !== false
+            ? h(
+                'div.card-actions',
+                h('button.btn.btn-ghost.btn-icon', { title: '이름 바꾸기', onclick: (e) => { e.stopPropagation(); renameNote(n); } }, icon('edit')),
+                h('button.btn.btn-ghost.btn-icon', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteNote(n); } }, icon('trash')),
+              )
+            : null,
         );
       }),
+    );
+  }
+
+  function studentsGrid() {
+    return h(
+      'div.card-grid',
+      h(
+        'button.card.card-new',
+        { onclick: () => editStudent(), style: { '--i': 0 } },
+        h('div.new-plus', icon('plus')),
+        h('div.cn-title', '새 학생'),
+        h('div.cn-sub', '이름·학교·학년을 적어 두면 오답노트를 만들 때 골라요'),
+      ),
+      students.map((st, i) =>
+        h(
+          `div.card.student-card${st.canEdit ? '.can-edit' : ''}`,
+          {
+            tabIndex: st.canEdit ? 0 : null,
+            onclick: st.canEdit ? () => editStudent(st) : null,
+            onkeydown: st.canEdit ? (e) => e.key === 'Enter' && editStudent(st) : null,
+            style: { '--i': Math.min(i + 1, 14) },
+          },
+          h('div.nc-top', h('span.nc-avatar', (st.name || '?').trim().slice(0, 1)), h('div.nc-who', h('div.nc-title', st.name), h('div.nc-student', [st.school, st.grade].filter(Boolean).join(' · ') || '학교·학년 없음'))),
+          st.memo ? h('div.sc-memo', st.memo) : null,
+          h('div.nc-foot', st.createdBy?.name ? h('span.creator', `등록: ${st.createdBy.name}`) : h('span'), h('span.nc-date', formatDate(st.updatedAt))),
+          st.canEdit
+            ? h(
+                'div.card-actions',
+                h('button.btn.btn-ghost.btn-icon', { title: '고치기', onclick: (e) => { e.stopPropagation(); editStudent(st); } }, icon('edit')),
+                h('button.btn.btn-ghost.btn-icon', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteStudent(st); } }, icon('trash')),
+              )
+            : null,
+        ),
+      ),
     );
   }
 
@@ -131,6 +177,7 @@ export async function showHome({ tab } = {}) {
             style: { '--i': Math.min(i + 1, 14), '--spine': spineFor(b.id) },
           },
           h('div.bc-title', b.name),
+          state.appInfo.academy && b.createdBy ? h('div.creator', `생성자: ${b.createdBy.name || '알 수 없음'}`) : null,
           h(
             'div.bc-files',
             h(`div${b.problemFile ? '' : '.muted'}`, icon('book'), h('span', b.problemFile || '문제집 없음')),
@@ -144,11 +191,14 @@ export async function showHome({ tab } = {}) {
             !b.problemAnalyzed && b.problemFile ? h('span.stat.muted', '분석 전') : null,
           ),
           h('div.bc-date', formatDate(b.updatedAt)),
-          h(
-            'div.card-actions',
-            h('button.btn.btn-ghost.btn-icon', { title: '이름 바꾸기', onclick: (e) => { e.stopPropagation(); renameBook(b); } }, icon('edit')),
-            h('button.btn.btn-ghost.btn-icon', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteBook(b, notes); } }, icon('trash')),
-          ),
+          // 고칠 수 없는 책(다른 선생님이 만든 책)은 이름 바꾸기·삭제 대신 내 책으로 복사
+          b.canEdit
+            ? h(
+                'div.card-actions',
+                h('button.btn.btn-ghost.btn-icon', { title: '이름 바꾸기', onclick: (e) => { e.stopPropagation(); renameBook(b); } }, icon('edit')),
+                h('button.btn.btn-ghost.btn-icon', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteBook(b, notes); } }, icon('trash')),
+              )
+            : h('div.card-actions', h('button.btn.btn-ghost.btn-icon', { title: '내 책으로 복사', onclick: (e) => { e.stopPropagation(); copyBook(b, e.currentTarget); } }, icon('files'))),
         ),
       ),
     );
@@ -199,6 +249,20 @@ async function deleteBook(b, notes) {
   showHome();
 }
 
+/** 다른 선생님이 만든 책을 내 책으로 (원본 파일을 받은 뒤 복사 — 오래 걸릴 수 있어서 버튼을 잠가 둠) */
+async function copyBook(b, btn) {
+  btn.disabled = true;
+  try {
+    await api.copyBook(b.id);
+  } catch (err) {
+    btn.disabled = false;
+    toast(`책을 복사하지 못했어요: ${errMsg(err)}`, { type: 'error', timeout: 8000 });
+    return;
+  }
+  toast(`"${b.name}"을(를) 내 책으로 복사했어요.`, { type: 'success' });
+  if (state.view === 'home') showHome({ tab: 'books' }); // 받는 동안 다른 화면으로 갔으면 그대로
+}
+
 /** 새 오답노트: 제목·학생 이름·책 고르기 */
 export async function createNote(books) {
   if (!books.length) {
@@ -211,6 +275,29 @@ export async function createNote(books) {
   }
   const titleInput = h('input.input', { placeholder: '예: 1학기 중간고사 대비 오답', value: '' });
   const studentInput = h('input.input', { placeholder: '학생 이름' });
+  // 학생 명단에서 고르면 이름을 채우고 그 학생을 기억 (이름을 다르게 고치면 직접 입력으로)
+  const students = await api.listStudents().catch(() => []);
+  let student = null;
+  const studentSelect = students.length
+    ? h(
+        'select.input',
+        {
+          onchange: () => {
+            student = students.find((st) => st.id === studentSelect.value) || null;
+            if (student) studentInput.value = student.name;
+            else studentInput.focus();
+          },
+        },
+        h('option', { value: '' }, '직접 입력'),
+        students.map((st) => h('option', { value: st.id }, [st.name, [st.school, st.grade].filter(Boolean).join(' ')].filter(Boolean).join(' · '))),
+      )
+    : null;
+  studentInput.addEventListener('input', () => {
+    if (student && studentInput.value.trim() !== student.name) {
+      student = null;
+      studentSelect.value = '';
+    }
+  });
   const picked = new Set(books.length === 1 ? [books[0].id] : []);
   const list = h(
     'div.book-pick',
@@ -236,7 +323,7 @@ export async function createNote(books) {
   );
   const body = h(
     'div.form',
-    h('label.field-v', h('span', '학생 이름'), studentInput),
+    studentSelect ? h('div.field-v', h('span', '학생 이름'), h('div.student-pick', studentInput, studentSelect)) : h('label.field-v', h('span', '학생 이름'), studentInput),
     h('label.field-v', h('span', '오답노트 제목'), titleInput),
     h('div.field-v', h('span', '어떤 책에서 고를까요? (여러 권 가능)'), list),
   );
@@ -254,9 +341,9 @@ export async function createNote(books) {
             toast('책을 하나 이상 골라 주세요.', { type: 'error' });
             return false;
           }
-          const student = studentInput.value.trim();
-          const title = titleInput.value.trim() || (student ? `${student} 오답노트` : '오답노트');
-          return { title, student, bookIds: books.filter((b) => picked.has(b.id)).map((b) => b.id) };
+          const name = studentInput.value.trim();
+          const title = titleInput.value.trim() || (name ? `${name} 오답노트` : '오답노트');
+          return { title, student: name, studentId: student?.id || '', bookIds: books.filter((b) => picked.has(b.id)).map((b) => b.id) };
         },
       },
     ],
@@ -280,4 +367,55 @@ async function deleteNote(n) {
   if (!(await confirmDialog(`"${n.title}" 오답노트를 삭제할까요?\n고른 문항 목록만 지워지고, 책장의 책은 그대로 남아요.`, { title: '오답노트 삭제', ok: '삭제', danger: true }))) return;
   await api.deleteNote(n.id);
   showHome();
+}
+
+// ---------------------------------------------------------------------------
+/** 학생 등록 / 고치기: 이름·학교·학년·메모 */
+async function editStudent(st = null) {
+  const nameInput = h('input.input', { value: st?.name || '', placeholder: '학생 이름' });
+  const schoolInput = h('input.input', { value: st?.school || '', placeholder: '예: 한빛고' });
+  const gradeInput = h('input.input', { value: st?.grade || '', placeholder: '예: 고2' });
+  const memoInput = h('textarea.input', { rows: 3, placeholder: '예: 함수 단원이 약해요 (선택)' }, st?.memo || '');
+  const r = await modal({
+    title: st ? '학생 정보 고치기' : '새 학생',
+    body: h(
+      'div.form',
+      h('label.field-v', h('span', '학생 이름'), nameInput),
+      h('div.form-2', h('label.field-v', h('span', '학교'), schoolInput), h('label.field-v', h('span', '학년'), gradeInput)),
+      h('label.field-v', h('span', '메모'), memoInput),
+    ),
+    buttons: [
+      { label: '취소', value: null },
+      {
+        label: st ? '저장' : '등록',
+        primary: true,
+        onClick: async () => {
+          const name = nameInput.value.trim();
+          if (!name) {
+            toast('학생 이름을 적어 주세요.', { type: 'error' });
+            return false;
+          }
+          try {
+            await api.saveStudent({ id: st?.id, name, school: schoolInput.value.trim(), grade: gradeInput.value.trim(), memo: memoInput.value.trim() });
+          } catch (err) {
+            toast(`저장하지 못했어요: ${errMsg(err)}`, { type: 'error' });
+            return false;
+          }
+          return true;
+        },
+      },
+    ],
+  });
+  if (r) showHome({ tab: 'students' });
+}
+
+async function deleteStudent(st) {
+  if (!(await confirmDialog(`"${st.name}" 학생을 명단에서 지울까요?\n이 학생으로 만든 오답노트는 그대로 남아요.`, { title: '학생 삭제', ok: '삭제', danger: true }))) return;
+  try {
+    await api.deleteStudent(st.id);
+  } catch (err) {
+    toast(`지우지 못했어요: ${errMsg(err)}`, { type: 'error' });
+    return;
+  }
+  showHome({ tab: 'students' });
 }

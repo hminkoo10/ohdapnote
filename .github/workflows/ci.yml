@@ -22,7 +22,7 @@ jobs:
           ONNXRUNTIME_NODE_INSTALL: skip
       - run: npm test
 
-  # 설치 파일이 잘 만들어지는지 확인하고, 시험용 설치 파일을 Artifacts 로 올립니다(릴리스는 하지 않음).
+  # 통합 클라우드용 묶음(zip)이 잘 만들어지는지 확인하고, 시험용 묶음을 Artifacts 로 올립니다(릴리스는 하지 않음).
   # main 은 Release 워크플로가 빌드·배포하므로 여기서는 건너뜀
   build-windows:
     runs-on: windows-latest
@@ -42,22 +42,17 @@ jobs:
           key: mathocr-model-${{ hashFiles('src/main/mathocr.js') }}
           restore-keys: mathocr-model-
       - run: node scripts/fetch-model.mjs
-      - run: npx electron-builder --win --x64 --publish never
-      # 배포 때 쓰는 것과 같은 파일 세 개(설치 파일, blockmap, 자동 업데이트용 latest.yml)가 다 만들어졌는지
-      - name: 업데이트 파일 확인
+      - name: 빌드 + zip 묶기
         shell: bash
         run: |
+          npx electron-builder --win dir --x64 --publish never
+          test -f dist/win-unpacked/resources/models/pix2text-mfr-1.5/encoder_model.onnx || { echo "::error::묶음에 수식 인식 모델이 없습니다"; exit 1; }
+          node scripts/write-manifest.mjs
           v="$(node -p "require('./package.json').version")"
+          (cd dist/win-unpacked && 7z a -tzip -mx=5 "../OhdapNote-$v-win-x64.zip" . > /dev/null)
           ls -l dist
-          test -f "dist/OhdapNote-Setup-$v.exe"
-          test -f "dist/OhdapNote-Setup-$v.exe.blockmap"
-          grep -q "OhdapNote-Setup-$v.exe" dist/latest.yml
-          test -f dist/win-unpacked/resources/models/pix2text-mfr-1.5/encoder_model.onnx || { echo "::error::설치 파일에 수식 인식 모델이 없습니다"; exit 1; }
-          cat dist/latest.yml
       - uses: actions/upload-artifact@v4
         with:
-          name: OhdapNote-Setup
-          path: |
-            dist/*.exe
-            dist/latest.yml
+          name: OhdapNote-zip
+          path: dist/*.zip
           retention-days: 14

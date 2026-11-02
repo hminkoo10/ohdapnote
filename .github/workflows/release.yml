@@ -1,10 +1,10 @@
-# 자동 빌드 + 배포 (윈도우 설치 파일 + 자동 업데이트)
+# 자동 빌드 + 배포 (마고에듀 통합 클라우드용 묶음)
 #
 # main 에 앱 코드가 바뀌어 올라오면(푸시·PR 병합) 자동으로:
 #   1) 버전 정하기 — package.json 버전이 이미 배포됐으면 patch 를 1 올려 커밋 (0.1.0 → 0.1.1)
 #   2) 태그(v0.1.1) 만들기
-#   3) 설치 파일 빌드 → 설치 파일·blockmap·latest.yml 을 한 Release 에 업로드
-#   4) 설치된 프로그램들이 새 버전을 받아 자동 업데이트
+#   3) 빌드 → magoedu-app.json 을 넣어 OhdapNote-x.y.z-win-x64.zip (+ .sha256) 으로 묶어 Release 에 업로드
+#   4) 통합 클라우드가 새 버전을 받아 두고, 오답노트를 다시 켤 때 새 버전으로 켬
 # 업데이트 내용은 지난 버전 이후의 커밋 제목으로 자동 작성됩니다.
 # (첫 배포는 RELEASE_NOTES.md, 수동 실행 때는 입력한 내용)
 #
@@ -135,39 +135,30 @@ jobs:
           node -e "const v=require('./package.json').version; const n=(process.env.NOTES||'').replace(/-----BEGIN PGP SIGNATURE-----[\\s\\S]*$/, '').trim(); require('fs').writeFileSync('release-notes.md', n || ('오답노트 ' + v + ' 업데이트'))"
           cat release-notes.md
 
-      # electron-builder 가 직접 올리게 하면(--publish always) 설치 파일과 blockmap 을 동시에 올리다가
-      # 같은 태그에 릴리스를 두 개 만들고 파일이 나뉘어 latest.yml 을 못 찾는 문제가 있어서,
-      # 빌드만 하고 세 파일을 한 번에 하나의 릴리스로 올립니다.
-      - name: 설치 파일 빌드
+      # 통합 클라우드가 받는 묶음: 빌드한 폴더 + magoedu-app.json 을 zip 하나로 (MagoEdu docs/INTEGRATION.md)
+      - name: 빌드 + zip 묶기
         shell: bash
         run: |
-          npx electron-builder --win --x64 --publish never -c.releaseInfo.releaseNotesFile=release-notes.md
-          test -f dist/win-unpacked/resources/models/pix2text-mfr-1.5/encoder_model.onnx || { echo "::error::설치 파일에 수식 인식 모델이 없습니다"; exit 1; }
+          npx electron-builder --win dir --x64 --publish never
+          test -f dist/win-unpacked/resources/models/pix2text-mfr-1.5/encoder_model.onnx || { echo "::error::묶음에 수식 인식 모델이 없습니다"; exit 1; }
+          node scripts/write-manifest.mjs
+          v="$(node -p "require('./package.json').version")"
+          (cd dist/win-unpacked && 7z a -tzip -mx=5 "../OhdapNote-$v-win-x64.zip" . > /dev/null)
+          (cd dist && sha256sum "OhdapNote-$v-win-x64.zip" > "OhdapNote-$v-win-x64.zip.sha256" && cat "OhdapNote-$v-win-x64.zip.sha256")
 
-      - name: GitHub Release 올리기 (설치 파일 + blockmap + latest.yml)
+      - name: GitHub Release 올리기 (zip + sha256)
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           v="$(node -p "require('./package.json').version")"
-          files=("dist/OhdapNote-Setup-$v.exe" "dist/OhdapNote-Setup-$v.exe.blockmap" "dist/latest.yml")
+          files=("dist/OhdapNote-$v-win-x64.zip" "dist/OhdapNote-$v-win-x64.zip.sha256")
           for f in "${files[@]}"; do
             [ -f "$f" ] || { echo "::error::$f 이(가) 없습니다"; ls dist; exit 1; }
           done
-          grep -q "OhdapNote-Setup-$v.exe" dist/latest.yml || { echo "::error::latest.yml 내용이 이상합니다"; cat dist/latest.yml; exit 1; }
           if gh release view "v$v" > /dev/null 2>&1; then
             gh release upload "v$v" "${files[@]}" --clobber
           else
             gh release create "v$v" "${files[@]}" --title "$v" --notes-file release-notes.md --verify-tag
           fi
-          # 설치된 프로그램이 받아 갈 주소에 latest.yml 이 실제로 있는지 확인
-          gh release view "v$v" --json assets --jq '.assets[].name' | tee assets.txt
-          grep -qx latest.yml assets.txt || { echo "::error::릴리스에 latest.yml 이 없습니다"; exit 1; }
-
-      - name: 같은 태그에 겹쳐 만들어진 예전 릴리스 정리
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/release-dedupe.sh
