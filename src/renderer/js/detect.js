@@ -408,7 +408,8 @@ export function extractCandidates(tokens, layout, opts = {}) {
     if (layout?.hasHeader && cy < bodyTop) continue;
     if (layout?.hasFooter && cy > bodyBottom) continue;
     if (hasLeftNeighbor(w)) continue;
-    candidates.push(make(parsed, prefix, w, numWord));
+    // 바로 뒤가 동그라미 답(①~⑤)이면 정답표 칸일 수 있음 (dropAnswerRows)
+    candidates.push({ ...make(parsed, prefix, w, numWord), answerAfter: /^[①-⑤]/.test(str0(nextWord(numWord) || { str: '' })) });
   }
   candidates.sort(byReadingOrder);
   const { kept, boxes } = dropAnswerRows(candidates);
@@ -480,8 +481,9 @@ function dropAnswerRows(cands) {
     const continued = row.some((c) => drop.has(c)); // 앞 줄에서 이어진 줄 (상자는 이미 기록함)
     let run = longestRun(row, 0.09);
     if (run.length < 4) run = longestRun(row, 0.075);
-    // 같은 단 한 줄에 번호가 셋 이상 커지며 나란하면(답이 앞 번호에 붙어 몇 개는 후보에서 빠진 "1 ① 2 … 4 …") 정답표
-    const rising = row.length >= 3 && row.every((c, k) => !k || (c.col === row[0].col && c.num > row[k - 1].num && c.x0 - row[k - 1].x0 <= 0.16));
+    // 같은 단 한 줄에 번호가 셋 이상 커지며 나란하고 바로 뒤에 동그라미 답이 붙은 번호가 있으면
+    // (답이 앞 번호에 붙어 몇 개는 후보에서 빠진 "1 ① 2 5/2π-1 3 ① 4 …") 정답표. 문제 속 표("n 1 2 3 4")는 아님
+    const rising = row.length >= 3 && row.some((c) => c.answerAfter) && row.every((c, k) => !k || (c.col === row[0].col && c.num > row[k - 1].num && c.x0 - row[k - 1].x0 <= 0.16));
     if (run.length < 3 && !rising) return;
     if (run.length < 3) run = row;
     const group = [...row];
