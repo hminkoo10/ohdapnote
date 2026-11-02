@@ -1,9 +1,10 @@
 // 학생 오답노트 화면: 책 고르기 → 틀린 번호 고르기 → 시험지 양식 PDF 내보내기
 
 import { h, clear, toast, modal, confirmDialog, icon, animateOut, countUp } from './ui.js';
-import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS } from './exporter.js';
+import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS, CONVERT_MODES } from './exporter.js';
 import { buildHwpx, renderStack, cropImage, blockSegs } from './hwpx.js';
-import { geminiTranscribe, geminiTranscribeBatch, canvasToBase64Jpeg } from './gemini.js';
+import { geminiTranscribeBatch, canvasToBase64Jpeg } from './gemini.js';
+import { scanTranscribe } from './scanocr.js';
 import { transcribeParts } from './pdfmath.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiOptions, aiLabel, aiModelText, jobDialog, findJob, holdSource } from './shared.js';
@@ -454,7 +455,7 @@ function exportPanel() {
   const seg = (name, current, options, onChange) =>
     h(
       'div.seg',
-      options.map(([value, label]) => h('label', h('input', { type: 'radio', name, value, checked: String(current) === String(value), onchange: () => onChange(value) }), h('span', label))),
+      options.map(([value, label, tip]) => h('label', { title: tip }, h('input', { type: 'radio', name, value, checked: String(current) === String(value), onchange: () => onChange(value) }), h('span', label))),
     );
   const info = examInfo();
   const field = (key, label, ic, placeholder) =>
@@ -516,6 +517,16 @@ function exportPanel() {
           renderFormatHint();
         }),
       ),
+      // 한글(HWPX)일 때만: 스캔본을 글자·수식으로 옮기는 방법
+      h(
+        'div.opt-row.convert-row',
+        { hidden: o.format !== 'hwpx' },
+        h('span.opt-label', '스캔본'),
+        seg('convert', CONVERT_MODES[o.convert] ? o.convert : 'mix', Object.entries(CONVERT_MODES).map(([k, v]) => [k, v.label, v.hint]), (v) => {
+          set('convert', v);
+          renderFormatHint();
+        }),
+      ),
       h('div.opt-row', h('span.opt-label', '배치'), seg('cols', o.columns, [[1, '1단'], [2, '2단']], (v) => set('columns', +v))),
       h('div.opt-row', h('span.opt-label', '풀이 여백'), seg('space', o.space, Object.entries(SPACE_OPTIONS).map(([k, v]) => [k, v.short]), (v) => set('space', v))),
       h(
@@ -540,21 +551,57 @@ function exportPanel() {
 function formatHint() {
   const el = h('p.small.muted.export-hint');
   setFormatHint(el);
+  refreshOcrInstalled();
   return el;
 }
 
-function setFormatHint(el) {
-  el.hidden = ns.note?.exportOptions.format !== 'hwpx';
-  el.textContent = geminiReady()
-    ? `문제·해설을 글자와 수식으로 옮겨 한글 수식 편집기로 고칠 수 있어요 (디지털 PDF 는 PDF 글자 그대로, 나머지는 ${aiLabel()} 사용)`
-    : aiOff()
-      ? '디지털 PDF(EBS 교재 등)는 글자와 수식으로 옮기고, 스캔본은 그림으로 넣어요 (설정에서 AI 꺼짐)'
-      : '디지털 PDF(EBS 교재 등)는 글자와 수식으로 옮겨요. 스캔본은 AI 를 설정하지 않으면 그림으로 들어가요 (설정에서 AI 키 입력)';
+/** 수식 인식 모델을 받아 두었는지 (안내 문구용 · 모르면 null) — 설정에서 받으면 다시 확인 */
+let ocrInstalled = null;
+document.addEventListener('mathocr:changed', () => renderFormatHint());
+function refreshOcrInstalled() {
+  Promise.resolve(api.mathocrStatus?.())
+    .then((s) => {
+      if (ocrInstalled === !!s?.installed) return;
+      ocrInstalled = !!s?.installed;
+      renderFormatHint();
+    })
+    .catch(() => {});
 }
 
+function setFormatHint(el) {
+  const o = ns.note?.exportOptions;
+  el.hidden = o?.format !== 'hwpx';
+  const mode = CONVERT_MODES[o?.convert] ? o.convert : 'mix';
+  const ai = geminiReady();
+  const noAi = aiOff() ? '설정에서 AI 가 꺼져 있어' : 'AI 를 설정하지 않아';
+  const noModel = ocrInstalled === false;
+  const now =
+    mode === 'ai'
+      ? ai
+        ? ` (${aiLabel()})`
+        : ` — 지금은 ${noAi} 그림으로 들어가요`
+      : mode === 'ocr'
+        ? noModel
+          ? '. 지금은 모델이 없어 그림으로 들어가요 (설정에서 받기)'
+          : ''
+        : noModel && !ai
+          ? ` — 지금은 수식 인식 모델이 없고 ${noAi} 그림으로 들어가요`
+          : noModel
+            ? ` — 수식 인식 모델이 없어 지금은 모두 AI(${aiLabel()})로`
+            : !ai
+              ? ` — ${noAi} 지금은 이 컴퓨터에서만`
+              : '';
+  el.textContent = `디지털 PDF(EBS 교재 등)는 PDF 글자 그대로 옮겨요. 스캔본은 ${CONVERT_MODES[mode].hint}${now}.`;
+}
+
+/** 내보내기 안내 다시 쓰기 (설정에서 AI·수식 인식 모델이 바뀌었을 때도) */
 export function renderFormatHint() {
   const el = document.querySelector('.export-hint');
-  if (el) setFormatHint(el);
+  if (!el) return;
+  setFormatHint(el);
+  const row = document.querySelector('.convert-row');
+  if (row) row.hidden = ns.note?.exportOptions.format !== 'hwpx';
+  refreshOcrInstalled();
 }
 
 /** 시험지 머리 미리보기 (작은 종이 모양) */
@@ -756,9 +803,9 @@ function exportSig(mode, blocks, opts, info) {
 }
 
 // ===========================================================================
-// 한글 문서(HWPX): 문항을 글자·수식으로 옮겨 넣음 — 디지털 PDF 는 PDF 글자로, 나머지는 AI 로 (못 옮긴 문항은 그림으로)
+// 한글 문서(HWPX): 문항을 글자·수식으로 옮겨 넣음 — 디지털 PDF 는 PDF 글자로, 스캔본은 OCR·AI 로 (못 옮긴 문항은 그림으로)
 // ===========================================================================
-const TRANSCRIBE_WIDTH = 1500; // AI 에 보내는 그림 폭(px)
+const TRANSCRIBE_WIDTH = 1500; // AI·OCR 에 넘기는 그림 폭(px)
 const MAX_TRANSCRIPTS = 3000; // 책 하나에 저장해 두는 개수
 const transcripts = new Map(); // 책 id → {items: {열쇠: {blocks, model, at}}, dirty}  (책 폴더의 transcripts.json)
 
@@ -825,8 +872,12 @@ async function pdfTranscribe(segs) {
 }
 
 /**
- * 0) 디지털 PDF 문항은 PDF 글자로 바로 옮김 (AI 를 쓰지 않음)
- * 1) 나머지 중 새로 옮길 문항을 먼저 AI 로 옮겨 저장: 문항 여러 개를 한 요청에 묶고(설정 aiBatch), 요청 여러 개를 동시에(aiConcurrency)
+ * 0) 디지털 PDF 문항은 PDF 글자로 바로 옮김 (어느 방식이든)
+ * 1) 스캔본 문항은 내보내기 설정 convert 에 따라
+ *    - 'ai'  : AI 로 (문항 여러 개를 한 요청에 묶고(설정 aiBatch), 요청 여러 개를 동시에(aiConcurrency))
+ *    - 'ocr' : 이 컴퓨터의 OCR + 수식 인식으로만 (AI 는 부르지 않음)
+ *    - 'mix' : 먼저 OCR 로, 결과가 미덥지 않은 문항만 AI 로 (AI 가 실패하면 OCR 결과를 씀)
+ *    옮긴 결과는 책마다 저장 (AI 는 transcriptKey, OCR 은 transcriptKey + '|local')
  * 2) buildHwpx 는 문항마다 transcribe 를 부르는데, 미리 옮겨 둔 결과를 그대로 씀
  */
 async function exportHwpx(blocks, entries, opts, info, job) {
@@ -839,20 +890,87 @@ async function exportHwpx(blocks, entries, opts, info, job) {
     const list = await pdfTranscribe(blockSegs(b));
     if (list) fromPdf.set(b, list);
   }
-  const useAi = geminiReady() && work.some((b) => !fromPdf.has(b));
+  const scanned = work.filter((b) => !fromPdf.has(b));
+  const mode = CONVERT_MODES[opts.convert] ? opts.convert : 'mix';
+  let ocrReady = false;
+  if (scanned.length && mode !== 'ai') {
+    try {
+      ocrReady = !!(await api.mathocrStatus())?.installed;
+    } catch (err) {
+      console.warn('수식 인식 모델 상태를 알지 못함', err);
+    }
+  }
+  const useAi = scanned.length > 0 && mode !== 'ocr' && geminiReady();
+  const useOcr = scanned.length > 0 && mode !== 'ai' && ocrReady;
+  if (scanned.length && !useAi && !useOcr) noConvertToast(mode, scanned.length);
   const { batch: batchSize, ...ai } = aiOptions();
   const abort = new AbortController();
   const storeOf = (block) => transcripts.get(bookOf.get(block.src));
-  const failed = new Set(); // 이번에 미리 옮기지 못한 문항 → 그림으로 (다시 묻지 않음)
-  let quota = false; // 한도가 차면 나머지는 묻지 않고 그림으로
+  const aiKey = (b) => transcriptKey(b);
+  const ocrKey = (b) => `${transcriptKey(b)}|local`;
+  const aiResult = (b) => (useAi ? storeOf(b)?.items[aiKey(b)] : null);
+  const ocrResult = (b) => (useOcr ? storeOf(b)?.items[ocrKey(b)] : null);
+  const has = (r) => !!r?.blocks?.length;
+  /** 쓸 결과: AI 결과가 있으면 그것, 없으면 OCR 결과 */
+  const resultOf = (b) => (has(aiResult(b)) ? aiResult(b) : has(ocrResult(b)) ? ocrResult(b) : null);
+  /** AI 에게 보낼 문항인지 ('섞어서'는 OCR 결과가 없거나 미덥지 않을 때만) */
+  const needsAi = (b) => useAi && !has(aiResult(b)) && !(has(ocrResult(b)) && ocrResult(b).reliable);
+  let quota = false; // 한도가 차면 나머지는 묻지 않음 (OCR 결과가 있으면 그것, 없으면 그림)
   let ui = null;
   const releases = [];
+  const settled = new Set();
+  const settle = (b, stateName, msg, path) => {
+    ui.row(b).set(stateName, msg, path);
+    settled.add(b);
+    ui.progress(settled.size, work.length);
+  };
+  /** AI 가 못 옮긴 문항: OCR 결과가 있으면 그것으로, 없으면 그림으로 */
+  const aiFailed = (b, why) => {
+    if (has(ocrResult(b))) settle(b, 'ok', `${why} → OCR 결과로`, 'OCR');
+    else settle(b, why === '읽은 내용이 없음' || why === '한도 초과' ? 'empty' : 'err', `${why} → 그림으로`, 'AI');
+  };
 
-  /** 새로 옮길 문항을 묶음으로 동시에 옮겨 저장 (같은 열쇠의 문항은 한 번만) */
-  const prefetch = async (pending) => {
+  /** 이 컴퓨터에서 옮기기 (문항 둘을 겹쳐서: 하나가 수식을 인식하는 동안 다음 문항의 글자를 읽음) */
+  const runOcr = async (pending) => {
+    let next = 0;
+    const worker = async () => {
+      while (next < pending.length) {
+        if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
+        const b = pending[next++];
+        const row = ui.row(b);
+        row.set('run', '글자 읽는 중…', 'OCR');
+        try {
+          const canvas = await renderStack(blockSegs(b), TRANSCRIBE_WIDTH);
+          const r = await scanTranscribe(canvas, { number: b.item.number, signal: abort.signal, api, onStatus: (msg) => row.set('run', msg, 'OCR') });
+          if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
+          if (!r.blocks.length) {
+            if (useAi) row.set('wait', '읽은 내용이 없음 → AI 에게', 'OCR');
+            else settle(b, 'empty', '읽은 내용이 없음 → 그림으로', 'OCR');
+            continue;
+          }
+          const store = storeOf(b);
+          store.items[ocrKey(b)] = { blocks: r.blocks, model: 'ocr', reliable: r.reliable, reasons: r.reasons, at: Date.now() };
+          store.dirty = true;
+          const what = `글자·수식으로 옮김${r.formulas ? ` (수식 ${r.formulas}개)` : ''}`;
+          if (r.reliable) settle(b, 'ok', what, 'OCR');
+          else if (useAi) row.set('wait', `미덥지 않음 (${r.reasons[0]}) → AI 에게`, 'OCR');
+          else settle(b, 'ok', `${what} · 확인 필요 (${r.reasons[0]})`, 'OCR');
+        } catch (err) {
+          if (err?.name === 'AbortError' || abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
+          console.warn('OCR 로 옮기지 못함', err);
+          if (useAi) row.set('wait', `${err.message} → AI 에게`, 'OCR');
+          else settle(b, 'err', `${err.message} → 그림으로`, 'OCR');
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(2, pending.length) }, worker));
+  };
+
+  /** AI 로 옮기기: 묶음으로 동시에 (같은 열쇠의 문항은 한 번만) */
+  const runAi = async (pending) => {
     const groups = new Map(); // 열쇠 → 블록들
     for (const b of pending) {
-      const key = transcriptKey(b);
+      const key = aiKey(b);
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(b);
     }
@@ -862,28 +980,16 @@ async function exportHwpx(blocks, entries, opts, info, job) {
       const keys = [...groups.keys()].filter((k) => groups.get(k)[0].role === role);
       for (let i = 0; i < keys.length; i += batchSize) batches.push({ role, keys: keys.slice(i, i + batchSize) });
     }
-    let done = work.length - pending.length;
-    ui.progress(done, work.length);
-    const settle = (key, stateName, msg) => {
-      for (const b of groups.get(key)) ui.row(b).set(stateName, msg);
-      done += groups.get(key).length;
-      ui.progress(done, work.length);
-    };
-    const giveUp = (key, stateName, msg) => {
-      for (const b of groups.get(key)) failed.add(b);
-      settle(key, stateName, msg);
-    };
-
     let next = 0;
     const worker = async () => {
       while (next < batches.length) {
         if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
         const { role, keys } = batches[next++];
         if (quota) {
-          for (const k of keys) giveUp(k, 'empty', '한도 초과 → 그림으로');
+          for (const k of keys) for (const b of groups.get(k)) aiFailed(b, '한도 초과');
           continue;
         }
-        for (const k of keys) for (const b of groups.get(k)) ui.row(b).set('run', '옮기는 중…');
+        for (const k of keys) for (const b of groups.get(k)) ui.row(b).set('run', '옮기는 중…', 'AI');
         let results;
         try {
           // buildHwpx 가 transcribe 에 넘기는 것과 같은 영역(blockSegs)·같은 폭의 그림
@@ -902,14 +1008,14 @@ async function exportHwpx(blocks, entries, opts, info, job) {
               quota = true;
               ui.status(r.message);
             }
-            giveUp(k, 'err', `${r.message} → 그림으로`);
+            for (const b of groups.get(k)) aiFailed(b, r.message);
           } else if (!r.length) {
-            giveUp(k, 'empty', '읽은 내용이 없음 → 그림으로');
+            for (const b of groups.get(k)) aiFailed(b, '읽은 내용이 없음');
           } else {
             const store = storeOf(groups.get(k)[0]);
             store.items[k] = { blocks: [...r], model: r.model, at: Date.now() };
             store.dirty = true;
-            settle(k, 'ok', `글자·수식으로 옮김 · ${r.model || '기본 모델'}`);
+            for (const b of groups.get(k)) settle(b, 'ok', `글자·수식으로 옮김 · ${r.model || '기본 모델'}`, 'AI');
           }
         });
       }
@@ -935,59 +1041,40 @@ async function exportHwpx(blocks, entries, opts, info, job) {
       };
     };
     if (fromPdf.has(block)) return finish(fromPdf.get(block));
-    const store = useAi && storeOf(block);
-    if (!store) return null;
-    const key = transcriptKey(block);
-    const row = ui?.row(block);
-    const cached = store.items[key];
-    if (cached?.blocks?.length) return finish(cached.blocks);
-    if (failed.has(block)) return null;
-    if (quota) {
-      row?.set('empty', '한도 초과 → 그림으로');
-      return null;
-    }
-    // 미리 옮기기에서 빠진 문항만 여기서 하나씩
-    row?.set('run', '옮기는 중…');
-    try {
-      const result = await geminiTranscribe(canvasToBase64Jpeg(await getStack(), 0.85), {
-        role: block.role,
-        ...ai,
-        signal: abort.signal,
-        onStatus: (msg) => ui?.status(msg),
-      });
-      if (!result.length) {
-        row?.set('empty', '읽은 내용이 없음 → 그림으로');
-        return null;
-      }
-      store.items[key] = { blocks: [...result], model: result.model, at: Date.now() };
-      store.dirty = true;
-      row?.set('ok', `글자·수식으로 옮김 · ${result.model || '기본 모델'}`);
-      return finish(store.items[key].blocks);
-    } catch (err) {
-      if (err?.name === 'AbortError') throw err;
-      if (/한도/.test(err.message)) {
-        quota = true;
-        ui?.status(err.message);
-      }
-      row?.set('err', `${err.message} → 그림으로`);
-      return null;
-    }
+    const r = (useAi || useOcr) && storeOf(block) ? resultOf(block) : null;
+    return r ? finish(r.blocks) : null;
   };
 
   try {
-    if (useAi) {
-      for (const bid of new Set(work.map((b) => bookOf.get(b.src)))) await loadTranscripts(bid);
-      const pending = work.filter((b) => !fromPdf.has(b) && !storeOf(b).items[transcriptKey(b)]?.blocks?.length);
-      if (pending.length) {
-        ui = transcribeDialog(work, pending.length, abort, { ...job, jobTitle: `${info.student ? `${info.student} · ` : ''}한글 문서 (문항 ${work.length}개)` });
+    if (useAi || useOcr) {
+      for (const bid of new Set(scanned.map((b) => bookOf.get(b.src)))) await loadTranscripts(bid);
+      const pendingOcr = useOcr ? scanned.filter((b) => !has(aiResult(b)) && !has(ocrResult(b))) : [];
+      const pendingAi = scanned.filter((b) => !pendingOcr.includes(b) && needsAi(b));
+      if (pendingOcr.length || pendingAi.length) {
+        ui = transcribeDialog(work, { ocr: pendingOcr.length, ai: pendingAi.length, useAi, useOcr }, abort, {
+          ...job,
+          jobTitle: `${info.student ? `${info.student} · ` : ''}한글 문서 (문항 ${work.length}개)`,
+        });
         // 뒤에서 도는 동안 다른 책을 열어도 이 원본들은 닫히지 않게
         for (const e of entries) for (const role of ['problem', 'answer']) releases.push(holdSource(e.bookObj, role));
-        for (const b of work) if (!pending.includes(b)) ui.row(b).set('ok', fromPdf.has(b) ? 'PDF 글자로 옮김' : '저장해 둔 결과');
-        await prefetch(pending);
+        for (const b of work) {
+          if (fromPdf.has(b)) settle(b, 'ok', 'PDF 글자로 옮김', 'PDF');
+          else if (!pendingOcr.includes(b) && !pendingAi.includes(b)) {
+            const r = resultOf(b);
+            if (r) settle(b, 'ok', '저장해 둔 결과', r === aiResult(b) ? 'AI' : 'OCR');
+            else settle(b, 'empty', '그림으로', '');
+          }
+        }
+        ui.progress(settled.size, work.length);
+        await runOcr(pendingOcr);
+        // OCR 결과가 미덥지 않은 문항(과 OCR 이 못 읽은 문항)만 AI 로
+        const toAi = scanned.filter((b) => !settled.has(b) && needsAi(b));
+        if (toAi.length) await runAi(toAi);
+        for (const b of scanned) if (!settled.has(b)) settle(b, 'empty', '그림으로', '');
         ui.status('한글 문서를 만드는 중…');
       }
     }
-    const bytes = await buildHwpx({ blocks, options: opts, title: info.title, info, transcribe: useAi || fromPdf.size ? transcribe : null });
+    const bytes = await buildHwpx({ blocks, options: opts, title: info.title, info, transcribe: useAi || useOcr || fromPdf.size ? transcribe : null });
     bytes.job = ui; // 옮기기 창을 띄웠으면 부른 쪽이 finish() — 앞에 보이면 창을 닫고, 뒤로 보내 두었으면 [저장하기] 알림
     return bytes;
   } catch (err) {
@@ -999,18 +1086,42 @@ async function exportHwpx(blocks, entries, opts, info, job) {
   }
 }
 
-/** 옮기는 동안 보이는 창 (문항별 상태, 진행 막대). [취소]하면 바로 요청을 끊고, [백그라운드에서 계속]이면 창만 닫고 계속 */
-function transcribeDialog(work, pendingCount, abort, { key, sig, jobTitle }) {
+/** 스캔본 문항을 글자로 옮길 수 없어 그림으로 넣을 때 알림 (설정 열기) */
+function noConvertToast(mode, n) {
+  const why =
+    mode === 'ocr'
+      ? '수식 인식 모델을 받지 않아서'
+      : mode === 'ai'
+        ? aiOff()
+          ? '설정에서 AI 가 꺼져 있어서'
+          : 'AI 를 설정하지 않아서'
+        : 'AI 도 수식 인식 모델도 쓸 수 없어서';
+  toast(`${why} 스캔본 문항 ${n}개는 그림으로 넣어요.`, { timeout: 8000, actions: [{ label: '설정 열기', onClick: () => nav.settings() }] });
+}
+
+/**
+ * 옮기는 동안 보이는 창 (문항별 상태 · 어떤 방법으로 옮겼는지(PDF/OCR/AI), 진행 막대).
+ * [취소]하면 바로 요청·인식을 끊고, [백그라운드에서 계속]이면 창만 닫고 계속
+ */
+function transcribeDialog(work, { ocr, ai: aiCount, useAi, useOcr }, abort, { key, sig, jobTitle }) {
   const rows = new Map();
   const list = h(
     'div.gem-list',
     work.map((b) => {
-      const row = h('div.gem-row', { dataset: { state: 'wait' } }, h('span.gem-dot'), h('strong', `${b.kind === 'answer' ? '해설' : '문제'} ${itemName(b.item)}`), h('span.gem-msg.muted', '기다리는 중'));
+      const row = h(
+        'div.gem-row',
+        { dataset: { state: 'wait' } },
+        h('span.gem-dot'),
+        h('strong', `${b.kind === 'answer' ? '해설' : '문제'} ${itemName(b.item)}`),
+        h('span.gem-path'),
+        h('span.gem-msg.muted', '기다리는 중'),
+      );
       rows.set(b, row);
       return row;
     }),
   );
-  const status = h('div.small.muted.gem-status', `모델: ${aiModelText()}`);
+  const how = useOcr && useAi ? `먼저 이 컴퓨터에서 OCR·수식 인식으로 옮기고, 결과가 미덥지 않은 문항만 AI(${aiLabel()})에게 보내요.` : useOcr ? '이 컴퓨터에서 OCR·수식 인식으로 옮겨요 (AI 를 쓰지 않아요). 한 문항에 몇 초~수십 초 걸려요.' : `AI(${aiLabel()})에게 보내요. 여러 문항을 한 요청에 묶어 동시에 보내요.`;
+  const status = h('div.small.muted.gem-status', useAi ? `모델: ${aiModelText()}` : '수식 인식: 이 컴퓨터 (Pix2Text)');
   const bar = h('div.progress-bar');
   const jd = jobDialog({
     key,
@@ -1021,7 +1132,7 @@ function transcribeDialog(work, pendingCount, abort, { key, sig, jobTitle }) {
     title: `문항 ${work.length}개를 글자·수식으로`,
     body: h(
       'div.gem-run',
-      h('p.small.muted', `새로 옮길 문항 ${pendingCount}개를 AI(${aiLabel()})에게 보내요. 여러 문항을 한 요청에 묶어 동시에 보내요. 옮기지 못한 문항은 그림으로 넣어요. 옮긴 결과는 저장해 두어 다음에는 다시 묻지 않아요.`),
+      h('p.small.muted', `새로 옮길 문항 ${ocr + aiCount}개 — ${how} 옮기지 못한 문항은 그림으로 넣어요. 옮긴 결과는 저장해 두어 다음에는 다시 하지 않아요.`),
       h('div.progress', bar),
       status,
       list,
@@ -1030,12 +1141,18 @@ function transcribeDialog(work, pendingCount, abort, { key, sig, jobTitle }) {
     className: 'gem-modal',
   });
   return {
+    /** path: 'PDF' | 'OCR' | 'AI' — 이 문항을 어떤 방법으로 옮겼는지 */
     row: (block) => ({
-      set(stateName, msg) {
+      set(stateName, msg, path) {
         const row = rows.get(block);
         if (!row) return;
         row.dataset.state = stateName;
         row.querySelector('.gem-msg').textContent = msg;
+        if (path != null) {
+          const tag = row.querySelector('.gem-path');
+          tag.textContent = path;
+          tag.dataset.path = path;
+        }
         if (stateName === 'run') row.scrollIntoView({ block: 'nearest' });
       },
     }),

@@ -463,10 +463,12 @@ export async function renderStack(segs, widthPx = 1500) {
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   let y = 0;
-  for (const c of parts) {
+  canvas.parts = []; // 영역마다 그림 안의 자리 (스캔본 옮기기에서 공통 지문·문항 경계로 씀)
+  parts.forEach((c, i) => {
     ctx.drawImage(c, 0, y);
+    canvas.parts.push({ y, h: c.height, stem: !!segs[i].rect.stem });
     y += c.height + gap;
-  }
+  });
   return canvas;
 }
 

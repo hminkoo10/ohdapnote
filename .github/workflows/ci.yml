@@ -16,7 +16,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # 단위 테스트는 수식 인식 모델을 쓰지 않으므로 onnxruntime-node 설치 스크립트(리눅스에서 CUDA 패키지를 받음)는 건너뜀
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
       - run: npm test
 
   # 설치 파일이 잘 만들어지는지 확인하고, 시험용 설치 파일을 Artifacts 로 올립니다(릴리스는 하지 않음).

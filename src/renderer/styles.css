@@ -2466,6 +2466,9 @@ main.sheet {
   gap: 10px 14px;
   flex-wrap: wrap;
 }
+.opt-row[hidden] {
+  display: none;
+}
 .opt-label {
   width: 60px;
   font-size: 12.5px;
@@ -3332,6 +3335,38 @@ main.sheet {
 }
 .gem-row[data-state='err'] .gem-msg {
   color: var(--danger);
+}
+/* 문항마다 어떻게 옮겼는지: PDF 글자 / 이 컴퓨터(OCR) / AI */
+.gem-path {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 750;
+  flex: 0 0 auto;
+}
+.gem-path:empty {
+  display: none;
+}
+.gem-path[data-path='OCR'] {
+  background: var(--teal-soft);
+  color: var(--teal-ink);
+}
+.gem-path[data-path='AI'] {
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+
+/* 설정: 수식 인식 모델 받기 */
+.mathocr-progress {
+  margin: 2px 0 8px;
+}
+.mathocr-progress[hidden] {
+  display: none;
 }
 
 /* ==========================================================================

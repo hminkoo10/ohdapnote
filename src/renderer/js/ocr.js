@@ -105,9 +105,10 @@ function toPgm(canvas) {
 
 /**
  * 캔버스에서 단어를 인식합니다.
- * @returns {Promise<{str:string,x0:number,y0:number,x1:number,y1:number,conf:number}[]>} 좌표는 캔버스 픽셀
+ * symbols 를 켜면 단어마다 글자 상자(symbols: [{str,x0,y0,x1,y1,conf}])도 붙임 — 한글 조사가 수식에 붙어 한 단어로 읽힐 때 글자 단위로 나누려고
+ * @returns {Promise<{str:string,x0:number,y0:number,x1:number,y1:number,conf:number,symbols?:object[]}[]>} 좌표는 캔버스 픽셀
  */
-export async function recognizeWords(canvas, { lang = 'kor+eng', psm = '11' } = {}) {
+export async function recognizeWords(canvas, { lang = 'kor+eng', psm = '11', symbols = false } = {}) {
   const image = toPgm(canvas);
   const { data } = await withWorker(lang, { tessedit_pageseg_mode: psm, user_defined_dpi: '220', tessedit_char_whitelist: '' }, (w) =>
     w.recognize(image, {}, { text: false, blocks: true }),
@@ -119,7 +120,13 @@ export async function recognizeWords(canvas, { lang = 'kor+eng', psm = '11' } = 
         for (const w of line.words || []) {
           const str = (w.text || '').trim();
           if (!str) continue;
-          words.push({ str, x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1, conf: w.confidence ?? 0 });
+          const word = { str, x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1, conf: w.confidence ?? 0 };
+          if (symbols) {
+            word.symbols = (w.symbols || [])
+              .filter((s) => (s.text || '').trim())
+              .map((s) => ({ str: s.text.trim(), x0: s.bbox.x0, y0: s.bbox.y0, x1: s.bbox.x1, y1: s.bbox.y1, conf: s.confidence ?? 0 }));
+          }
+          words.push(word);
         }
       }
     }

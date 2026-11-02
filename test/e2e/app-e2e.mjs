@@ -51,7 +51,8 @@ let app = await launch();
 let win = await app.firstWindow();
 const watch = (w) => {
   w.on('console', (m) => {
-    if (m.type() === 'error' && !/diacritics/.test(m.text())) {
+    // Tesseract 가 아주 작은 글줄에서 내는 알림 (오류 아님: 그 줄만 건너뜀)
+    if (m.type() === 'error' && !/diacritics|Image too small to scale|Line cannot be recognized/.test(m.text())) {
       errors.push(m.text());
       console.log('[renderer error]', m.text());
     }
@@ -269,7 +270,7 @@ try {
   await win.click('.settings .set-adv summary');
   await win.fill('.settings .set-adv input[type="number"] >> nth=1', '2');
   await win.click('.modal-footer .btn-primary');
-  await win.waitForSelector('.export-hint:has-text("Gemini 사용")', { timeout: 10000 });
+  await win.waitForSelector('.export-hint:has-text("모두 AI(Gemini)로")', { timeout: 10000 });
 
   // 뒤에서 옮기는 중에 오답노트를 고치고 다시 내보내면 앞 작업을 멈추고 고친 내용으로 새로 (예전에는 앞 창을 다시 보여 줘서 고친 게 빠졌음)
   step('한글: 뒤에서 옮기는 중에 문항 하나를 빼고 다시 → 고친 내용으로 새로 / [취소] 뒤 다시 → 새로');
@@ -323,12 +324,12 @@ try {
     await win.click('.modal-footer .btn-primary');
   };
   await setAi(false);
-  await win.waitForSelector('.export-hint:has-text("AI 꺼짐")', { timeout: 10000 });
+  await win.waitForSelector('.export-hint:has-text("AI 가 꺼져")', { timeout: 10000 });
   const off = await exportHwpx('app-export-ai-off.hwpx');
   if (count(off, 'hp:equation') !== 0 || count(off, 'hp:pic') < 4) throw new Error('AI 를 껐는데 AI 결과가 들어갔습니다');
   if ((await app.evaluate(() => globalThis.gemCalls.length)) !== calls2) throw new Error('AI 를 껐는데 AI 를 불렀습니다');
   await setAi(true);
-  await win.waitForSelector('.export-hint:has-text("Gemini 사용")', { timeout: 10000 });
+  await win.waitForSelector('.export-hint:has-text("모두 AI(Gemini)로")', { timeout: 10000 });
 
   step('다른 AI: 세부 설정에서 Claude 로 바꿔 해설지 한글 내보내기 / OpenAI 호환 (내 컴퓨터의 가짜 서버로, 메인 프로세스·SDK 그대로)');
   const fakeSeen = [];
@@ -368,7 +369,7 @@ try {
     await win.fill('.settings .set-adv .ai-only:not([hidden]) input', fakeUrl);
     await shot('9-settings-claude');
     await win.click('.modal-footer .btn-primary');
-    await win.waitForSelector('.export-hint:has-text("Claude 사용")', { timeout: 10000 });
+    await win.waitForSelector('.export-hint:has-text("모두 AI(Claude)로")', { timeout: 10000 });
     const out = join(OUT, 'app-export-claude.hwpx');
     rmSync(out, { force: true });
     await stubSave(out);
@@ -398,9 +399,12 @@ try {
   await win.click('.seg:has(input[name="format"]) label:has-text("PDF")');
   await win.waitForSelector('.export-hint[hidden]', { state: 'attached' });
 
-  step('설정 창 (학원·선생님 기본값, AI 1·2순위)');
+  step('설정 창 (학원·선생님 기본값, AI 1·2순위, 수식 인식 모델은 받기 전)');
   await win.click('#settings-btn');
   await win.waitForSelector('.modal .settings');
+  // 스캔본 수식 인식: 켜고 끄는 스위치 없이 모델 상태와 [모델 받기]만
+  await win.waitForSelector('.set-card:has-text("스캔본 수식 인식 (AI 없이)"):has-text("아직 받지 않았어요") button:has-text("모델 받기")', { timeout: 5000 });
+  if (await win.$('.set-card:has-text("스캔본 수식 인식") .switch')) throw new Error('수식 인식 카드에 스위치가 있습니다');
   await win.waitForTimeout(500);
   await shot('9-settings');
   await win.fill('.settings .set-card >> nth=0 >> input >> nth=0', '기본학원');
@@ -427,6 +431,108 @@ try {
   if (ocrChips.length < 22) throw new Error(`OCR 인식 수가 너무 적습니다: ${ocrChips.length}`);
   await win.waitForTimeout(400);
   await shot('10-photos');
+
+  step('스캔본 한글(HWPX): 가짜 수식 인식 — OCR만: AI 없이 수식으로 / 섞어서: 미덥지 않은 문항만 AI 로');
+  // 메인 프로세스의 수식 인식·AI 처리를 바꿔 끼움: 모델은 받아 둔 것으로, 수식은 늘 같은 LaTeX.
+  // mathLow 가 남아 있으면 그 요청(문항 하나)만 확신도를 낮게
+  await app.evaluate(({ ipcMain }) => {
+    globalThis.mathCalls = [];
+    globalThis.mathLow = 0;
+    globalThis.__realMathocr ??= { status: ipcMain._invokeHandlers?.get('mathocr:status'), recognize: ipcMain._invokeHandlers?.get('mathocr:recognize') }; // 진짜 모델 단계에서 되돌림
+    ipcMain.removeHandler('mathocr:status');
+    ipcMain.handle('mathocr:status', () => ({ installed: true, dir: '', bytes: 1 }));
+    ipcMain.removeHandler('mathocr:recognize');
+    ipcMain.handle('mathocr:recognize', async (_e, { images }) => {
+      const low = globalThis.mathLow > 0;
+      if (low) globalThis.mathLow--;
+      globalThis.mathCalls.push({ images: images.length, low });
+      return { ok: true, results: images.map(() => ({ latex: 'x^{2}+1', ms: 1, conf: low ? { mean: 0.5, min: 0.1, n: 6 } : { mean: 0.99, min: 0.95, n: 6 } })) };
+    });
+    globalThis.aiCalls = [];
+    ipcMain.removeHandler('ai:generate');
+    ipcMain.handle('ai:generate', async (_e, { provider, body }) => {
+      const images = provider === 'gemini' ? body.contents[0].parts.filter((p) => p.inlineData).length : body.messages[0].content.filter((c) => c.type === 'image' || c.type === 'image_url').length;
+      globalThis.aiCalls.push({ provider, images });
+      const blocks = [{ type: 'para', text: 'AI 로 옮긴 문항 $y=2x$' }];
+      const text = JSON.stringify(images > 1 ? { items: Array.from({ length: images }, (_, i) => ({ index: i + 1, blocks })) } : { blocks });
+      const json =
+        provider === 'gemini'
+          ? { candidates: [{ content: { parts: [{ text }] } }] }
+          : provider === 'anthropic'
+            ? { id: 'msg_e2e', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }
+            : { id: 'cc', object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }] };
+      return { ok: true, status: 200, json };
+    });
+  });
+  await win.click('#back-btn');
+  await win.waitForSelector('.seg-tab[data-tab="notes"]');
+  await win.click('.seg-tab[data-tab="notes"]');
+  await win.click('.card-new:has-text("새 오답노트")');
+  await win.waitForSelector('.modal .book-opt');
+  await win.fill('.modal .field-v >> nth=0 >> input', '이바다');
+  await win.fill('.modal .field-v >> nth=1 >> input', '사진 문제집 오답');
+  await win.locator('.modal .book-opt', { hasText: '사진 문제집' }).click();
+  await win.click('.modal .btn-primary');
+  await win.waitForSelector('.qtable .chip', { timeout: 30000 });
+  for (const k of [0, 1, 2]) await chip(k).click();
+  await win.click('.seg:has(input[name="format"]) label:has-text("한글")');
+  await win.waitForSelector('.convert-row:not([hidden]) input[value="mix"]:checked', { state: 'attached' });
+  await win.click('.seg:has(input[name="convert"]) label:has-text("OCR만")');
+  await win.waitForSelector('.export-hint:has-text("AI 를 쓰지 않고")', { timeout: 10000 });
+  const scanOcr = await exportHwpx('app-export-scan-ocr.hwpx');
+  const mathCalls1 = await app.evaluate(() => globalThis.mathCalls);
+  console.log(`    OCR만: 수식 인식 요청 ${mathCalls1.length}개 (수식 ${mathCalls1.map((c) => c.images).join('+')}개), AI 요청 ${(await app.evaluate(() => globalThis.aiCalls)).length}개`);
+  if (mathCalls1.length !== 3) throw new Error(`수식 인식 요청 수 (문항마다 한 번): ${mathCalls1.length}`);
+  if (count(scanOcr, 'hp:equation') < mathCalls1.reduce((s, c) => s + c.images, 0)) throw new Error('OCR만: 인식한 수식이 한글 수식으로 들어가지 않았습니다');
+  if ((await app.evaluate(() => globalThis.aiCalls)).length) throw new Error('OCR만인데 AI 를 불렀습니다');
+  const localSaved = readdirSync(join(userData, 'data', 'books'))
+    .map((d) => join(userData, 'data', 'books', d, 'transcripts.json'))
+    .filter((f) => existsSync(f))
+    .flatMap((f) => Object.entries(JSON.parse(readFileSync(f, 'utf8')).items || {}))
+    .filter(([k, v]) => k.endsWith('|local') && v.model === 'ocr');
+  if (localSaved.length !== 3) throw new Error(`OCR 결과가 책에 저장되지 않았습니다: ${localSaved.length}`);
+
+  // 섞어서: 처음 보는 문항 셋, 그중 하나만 확신도가 낮게 → 그 문항만 AI 로 (AI 결과로 바뀜)
+  for (const k of [0, 1, 2, 4, 5, 6]) await chip(k).click();
+  await win.click('.seg:has(input[name="convert"]) label:has-text("섞어서")');
+  await app.evaluate(() => {
+    globalThis.mathCalls = [];
+    globalThis.mathLow = 1;
+  });
+  const scanMix = await exportHwpx('app-export-scan-mix.hwpx');
+  const mathCalls2 = await app.evaluate(() => globalThis.mathCalls);
+  const aiCalls = await app.evaluate(() => globalThis.aiCalls);
+  console.log(`    섞어서: 수식 인식 요청 ${mathCalls2.length}개 (확신도 낮게 ${mathCalls2.filter((c) => c.low).length}개), AI 요청 ${aiCalls.length}개 (그림 ${aiCalls.map((c) => c.images).join('+')}장)`);
+  if (mathCalls2.length !== 3 || mathCalls2.filter((c) => c.low).length !== 1) throw new Error(`섞어서: 수식 인식 요청 ${JSON.stringify(mathCalls2)}`);
+  if (aiCalls.reduce((s, c) => s + c.images, 0) !== 1) throw new Error(`섞어서: 미덥지 않은 문항 하나만 AI 로 가야 합니다: ${JSON.stringify(aiCalls)}`);
+  if ((scanMix.match(/AI 로 옮긴 문항/g) || []).length !== 1) throw new Error('섞어서: AI 결과가 그 문항에만 들어가지 않았습니다');
+  if (count(scanMix, 'hp:equation') < 1 + mathCalls2.filter((c) => !c.low).reduce((s, c) => s + c.images, 0)) throw new Error('섞어서: OCR 결과 수식이 빠졌습니다');
+  await shot('10b-scan-mix');
+
+  // 진짜 수식 인식 모델 (내 컴퓨터에 받아 둔 모델이 있을 때만: OHDAP_MFR_DIR=모델 폴더). 모델 파일은 저장소·CI 에 없음
+  if (process.env.OHDAP_MFR_DIR) {
+    step('스캔본 한글(HWPX): 진짜 수식 인식 모델로 OCR만 (utilityProcess · IPC 그대로)');
+    const modelDir = join(userData, 'models', 'pix2text-mfr-1.5');
+    mkdirSync(modelDir, { recursive: true });
+    for (const f of ['encoder_model.onnx', 'decoder_model.onnx', 'tokenizer.json']) copyFileSync(join(process.env.OHDAP_MFR_DIR, f), join(modelDir, f));
+    await app.evaluate(({ ipcMain }) => {
+      const real = globalThis.__realMathocr;
+      if (!real?.status || !real?.recognize) throw new Error('원래 mathocr 처리기를 찾지 못함');
+      for (const [ch, fn] of [['mathocr:status', real.status], ['mathocr:recognize', real.recognize]]) {
+        ipcMain.removeHandler(ch);
+        ipcMain.handle(ch, fn);
+      }
+      globalThis.aiCalls = [];
+    });
+    for (const k of [4, 5, 6, 7, 8, 9]) await chip(k).click(); // 처음 보는 문항 7·8·9
+    await win.click('.seg:has(input[name="convert"]) label:has-text("OCR만")');
+    const t0 = Date.now();
+    const real = await exportHwpx('app-export-scan-real.hwpx');
+    const eqs = [...real.matchAll(/<hp:script>([^<]*)<\/hp:script>/g)].map((m) => m[1]);
+    console.log(`    진짜 모델: ${Math.round((Date.now() - t0) / 1000)}초, 수식 ${eqs.length}개: ${eqs.slice(0, 8).join(' | ')}`);
+    if (!eqs.length) throw new Error('진짜 모델: 한글 수식이 하나도 없습니다');
+    if ((await app.evaluate(() => globalThis.aiCalls)).length) throw new Error('진짜 모델 OCR만인데 AI 를 불렀습니다');
+  }
 
   step('재실행 후 저장 내용 확인');
   await win.click('#back-btn');
