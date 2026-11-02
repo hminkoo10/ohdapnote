@@ -657,10 +657,8 @@ select.input {
   width: 30px;
   height: 30px;
   border-radius: 9px;
-  background:
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><path d='m6.5 12.5 3.5 3.5 7.5-8'/></svg>") center/18px no-repeat,
-    var(--grad-primary);
-  box-shadow: var(--sh-primary);
+  background: #fff url("logo.png") center/cover no-repeat;
+  box-shadow: var(--sh-sm), 0 0 0 1px rgba(25, 31, 40, 0.06);
 }
 .brand-name {
   font-size: 17px;

@@ -237,7 +237,7 @@ src/renderer/js/
   hwpeq.js                LaTeX → 한글 수식 스크립트 ({a} over {b}, sqrt, root … of, LEFT ( RIGHT ) …) + 대략적인 크기
   icons.js                Lucide 아이콘 (scripts/build-icons.mjs 로 생성)
 src/renderer/styles.css   화면 디자인 (차분한 주황 포인트, 전환 애니메이션)
-build/icon.svg            앱 아이콘 원본 (scripts/build-app-icon.mjs 로 png·ico 생성)
+build/icon-source.png     앱 아이콘 원본 손글씨 (scripts/build-app-icon.py 로 png·ico·화면 로고 생성)
 scripts/copy-vendor.mjs   pdf.js·Tesseract·pdf-lib·Pretendard 글꼴을 src/renderer/vendor 로 복사 (npm install 때 자동)
 test/                     단위·인식·E2E 테스트
 ```

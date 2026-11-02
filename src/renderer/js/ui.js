@@ -194,11 +194,13 @@ export function icon(name) {
   return svg;
 }
 
-/** 앱 로고 (build/icon.svg 와 같은 모양) */
+/** 앱 로고 (손글씨 ‘오답 노트’, scripts/build-app-icon.py 가 만든 logo.png) */
 export function logo(cls = 'brand-logo') {
-  const wrap = document.createElement('span');
-  wrap.innerHTML = `<svg class="${cls}" viewBox="0 0 1024 1024" aria-hidden="true"><defs><linearGradient id="lg-bg" x1=".1" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#FFB443"/><stop offset=".5" stop-color="#FF7A1A"/><stop offset="1" stop-color="#EE4B1C"/></linearGradient><linearGradient id="lg-ink" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF8A2A"/><stop offset="1" stop-color="#E8431A"/></linearGradient></defs><path d="M512 56c214 0 300 0 378 78s78 164 78 378 0 300-78 378-164 78-378 78-300 0-378-78S56 726 56 512s0-300 78-378S298 56 512 56z" fill="url(#lg-bg)"/><g transform="rotate(-7 512 540)"><path d="M330 232h262l150 150v378a48 48 0 0 1-48 48H330a48 48 0 0 1-48-48V280a48 48 0 0 1 48-48z" fill="#fff"/><path d="M592 232v102a48 48 0 0 0 48 48h102z" fill="#FFD6B3"/><rect x="350" y="330" width="170" height="30" rx="15" fill="#FFD0A8"/><rect x="350" y="404" width="128" height="30" rx="15" fill="#FFE1C7"/><path d="M384 604l84 84 176-206" fill="none" stroke="url(#lg-ink)" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/></g></svg>`;
-  return wrap.firstChild;
+  const img = document.createElement('img');
+  img.className = cls;
+  img.src = 'logo.png';
+  img.alt = '';
+  return img;
 }
 
 /** 설정에서 "애니메이션 줄이기"를 고른 경우만 (윈도우의 애니메이션 끄기 설정과는 상관없이 기본은 켬) */
