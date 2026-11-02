@@ -35,6 +35,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # 수식 인식 모델(약 120MB)은 저장소에 없어서 빌드 전에 받아 설치 파일에 넣음 (받은 파일은 캐시에 둠)
+      - uses: actions/cache@v4
+        with:
+          path: build/models
+          key: mathocr-model-${{ hashFiles('src/main/mathocr.js') }}
+          restore-keys: mathocr-model-
+      - run: node scripts/fetch-model.mjs
       - run: npx electron-builder --win --x64 --publish never
       # 배포 때 쓰는 것과 같은 파일 세 개(설치 파일, blockmap, 자동 업데이트용 latest.yml)가 다 만들어졌는지
       - name: 업데이트 파일 확인
@@ -45,6 +52,7 @@ jobs:
           test -f "dist/OhdapNote-Setup-$v.exe"
           test -f "dist/OhdapNote-Setup-$v.exe.blockmap"
           grep -q "OhdapNote-Setup-$v.exe" dist/latest.yml
+          test -f dist/win-unpacked/resources/models/pix2text-mfr-1.5/encoder_model.onnx || { echo "::error::설치 파일에 수식 인식 모델이 없습니다"; exit 1; }
           cat dist/latest.yml
       - uses: actions/upload-artifact@v4
         with:
