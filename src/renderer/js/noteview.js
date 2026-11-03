@@ -8,7 +8,7 @@ import { scanTranscribe } from './scanocr.js';
 import { transcribeParts } from './pdfmath.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiOptions, aiLabel, aiModelText, jobDialog, findJob, holdSource } from './shared.js';
-import { topbar, renderUpdateBadge } from './chrome.js';
+import { topbar } from './chrome.js';
 import { spineFor } from './home.js';
 
 // 바뀐 횟수 / 저장할 때의 횟수 — 실시간으로 다시 읽을 때 고치는 중인지 보려고 (makeSaver 는 알려 주지 않음)
@@ -178,7 +178,6 @@ function render({ enter = false } = {}) {
       h('section.note-body', noteBody()),
     ),
   );
-  renderUpdateBadge();
 }
 
 /** 이 노트에 쓰는 책들 (알약 모양) + 책 추가 */

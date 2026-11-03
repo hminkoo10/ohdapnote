@@ -970,7 +970,7 @@ function registerIpc() {
 
   ipcMain.handle('shell:openPath', (_e, p) => shell.openPath(p));
   ipcMain.handle('shell:showItem', (_e, p) => shell.showItemInFolder(p));
-  ipcMain.handle('shell:openDataDir', () => shell.openPath(dataDir()));
+  ipcMain.handle('cloud:open', () => cloud.openCloud());
   ipcMain.handle('shell:openExternal', (_e, url) => {
     if (/^https:\/\//.test(url)) return shell.openExternal(url);
     return false;
@@ -1059,39 +1059,6 @@ function registerIpc() {
       if (requestId) mathocrRequests.delete(requestId);
     }
   });
-
-  // ---- 업데이트: 통합 클라우드가 새 버전을 받아 둠 → 다시 켜면 새 버전 ----
-  ipcMain.handle('update:check', () => checkForUpdates());
-  ipcMain.handle('update:install', () => {
-    if (updateState.status !== 'downloaded') return false;
-    setImmediate(() => {
-      ai.killAll();
-      stopMathocrWorker();
-      app.exit(cloud.RESTART_EXIT_CODE); // 통합 클라우드가 바로 새 버전으로 다시 켬
-    });
-    return true;
-  });
-  ipcMain.handle('update:getState', () => updateState);
-}
-
-// ---------------------------------------------------------------------------
-// 업데이트 (통합 클라우드가 새 버전을 옆 폴더에 받아 둠)
-// ---------------------------------------------------------------------------
-
-let updateState = { status: 'idle', current: app.getVersion() };
-
-function checkForUpdates() {
-  if (!session || session.dev) {
-    updateState = { status: 'disabled', current: app.getVersion() };
-    return updateState;
-  }
-  const version = cloud.newerVersionInstalled('ohdapnote', app.getVersion());
-  const next = version ? { status: 'downloaded', current: app.getVersion(), version } : { status: 'latest', current: app.getVersion() };
-  if (next.status !== updateState.status || next.version !== updateState.version) {
-    updateState = next;
-    send('update:status', updateState);
-  }
-  return updateState;
 }
 
 // ---------------------------------------------------------------------------
@@ -1185,8 +1152,6 @@ if (!session) {
     registerIpc();
     createWindow();
     watchData();
-    checkForUpdates();
-    setInterval(checkForUpdates, 5 * 60 * 1000);
   });
 
   app.on('window-all-closed', () => {

@@ -3317,44 +3317,6 @@ main.sheet {
   flex: 1;
   line-height: 1.5;
 }
-.update-card {
-  margin: 6px 0 10px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  display: grid;
-  gap: 8px;
-}
-.uc-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.uc-icon {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-  background: var(--primary-soft);
-  color: var(--primary-ink);
-}
-.uc-status {
-  font-size: 13px;
-  color: var(--text-2);
-}
-.uc-notes pre {
-  margin: 4px 0 0;
-  max-height: 140px;
-  overflow: auto;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--surface-2);
-  font: inherit;
-  font-size: 12.5px;
-  white-space: pre-wrap;
-}
 .credit {
   display: flex;
   align-items: center;

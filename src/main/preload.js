@@ -64,7 +64,7 @@ contextBridge.exposeInMainWorld('ohdap', {
 
   openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
   showItemInFolder: (p) => ipcRenderer.invoke('shell:showItem', p),
-  openDataDir: () => ipcRenderer.invoke('shell:openDataDir'),
+  openCloud: () => ipcRenderer.invoke('cloud:open'), // 통합 클라우드 창 (업데이트·계정은 거기서)
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
   // AI (Gemini · OpenAI 호환 · Claude · ChatGPT 구독)
@@ -83,14 +83,5 @@ contextBridge.exposeInMainWorld('ohdap', {
     const listener = (_e, progress) => callback(progress);
     ipcRenderer.on('mathocr:progress', listener);
     return () => ipcRenderer.removeListener('mathocr:progress', listener);
-  },
-
-  checkForUpdates: () => ipcRenderer.invoke('update:check'),
-  installUpdate: () => ipcRenderer.invoke('update:install'),
-  getUpdateState: () => ipcRenderer.invoke('update:getState'),
-  onUpdateStatus: (callback) => {
-    const listener = (_e, state) => callback(state);
-    ipcRenderer.on('update:status', listener);
-    return () => ipcRenderer.removeListener('update:status', listener);
   },
 });

@@ -4,7 +4,7 @@ import { h, clear, toast, confirmDialog, debounce, formatDate, icon, animateOut 
 import { analyzeDocument, parsePageRange, reanalyzeSinglePage, replacePageItems } from './analyze.js';
 import { ROLES, ROLE_NAME, newDoc, pageLabel, bookPage, computeMatches, normalizeDoc, findItem, flaggedPages, missingNumbers, missingCount } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSource, getSources, dropSources, clearPreviewCache, renderPreview, renderQTable, runGeminiPages, geminiReady, aiOff, jobs, findJob, startJob, holdBook, holdSource, liveBook, errMsg } from './shared.js';
-import { topbar, renderUpdateBadge } from './chrome.js';
+import { topbar } from './chrome.js';
 import { createEditor } from './editor.js';
 import { placeSegThumb } from './home.js';
 
@@ -246,7 +246,6 @@ function render({ enter = false, tabAnim = null, thumbFrom = null } = {}) {
     ),
   );
   requestAnimationFrame(() => placeSegThumb(tabs, thumbFrom));
-  renderUpdateBadge();
 }
 
 async function switchTab(tab, { role, page, itemId, instant = false } = {}) {

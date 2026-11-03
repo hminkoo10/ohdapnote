@@ -1,8 +1,8 @@
-// 오답노트 화면 시작점: 화면 이동(첫 화면 ↔ 책 ↔ 오답노트), 설정, 업데이트 알림
+// 오답노트 화면 시작점: 화면 이동(첫 화면 ↔ 책 ↔ 오답노트), 설정, 실시간 반영
 
 import { h, toast, ripple, animateOut } from './ui.js';
 import { api, state, nav, runLeaveHooks } from './shared.js';
-import { onUpdateStatus, openSettings, applyMotion } from './chrome.js';
+import { openSettings, applyMotion } from './chrome.js';
 import { showHome } from './home.js';
 import { openBook, bookDataChanged } from './bookview.js';
 import { openNote, renderFormatHint, noteDataChanged } from './noteview.js';
@@ -87,10 +87,9 @@ async function boot() {
     root.append(h('div.fatal', '이 화면은 오답노트 프로그램 안에서 실행해야 합니다.'));
     return;
   }
-  [state.appInfo, state.settings, state.update] = await Promise.all([api.appInfo(), api.getSettings(), api.getUpdateState()]);
+  [state.appInfo, state.settings] = await Promise.all([api.appInfo(), api.getSettings()]);
   applyMotion(state.settings.motion);
   document.fonts?.load('600 14px "Pretendard Variable"').catch(() => {});
-  api.onUpdateStatus(onUpdateStatus);
   api.onDataChanged((change) => onDataChanged(change).catch((err) => console.error(err)));
   api.onFilesFetching(onFilesFetching);
   // 누른 자리에서 퍼지는 물결

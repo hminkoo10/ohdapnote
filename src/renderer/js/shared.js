@@ -13,7 +13,6 @@ export const api = window.ohdap;
 export const state = {
   appInfo: null,
   settings: null,
-  update: { status: 'idle' },
   view: null, // 'home' | 'book' | 'note'
 };
 

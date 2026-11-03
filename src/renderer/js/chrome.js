@@ -1,10 +1,9 @@
-// 위쪽 막대, 뒤에서 도는 작업·업데이트 표시, 설정 창
+// 위쪽 막대, 뒤에서 도는 작업 표시, 설정 창 (업데이트는 통합 클라우드가 맡음)
 
-import { h, clear, toast, modal, icon } from './ui.js';
-import { api, state, nav, runLeaveHooks, jobs, jobListeners, findJob, confirmStopJobs, errMsg } from './shared.js';
+import { h, toast, modal, icon } from './ui.js';
+import { api, state, nav, jobs, jobListeners, findJob, errMsg } from './shared.js';
 import { aiSettingsCard, academyAiCard } from './aisettings.js';
 
-export const updateListeners = new Set();
 const fmtMB = (b) => (b ? `${(b / 1048576).toFixed(1)}MB` : '');
 
 export function topbar(left, right = null) {
@@ -17,7 +16,6 @@ export function topbar(left, right = null) {
       'div.topbar-right',
       right,
       jobBadge,
-      h('span.update-badge'),
       h('button.btn.btn-ghost#settings-btn', { onclick: () => openSettings(), title: '설정' }, icon('gear'), h('span', '설정')),
     ),
   );
@@ -40,33 +38,6 @@ export function renderJobBadge(el = document.querySelector('.job-badge')) {
   }
 }
 jobListeners.add(() => renderJobBadge());
-
-export function renderUpdateBadge() {
-  const el = document.querySelector('.update-badge');
-  if (!el) return;
-  clear(el);
-  const s = state.update || {};
-  if (s.status === 'downloaded') el.append(h('button.btn.btn-small.btn-primary', { onclick: installUpdate }, icon('refresh'), `재시작하고 ${s.version} 설치`));
-}
-
-export async function installUpdate() {
-  if (!(await confirmStopJobs('멈추고 다시 시작'))) return;
-  await runLeaveHooks();
-  api.installUpdate();
-}
-
-export function onUpdateStatus(s) {
-  state.update = s;
-  renderUpdateBadge();
-  updateListeners.forEach((fn) => fn(s));
-  if (s.status === 'downloaded') {
-    toast(`새 버전 ${s.version}을(를) 받아 두었어요.${s.notes ? `\n${s.notes.split('\n')[0].slice(0, 80)}` : ''}`, {
-      type: 'success',
-      timeout: 0,
-      actions: [{ label: '지금 재시작해서 설치', onClick: () => installUpdate() }],
-    });
-  }
-}
 
 // 수식 인식 모델 받기 — 설정 창을 닫아도 계속 받고, 다시 열면 진행이 이어서 보임
 const mathocrDl = { running: false, percent: 0, render: null };
@@ -142,51 +113,12 @@ function mathOcrCard() {
   return card;
 }
 
-/** 설정 화면의 업데이트 카드 (상태에 따라 실시간으로 바뀜) — 새 버전은 통합 클라우드가 받아 둠 */
-function updateCard() {
-  const card = h('div.update-card');
-  const render = (u = state.update || {}) => {
-    if (!card.isConnected && card.dataset.mounted) {
-      updateListeners.delete(render);
-      return;
-    }
-    card.dataset.mounted = '1';
-    clear(card);
-    const statusText =
-      {
-        disabled: '개발 실행에서는 업데이트를 확인하지 않아요.',
-        latest: '최신 버전을 쓰고 있어요.',
-        downloaded: `새 버전 ${u.version} 준비 완료 — 다시 시작하면 바뀌어요.`,
-        idle: '통합 클라우드가 새 버전을 받아 두면 여기에서 알려 드려요.',
-      }[u.status] || '';
-    const parts = [
-      h(
-        'div.uc-head',
-        h('span.uc-icon', icon('refresh')),
-        h('div', h('strong', '업데이트'), h('div.small.muted', `지금 버전 ${state.appInfo.version}`)),
-        h('span.spacer'),
-        u.status === 'downloaded'
-          ? h('button.btn.btn-small.btn-primary', { onclick: installUpdate }, icon('refresh'), '지금 다시 시작해서 설치')
-          : h(
-              'button.btn.btn-small',
-              {
-                disabled: u.status === 'disabled',
-                onclick: async () => {
-                  state.update = await api.checkForUpdates();
-                  render(state.update);
-                },
-              },
-              '업데이트 확인',
-            ),
-      ),
-      h('div.uc-status', statusText),
-      u.notes ? h('div.uc-notes', h('div.small.muted', `${u.version} 에서 바뀐 점`), h('pre', u.notes)) : null,
-    ];
-    card.append(...parts.filter(Boolean));
-  };
-  updateListeners.add(render);
-  render();
-  return card;
+/** 통합 클라우드 계정 (이름 · 학원 · 원장/선생님) */
+function accountText() {
+  const u = state.appInfo.user || {};
+  if (!u.name) return '개발 실행';
+  const role = { director: '원장', admin: '운영자' }[u.role] || '선생님';
+  return [u.name, u.academy, role].filter(Boolean).join(' · ');
 }
 
 export function applyMotion(motion) {
@@ -232,8 +164,8 @@ export async function openSettings() {
     h('section.set-card',
       h('h4', icon('gear'), '프로그램'),
       h('label.field', h('span', '애니메이션'), motionSelect),
-      updateCard(),
-      h('div.field-row', h('button.btn.btn-small', { onclick: () => api.openDataDir() }, icon('folder'), '데이터 폴더 열기'), h('span.small.muted', '교재와 오답노트가 저장되는 곳')),
+      h('div.field', h('span', '통합 클라우드 계정'), h('div.field-row', h('span', accountText()), h('button.btn.btn-small', { onclick: () => api.openCloud() }, '통합 클라우드 열기'))),
+      h('p.small.muted', '업데이트는 통합 클라우드가 받아 둬요. 오답노트를 다시 켜면 새 버전으로 바뀌어요.'),
       h('div.credit', h('span', `오답노트 ${state.appInfo.version}`), h('span.dot'), h('span', `개발 ${state.appInfo.developer || '구현민'}`)),
     ),
   );
