@@ -176,6 +176,7 @@ try {
   step('새 오답노트: 학생을 고르면 그 학생 폴더에');
   const created = await call('createNote', { title: '하늘 기말', student: '김하늘', studentId: sky.id, bookIds: [sharedBook] });
   assert(existsSync(studentNote(sky.id, created.id)) && !existsSync(memberNote('teacher-a', created.id)), '새 노트 자리');
+  assert(created.answersForStudent === false && readNote(studentNote(sky.id, created.id)).answersForStudent === false, '새 노트의 학생 답지 공개 기본값');
 
   step('첫 화면: 학생별 → 김하늘 → 노트 2개');
   await showAll();
@@ -193,6 +194,17 @@ try {
   assert(tabs.includes('박선생 공유 문제집') && tabs.includes('볼 수 없는 교재'), '책 탭: ' + tabs);
   assert((await win.textContent('.student-chip')).includes('김하늘'), '학생 칩');
 
+  step('학생 답지 공개: 예전 노트는 기본 끔, 켜기·다시 열기·끄기');
+  assert((await call('getNote', skyNote)).answersForStudent === false, '예전 노트의 학생 답지 공개 기본값');
+  assert(!(await win.isChecked('#answers-for-student')), '예전 노트의 스위치가 켜졌습니다');
+  assert((await win.textContent('#answers-for-student-hint')).includes('학생이 받는 PDF'), '학생 PDF 설명');
+  await win.click('.note-student-settings .switch');
+  await until(() => readNote(studentNote(sky.id, skyNote)).answersForStudent === true, '학생 답지 공개가 저장되지 않았습니다');
+  await openNoteFromHome(sky.id, '하늘 1학기');
+  assert(await win.isChecked('#answers-for-student'), '다시 연 노트의 학생 답지 공개가 꺼졌습니다');
+  await win.click('.note-student-settings .switch');
+  await until(() => readNote(studentNote(sky.id, skyNote)).answersForStudent === false, '학생 답지 공개 끄기가 저장되지 않았습니다');
+
   step('고치는 중에 다른 곳에서 고치면 저장할 때 합침 (제목은 내 것, 고른 문항은 둘 다)');
   await win.waitForTimeout(OWN_MS);
   await win.fill('.title-input', '하늘 1학기 (김선생)');
@@ -200,6 +212,7 @@ try {
   const outside = readNote(studentNote(sky.id, skyNote));
   outside.selected[sharedBook] = ['s1', 's2'];
   outside.exportOptions = { ...(outside.exportOptions || {}), cover: true };
+  outside.answersForStudent = true;
   outside.updatedAt = Date.now();
   writeOutside(studentNote(sky.id, skyNote), outside);
   await waitToast('합쳐서 저장');
@@ -209,12 +222,15 @@ try {
   assert(JSON.stringify(merged.selected[privateBook]) === '["p1","p2"]', '볼 수 없는 교재의 선택이 사라졌습니다: ' + JSON.stringify(merged.selected));
   assert(merged.exportOptions?.cover === true, '다른 곳에서 고친 내보내기 설정: ' + JSON.stringify(merged.exportOptions));
   assert(merged.updatedBy?.id === 'teacher-a', 'updatedBy');
+  assert(merged.answersForStudent === true, '다른 곳에서 켠 학생 답지 공개가 사라졌습니다');
+  await win.waitForFunction(() => document.querySelector('#answers-for-student')?.checked === true);
   await shot('3-merged');
 
   step('고치는 중이 아니면 다른 곳에서 고친 것을 바로 다시 읽음');
   await win.waitForTimeout(OWN_MS);
-  writeOutside(studentNote(sky.id, skyNote), { ...readNote(studentNote(sky.id, skyNote)), title: '박선생이 바꾼 제목', updatedAt: Date.now() });
+  writeOutside(studentNote(sky.id, skyNote), { ...readNote(studentNote(sky.id, skyNote)), title: '박선생이 바꾼 제목', answersForStudent: false, updatedAt: Date.now() });
   await win.waitForFunction(() => document.querySelector('.title-input')?.value === '박선생이 바꾼 제목', null, { timeout: 10000 });
+  assert(!(await win.isChecked('#answers-for-student')), '다른 곳에서 끈 학생 답지 공개가 화면에 반영되지 않았습니다');
   await win.click('#back-btn');
 
   step('담당 바꾸기 (통합 클라우드에 부탁) · 그사이 다른 사람이 고친 학생은 conflict');
@@ -232,12 +248,37 @@ try {
   const loose = await call('createNote', { title: '이름만 적은 노트', student: '바다', studentId: '', bookIds: [sharedBook] });
   assert(existsSync(memberNote('teacher-a', loose.id)), '미지정 노트는 내 폴더에');
   const got = await call('getNote', loose.id);
+  await call('saveNote', { ...got, answersForStudent: true }, got);
+  assert(readNote(memberNote('teacher-a', loose.id)).answersForStudent === false, '미지정 노트의 학생 답지 공개를 켰습니다');
   const base = structuredClone(got);
   got.studentId = sea.id;
   got.student = '이바다';
   await call('saveNote', got, base);
   assert(existsSync(studentNote(sea.id, loose.id)) && !existsSync(memberNote('teacher-a', loose.id)), '학생 폴더로 옮겨지지 않았습니다');
   const loose2 = await call('createNote', { title: '김선생 미지정', student: '', studentId: '', bookIds: [] });
+
+  step('학생 지정·해제: 답지 공개 설정 표시·숨김, 해제하면 기본 끔');
+  await openNoteFromHome('', '김선생 미지정');
+  assert((await win.$('#answers-for-student')) === null, '미지정 노트에 학생 답지 공개가 보입니다');
+  await win.click('.student-chip');
+  await win.fill('.modal .student-search input', '하늘');
+  await win.press('.modal .student-search input', 'ArrowDown');
+  await win.press('.modal .student-search input', 'Enter');
+  await win.click('.modal .btn-primary');
+  await win.waitForSelector('.note-student-settings .switch');
+  assert(!(await win.isChecked('#answers-for-student')), '학생을 정한 노트의 학생 답지 공개 기본값');
+  await win.click('.note-student-settings .switch');
+  await until(() => existsSync(studentNote(sky.id, loose2.id)) && readNote(studentNote(sky.id, loose2.id)).answersForStudent === true, '학생 지정 후 공개가 저장되지 않았습니다');
+  await win.waitForSelector('.modal-overlay', { state: 'detached' });
+  await win.click('.student-chip');
+  await win.fill('.modal .student-search input', '명단에 없는 이름');
+  await win.click('.modal .btn-primary');
+  await win.waitForSelector('.modal:has-text("학생 미지정") .btn-primary');
+  await win.click('.modal:has-text("학생 미지정") .btn-primary');
+  await until(() => existsSync(memberNote('teacher-a', loose2.id)) && !existsSync(studentNote(sky.id, loose2.id)), '학생 해제 후 내 폴더로 옮겨지지 않았습니다');
+  assert((await win.$('#answers-for-student')) === null, '학생 해제 후에도 학생 답지 공개가 보입니다');
+  assert(readNote(memberNote('teacher-a', loose2.id)).answersForStudent === false, '학생 해제 후에도 답지 공개가 켜져 있습니다');
+  await win.click('#back-btn');
 
   step('노트 화면에서 학생 바꾸기 (명단에서 고름)');
   await openNoteFromHome(sea.id, '이름만 적은 노트');
@@ -256,8 +297,9 @@ try {
   await until(async () => (await call('listStudents')).find((s) => s.id === added.id)?.deletedAt, '지운 학생이 명단에 반영되지 않았습니다');
   const ro = await call('getNote', loose.id);
   assert(ro.$readonly && ro.$why === 'deleted', '지운 학생 노트: ' + JSON.stringify({ ro: ro.$readonly, why: ro.$why }));
-  const denied = await fails('saveNote', { ...ro, $readonly: false, title: '고침' }, ro);
+  const denied = await fails('saveNote', { ...ro, $readonly: false, title: '고침', answersForStudent: true }, ro);
   assert(denied?.includes('지운 학생'), '지운 학생 노트를 고쳤습니다: ' + denied);
+  assert(readNote(studentNote(added.id, loose.id)).answersForStudent === false, '지운 학생의 답지 공개를 켰습니다');
   assert((await call('listNotes')).find((n) => n.id === loose.id)?.canEdit === false, '목록 canEdit');
   await showAll();
   await win.waitForSelector(`.student-group[data-student="${added.id}"]`, { timeout: 10000 });
@@ -265,6 +307,7 @@ try {
   await win.click('.note-card:has-text("이름만 적은 노트")');
   await win.waitForSelector('.readonly-banner', { timeout: 10000 });
   assert((await win.textContent('.readonly-banner')).includes('지운 학생'), '보기만 안내');
+  assert(await win.isDisabled('#answers-for-student'), '보기만 하는 학생 노트의 답지 공개를 바꿀 수 있습니다');
   await shot('4-deleted-student');
   await win.click('#back-btn');
   await call('restoreStudent', added.id);

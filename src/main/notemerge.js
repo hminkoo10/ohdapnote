@@ -32,7 +32,7 @@ function mergeValue(base, mine, cur) {
   return mine;
 }
 
-const SPECIAL = new Set(['id', 'bookIds', 'selected', 'renamesSeen', 'updatedAt']);
+const SPECIAL = new Set(['id', 'bookIds', 'selected', 'renamesSeen', 'updatedAt', 'answersForStudent']);
 
 /** base · mine · cur 는 저장되는 모양 (화면용 $ 값 없이) → 합친 오답노트 */
 function mergeNote(base, mine, cur) {
@@ -44,6 +44,8 @@ function mergeNote(base, mine, cur) {
     if (v !== undefined) out[k] = v;
   }
   out.id = mine.id;
+  // 예전 노트의 빈 값도 false: 기본값을 채운 것만으로 다른 사람이 켠 설정을 덮지 않게
+  out.answersForStudent = mergeValue(base.answersForStudent === true, mine.answersForStudent === true, cur.answersForStudent === true);
   out.bookIds = mergeList(base.bookIds, mine.bookIds, cur.bookIds);
   const sel = (n, b) => n?.selected?.[b];
   out.selected = Object.fromEntries(out.bookIds.map((b) => [b, mergeList(sel(base, b), sel(mine, b), sel(cur, b))]));

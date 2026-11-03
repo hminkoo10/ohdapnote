@@ -745,6 +745,7 @@ const noteSig = (note) => JSON.stringify(stripMeta(note));
  */
 function saveNoteFile(note, base) {
   const mine = stampRenames(stripMeta(note));
+  mine.answersForStudent = mine.answersForStudent === true;
   const cur = findNote(mine.id);
   if (cur && !canWriteLoc(cur)) throw new Error(cur.sid ? '지운 학생의 오답노트는 고칠 수 없어요. 학생을 되살리면 고칠 수 있어요.' : '다른 선생님의 오답노트는 고칠 수 없어요.');
   const onDisk = cur ? readJsonSync(locFile(cur, mine.id), null, sanitizeNote) : null;
@@ -757,6 +758,7 @@ function saveNoteFile(note, base) {
   out.updatedBy = createdByMe();
   const to = targetLoc(out, cur);
   if (to.sid) out.studentId = to.sid;
+  out.answersForStudent = !!to.sid && out.answersForStudent === true;
   writeJsonAtomicSync(locFile(to, out.id), out);
   if (cur && !sameLoc(cur, to)) {
     markOwn(locFile(cur, out.id));
@@ -1139,6 +1141,7 @@ function registerIpc() {
       title: (title || '').trim() || '오답노트',
       student: (student || '').trim(),
       studentId: isValidId(studentId) ? studentId : '',
+      answersForStudent: false,
       bookIds: ids,
       selected: Object.fromEntries(ids.map((b) => [b, []])),
       exportOptions: null,
@@ -1162,6 +1165,7 @@ function registerIpc() {
     if (catchUpRenames(note) && writable) await writeJsonAtomic(locFile(loc, id), note);
     if (loc.sid) note.studentId = loc.sid;
     const st = note.studentId ? rosterStudent(note.studentId) : null;
+    note.answersForStudent = !!loc.sid && note.answersForStudent === true;
     const meta = { $shared: !!loc.sid, $studentName: st?.name || '' };
     if (writable) {
       noteSeen.set(id, noteSig(readJsonSync(locFile(loc, id), null, sanitizeNote) || note));

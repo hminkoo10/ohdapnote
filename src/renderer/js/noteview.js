@@ -181,6 +181,7 @@ function render({ enter = false } = {}) {
     h(
       `main.sheet.note-sheet${enter ? '.view-enter' : ''}`,
       ro ? h('div.readonly-banner', icon('eye'), h('span', why)) : null,
+      studentSettings(),
       bookBar(),
       h('section.note-body', noteBody()),
     ),
@@ -189,6 +190,32 @@ function render({ enter = false } = {}) {
 
 /** 위쪽 학생 칩: 명단의 학생이면 명단 이름, 아니면 적어 둔 이름 (시험지 머리의 학생 이름은 따로 고칠 수 있음) */
 const studentLabel = (n) => n.$studentName || n.student || '학생 미지정';
+
+function studentSettings() {
+  const n = ns.note;
+  if (!n.$shared) return h('section.note-student-settings', { hidden: true });
+  return h(
+    'section.note-student-settings',
+    { 'aria-label': '학생 PDF 설정' },
+    h(
+      'label.switch',
+      h('input#answers-for-student', {
+        type: 'checkbox',
+        checked: n.answersForStudent === true,
+        disabled: ns.readonly,
+        'aria-describedby': 'answers-for-student-hint',
+        onchange: (e) => {
+          if (ns.readonly || !n.$shared) return;
+          n.answersForStudent = e.target.checked;
+          markDirty();
+        },
+      }),
+      h('span.sw'),
+      '학생에게 답지 보여 주기',
+    ),
+    h('span.small.muted#answers-for-student-hint', '켜면 학생이 받는 PDF에 답지(해설)도 들어가요.'),
+  );
+}
 
 /** 학생 바꾸기: 명단의 학생을 고르면 그 학생 오답노트가 됨 (저장할 때 그 학생 폴더로 옮겨짐), 명단에 없는 이름은 학생 미지정 */
 async function changeStudent() {
@@ -223,6 +250,8 @@ async function changeStudent() {
   if (r.st) n.$studentName = r.st.name;
   else delete n.$studentName;
   n.$shared = shared && !!r.st;
+  if (!n.$shared) n.answersForStudent = false;
+  document.querySelector('.note-student-settings')?.replaceWith(studentSettings());
   markDirty();
   syncExamFields();
   const t = document.querySelector('.topbar .student-name');

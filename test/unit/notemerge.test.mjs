@@ -67,6 +67,55 @@ test('내보내기 설정은 칸마다 합침', () => {
   assert.deepEqual(mergeNote(base, mine, cur).exportOptions, { space: 'wide', answers: false, cover: true });
 });
 
+test('학생 답지 공개: 값이 없거나 boolean true 가 아니면 기본 false', () => {
+  for (const value of [undefined, null, 'true', 1, false]) {
+    const note = { ...copy(), answersForStudent: value };
+    assert.equal(mergeNote(note, note, note).answersForStudent, false);
+  }
+});
+
+test('학생 답지 공개: 한쪽에서 켜면 다른 쪽의 제목·문항 변경과 함께 남음', () => {
+  const before = { ...copy(), answersForStudent: false };
+  const enabled = { ...copy(), answersForStudent: true };
+  const edited = { ...copy(), answersForStudent: false, title: '기말 대비' };
+  edited.selected[B1].push('c');
+  for (const [mine, cur] of [[enabled, edited], [edited, enabled]]) {
+    const out = mergeNote(before, mine, cur);
+    assert.equal(out.answersForStudent, true);
+    assert.equal(out.title, '기말 대비');
+    assert.deepEqual(out.selected[B1], ['a', 'b', 'c']);
+    assert.deepEqual(out.exportOptions, base.exportOptions);
+  }
+});
+
+test('학생 답지 공개: 한쪽에서 끄면 다른 쪽의 변경으로 다시 켜지지 않음', () => {
+  const before = { ...copy(), answersForStudent: true };
+  const disabled = { ...copy(), answersForStudent: false };
+  const edited = { ...copy(), answersForStudent: true, title: '기말 대비' };
+  for (const [mine, cur] of [[disabled, edited], [edited, disabled]]) {
+    const out = mergeNote(before, mine, cur);
+    assert.equal(out.answersForStudent, false);
+    assert.equal(out.title, '기말 대비');
+  }
+});
+
+test('학생 답지 공개: 예전 노트에 기본값만 채워도 다른 사람이 켠 설정은 유지', () => {
+  const defaults = { ...copy(), answersForStudent: false };
+  const enabled = { ...copy(), answersForStudent: true };
+  assert.equal(mergeNote(base, defaults, enabled).answersForStudent, true);
+  assert.equal(mergeNote(base, enabled, defaults).answersForStudent, true);
+  assert.equal(mergeNote(defaults, defaults, copy()).answersForStudent, false);
+});
+
+test('학생 답지 공개: 양쪽이 같은 값으로 바꾸면 그 값을 유지', () => {
+  for (const value of [false, true]) {
+    const before = { ...copy(), answersForStudent: !value };
+    const mine = { ...copy(), answersForStudent: value };
+    const cur = { ...copy(), answersForStudent: value };
+    assert.equal(mergeNote(before, mine, cur).answersForStudent, value);
+  }
+});
+
 test('책 더하기·빼기: 뺀 책의 선택은 사라지고 더한 책은 양쪽 것이 모두', () => {
   const mine = copy();
   mine.bookIds = [B1, B3]; // B2 빼고 B3 더함
