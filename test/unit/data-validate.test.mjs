@@ -186,7 +186,9 @@ test('데이터 보존 회귀: 실제 요청 응답도 새 필드·학생 teache
 });
 
 test('정상 Codex 설치 경로·빈 모델·수식·SSO 만료시각 보존', () => {
-  const codexPath = path.join(process.env.APPDATA || process.cwd(), 'npm', 'codex.cmd');
+  const codexPath = process.platform === 'win32'
+    ? path.join(process.env.APPDATA || process.cwd(), 'npm', 'codex.cmd')
+    : path.join(require('node:os').homedir(), '.local', 'bin', 'codex'); // CI(리눅스)
   assert.equal(sanitizeSettings({ codexPath }).codexPath, codexPath);
   assert.equal(sanitizeSettings({ openaiModel: '' }).openaiModel, '');
   const t = sanitizeTranscripts({ items: { q: { blocks: [{ type: 'math', latex: 'x < 2' }] } } });
