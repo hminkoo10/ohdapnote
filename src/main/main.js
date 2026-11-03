@@ -82,10 +82,11 @@ const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
 // ---------------------------------------------------------------------------
 // 저장 위치
 //   학원 공간 (MAGOEDU_ACADEMY_DIR, 같은 학원 선생님 모두가 봄 — 통합 클라우드 docs/INTEGRATION.md 4-1)
-//     books/<id>/book.json · 원본 파일 · transcripts.json · renames.json   교재 (만든 사람·원장만 고침)
+//     books/<id>/book.json · 원본 파일 · transcripts.json · renames.json   학원 공유 교재 (만든 사람·원장만 고침)
 //     students/<id>.json                                                   학생 명단 (누구나 등록, 등록한 사람·원장만 고침)
 //     academy.json                                                         학원 공용 AI 키 (원장만 고침)
 //     members/<계정>/notes/<id>.json · transcripts/<책 id>.json · profile.json   내 오답노트 (나와 원장만 봄, 나만 고침)
+//     members/<계정>/books/<id>/ (books/<id>/ 와 같은 구조)                   나만 보기 교재 (나와 원장만 봄, 나만 고침)
 //   학원이 없는 계정은 개인 공간의 shared/ 를 같은 구조로 씀 (공유는 안 됨)
 //   개인 공간 (MAGOEDU_DATA_DIR): settings.json — 내 AI 키·화면 설정 (같은 아이디의 컴퓨터끼리)
 //   이 컴퓨터만 (MAGOEDU_LOCAL_DIR = userData): 수식 인식 모델, 로그, legacy/ (예전에 따로 깔아 쓰던 데이터 — 처음 켤 때 옮김)
@@ -106,16 +107,47 @@ function isValidId(id) {
   return typeof id === 'string' && /^[a-zA-Z0-9-]{8,64}$/.test(id);
 }
 
-function bookDir(id) {
-  if (!isValidId(id)) throw new Error('잘못된 책 ID');
-  return path.join(booksDir(), id);
-}
-const bookFile = (id) => path.join(bookDir(id), 'book.json');
-
 function memberDir(uid) {
   if (typeof uid !== 'string' || !/^[A-Za-z0-9-]{1,64}$/.test(uid)) throw new Error('잘못된 계정');
   return path.join(membersDir(), uid);
 }
+const myBooksDir = () => path.join(memberDir(me.id), 'books'); // 나만 보기 교재 (학원 공간에서만)
+
+/** 새 책 폴더: 학원 공유면 books/<id>, 나만 보기면 members/<나>/books/<id> (학원이 없으면 늘 books/) */
+function newBookDir(id, shared = true) {
+  if (!isValidId(id)) throw new Error('잘못된 책 ID');
+  return path.join(academyMode() && !shared ? myBooksDir() : booksDir(), id);
+}
+
+/**
+ * 책 폴더 찾기 → { dir, place }  place: shared(학원 공유) | private(내 나만 보기) | others(다른 선생님의 나만 보기)
+ * books/<id> → members/<나>/books/<id> → 원장이면 members/<다른 계정>/books/<id> (선생님 오답노트에 쓴 책을 열 수 있게).
+ * book.json 이 있는 첫 곳. 없으면 books/<id>
+ */
+function locateBook(id) {
+  const shared = newBookDir(id);
+  if (!academyMode() || fs.existsSync(path.join(shared, 'book.json'))) return { dir: shared, place: 'shared' };
+  const mine = path.join(myBooksDir(), id);
+  if (fs.existsSync(path.join(mine, 'book.json'))) return { dir: mine, place: 'private' };
+  if (isManager()) {
+    let uids = [];
+    try {
+      uids = fs.readdirSync(membersDir(), { withFileTypes: true }).filter((e) => e.isDirectory() && /^[A-Za-z0-9-]{1,64}$/.test(e.name) && e.name !== me.id).map((e) => e.name);
+    } catch {
+      /* members/ 없음 */
+    }
+    for (const uid of uids) {
+      const dir = path.join(membersDir(), uid, 'books', id);
+      if (fs.existsSync(path.join(dir, 'book.json'))) return { dir, place: 'others' };
+    }
+  }
+  return { dir: shared, place: 'shared' };
+}
+const bookDir = (id) => locateBook(id).dir;
+const bookFile = (id) => path.join(bookDir(id), 'book.json');
+
+/** 통합 클라우드에 받기·지우기를 부탁할 때 쓰는 학원 공간 안의 경로 ('/' 로 구분) */
+const cloudRel = (file) => path.relative(sharedDir(), file).split(path.sep).join('/');
 const notesDirOf = (uid) => path.join(memberDir(uid), 'notes');
 const myTranscriptsFile = (bookId) => path.join(memberDir(me.id), 'transcripts', `${bookId}.json`);
 
@@ -227,7 +259,7 @@ async function effectiveSettings() {
 // ---------------------------------------------------------------------------
 // app:// 프로토콜
 //   app://bundle/<path>            → src/renderer/<path>
-//   app://book/<id>/<file>         → 학원 공간 books/<id>/<file> (아직 받지 않은 원본은 통합 클라우드에 받아 달라고 한 뒤)
+//   app://book/<id>/<file>         → 그 책 폴더의 <file> (locateBook. 아직 받지 않은 원본은 통합 클라우드에 받아 달라고 한 뒤)
 // ---------------------------------------------------------------------------
 
 async function serveFile(file) {
@@ -274,7 +306,8 @@ const fetching = new Map(); // 학원 공간 경로 → 받는 중 (Promise)
 
 /** 아직 받지 않은 원본을 통합 클라우드에 받아 달라고 하고 기다림 → { ok, missing, error? } */
 async function fetchBookFiles(id, names) {
-  const rels = [...new Set(names)].filter((n) => n && !fs.existsSync(safeJoin(bookDir(id), n))).map((n) => `books/${id}/${n}`);
+  const dir = bookDir(id);
+  const rels = [...new Set(names)].filter((n) => n && !fs.existsSync(safeJoin(dir, n))).map((n) => cloudRel(safeJoin(dir, n)));
   if (!rels.length) return { ok: true, missing: [] };
   const fresh = rels.filter((r) => !fetching.has(r));
   if (fresh.length) {
@@ -292,8 +325,28 @@ async function fetchBookFiles(id, names) {
 
 /** 이 컴퓨터에 받지 않은 원본은 폴더에서 지울 수 없으니 서버에서 지워 달라고 함 (책을 지우거나 원본을 바꿀 때) */
 async function removeRemoteOnly(id, names) {
-  const gone = names.filter((n) => !fs.existsSync(path.join(bookDir(id), n))).map((n) => `books/${id}/${n}`);
+  const dir = bookDir(id);
+  const gone = names.filter((n) => !fs.existsSync(path.join(dir, n))).map((n) => cloudRel(path.join(dir, n)));
   if (gone.length) await cloud.removeFiles(session, gone).catch((err) => log.warn('[remove]', err.message));
+}
+
+/** 책 폴더를 통째로 복사 (학원 공유 켜고 끌 때). book.json 은 맨 나중에 — 다 옮기기 전에는 새 자리를 책으로 보지 않게 */
+async function copyBookFiles(from, to) {
+  const files = [];
+  const walk = async (rel) => {
+    for (const e of await fsp.readdir(path.join(from, rel), { withFileTypes: true })) {
+      const r = path.join(rel, e.name);
+      if (e.isDirectory()) await walk(r);
+      else if (e.isFile() && !/\.(tmp|magoedu-dl|part)$/i.test(e.name)) files.push(r);
+    }
+  };
+  await walk('');
+  files.sort((a, b) => (a === 'book.json') - (b === 'book.json'));
+  for (const r of files) {
+    await fsp.mkdir(path.dirname(path.join(to, r)), { recursive: true });
+    markOwn(path.join(to, r));
+    await fsp.copyFile(path.join(from, r), path.join(to, r));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -360,6 +413,9 @@ function canEdit(obj) {
   return !academyMode() || isManager() || obj?.createdBy?.id === me.id;
 }
 
+/** 책을 고칠 수 있는지: 다른 선생님의 나만 보기 책(members/<그 사람>/)은 그 사람만 고침 — 원장도 보기만 */
+const canEditBook = (book, place) => canEdit(book) && place !== 'others';
+
 /** 화면에 넘길 때만 붙이는 값($로 시작)은 저장하지 않음 */
 function stripMeta(obj) {
   const out = { ...obj };
@@ -367,7 +423,7 @@ function stripMeta(obj) {
   return out;
 }
 
-function summarizeBook(book) {
+function summarizeBook(book, place = 'shared') {
   const docs = book.docs || {};
   return {
     id: book.id,
@@ -375,7 +431,9 @@ function summarizeBook(book) {
     createdAt: book.createdAt,
     updatedAt: book.updatedAt,
     createdBy: book.createdBy || null,
-    canEdit: canEdit(book),
+    canEdit: canEditBook(book, place),
+    shared: academyMode() && place === 'shared', // 학원 공유 (끄면 나만 보기 — 원장은 볼 수 있음)
+    mine: !academyMode() || book.createdBy?.id === me.id, // 내 책장 (학원 공간에서)
     problemFile: docs.problem?.originalName || '',
     answerFile: docs.answer?.originalName || '',
     problemCount: count(docs.problem),
@@ -421,8 +479,15 @@ async function listJson(dir, fileOf) {
 }
 
 const JSON_ID = /^[a-zA-Z0-9-]{8,64}\.json$/;
-const listBooks = () =>
-  listJson(booksDir(), (e) => (e.isDirectory() && isValidId(e.name) ? path.join(booksDir(), e.name, 'book.json') : null));
+/** 책장: 학원 공유(books/) + 내 나만 보기(members/<나>/books/, 학원 공간에서만) → [{ book, place }] */
+async function listBooks() {
+  const inDir = async (dir, place) =>
+    (await listJson(dir, (e) => (e.isDirectory() && isValidId(e.name) ? path.join(dir, e.name, 'book.json') : null))).map((book) => ({ book, place }));
+  const shared = await inDir(booksDir(), 'shared');
+  if (!academyMode()) return shared;
+  const ids = new Set(shared.map((x) => x.book.id)); // 두 곳에 다 있으면 locateBook 처럼 학원 공유 쪽
+  return [...shared, ...(await inDir(myBooksDir(), 'private')).filter((x) => !ids.has(x.book.id))];
+}
 const listNotesOf = (uid) => listJson(notesDirOf(uid), (e) => (e.isFile() && JSON_ID.test(e.name) ? path.join(notesDirOf(uid), e.name) : null));
 const listNotes = () => listNotesOf(me.id);
 const listStudents = () => listJson(studentsDir(), (e) => (e.isFile() && JSON_ID.test(e.name) ? path.join(studentsDir(), e.name) : null));
@@ -532,9 +597,10 @@ async function importLegacy() {
   if (!fs.existsSync(src)) return null;
   const done = { books: 0, notes: 0 };
   const dirs = async (sub) => (await fsp.readdir(path.join(src, sub), { withFileTypes: true }).catch(() => [])).filter((e) => e.isDirectory() && isValidId(e.name)).map((e) => e.name);
+  // 옮긴 책은 새 책처럼 학원 공유 (books/)
   const copyBook = async (from, id, book) => {
-    await fsp.cp(from, bookDir(id), { recursive: true, filter: (f) => !/\.tmp$/i.test(f) && path.basename(f) !== 'project.json' });
-    await writeJsonAtomic(bookFile(id), { ...book, id, createdBy: createdByMe() });
+    await fsp.cp(from, newBookDir(id), { recursive: true, filter: (f) => !/\.tmp$/i.test(f) && path.basename(f) !== 'project.json' });
+    await writeJsonAtomic(path.join(newBookDir(id), 'book.json'), { ...book, id, createdBy: createdByMe() });
     done.books += 1;
   };
   const addNote = async (note) => {
@@ -666,12 +732,13 @@ function registerIpc() {
 
   // ---- 책 ----
   ipcMain.handle('books:list', async () => {
-    const list = (await listBooks()).map(summarizeBook);
+    const list = (await listBooks()).map(({ book, place }) => summarizeBook(book, place));
     list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     return list;
   });
 
-  ipcMain.handle('books:create', async (_e, { name } = {}) => {
+  // 새 책은 학원 공유가 기본 (shared: false 면 나만 보기)
+  ipcMain.handle('books:create', async (_e, { name, shared = true } = {}) => {
     const id = crypto.randomUUID();
     const now = Date.now();
     const book = {
@@ -685,20 +752,23 @@ function registerIpc() {
       docs: { problem: null, answer: null },
       answerOverrides: {},
     };
-    await writeJsonAtomic(bookFile(id), book);
-    return { ...book, $canEdit: true };
+    await writeJsonAtomic(path.join(newBookDir(id, shared), 'book.json'), book);
+    return { ...book, $canEdit: true, $shared: academyMode() && !!shared };
   });
 
+  // $shared: 학원 공유인지 (학원 공간에서만 true 가 될 수 있음)
   ipcMain.handle('books:get', async (_e, id) => {
-    const book = await readJson(bookFile(id), null);
+    const { dir, place } = locateBook(id);
+    const book = await readJson(path.join(dir, 'book.json'), null);
     if (!book) throw new Error('책을 찾을 수 없습니다.');
-    return { ...book, $canEdit: canEdit(book) };
+    return { ...book, $canEdit: canEditBook(book, place), $shared: academyMode() && place === 'shared' };
   });
 
   /** 지금 저장된 책을 고칠 수 있는지 (만든 사람은 바뀌지 않음) → 저장된 책 */
   function checkBookWrite(id) {
-    const cur = readJsonSync(bookFile(id));
-    if (cur && !canEdit(cur)) throw new Error('만든 사람과 원장만 고칠 수 있어요.');
+    const { dir, place } = locateBook(id);
+    const cur = readJsonSync(path.join(dir, 'book.json'));
+    if (cur && !canEditBook(cur, place)) throw new Error(place === 'others' ? '나만 보기 책은 만든 선생님만 고칠 수 있어요.' : '만든 사람과 원장만 고칠 수 있어요.');
     return cur;
   }
   const toSave = (book, cur) => ({ ...stripMeta(book), createdBy: cur?.createdBy || book.createdBy || createdByMe() });
@@ -745,16 +815,40 @@ function registerIpc() {
     if (!got.ok) throw new Error('교재 파일을 받지 못해 복사할 수 없어요. 인터넷 연결을 확인해 주세요.');
     const newId = crypto.randomUUID();
     const now = Date.now();
-    await fsp.mkdir(bookDir(newId), { recursive: true });
+    const from = bookDir(id);
+    const to = newBookDir(newId); // 새 책처럼 학원 공유
+    await fsp.mkdir(to, { recursive: true });
     for (const name of files) {
-      markOwn(path.join(bookDir(newId), name));
-      await fsp.copyFile(path.join(bookDir(id), name), path.join(bookDir(newId), name));
+      markOwn(path.join(to, name));
+      await fsp.copyFile(path.join(from, name), path.join(to, name));
     }
     const tr = await mergedTranscripts(id);
-    if (Object.keys(tr.items || {}).length) await writeJsonAtomic(path.join(bookDir(newId), 'transcripts.json'), tr);
+    if (Object.keys(tr.items || {}).length) await writeJsonAtomic(path.join(to, 'transcripts.json'), tr);
     const copy = { ...stripMeta(book), id: newId, name: `${book.name || '책'} (복사본)`, createdBy: createdByMe(), createdAt: now, updatedAt: now };
-    await writeJsonAtomic(bookFile(newId), copy);
+    await writeJsonAtomic(path.join(to, 'book.json'), copy);
     return summarizeBook(copy);
+  });
+
+  /**
+   * 학원 공유 켜고 끄기 (만든 사람만): 책 폴더를 books/<id> ↔ members/<나>/books/<id> 로 옮김 → 새 요약.
+   * 끄면 다른 선생님에게는 지워진 책처럼 보임 (원장은 볼 수 있음)
+   */
+  ipcMain.handle('books:setShared', async (_e, { id, shared } = {}) => {
+    if (!academyMode()) throw new Error('학원 공간에서만 공유를 바꿀 수 있어요.');
+    const { dir: from, place } = locateBook(id);
+    const book = readJsonSync(path.join(from, 'book.json'));
+    if (!book) throw new Error('책을 찾을 수 없습니다.');
+    if (place === 'others' || book.createdBy?.id !== me.id) throw new Error('책을 만든 사람만 공유를 바꿀 수 있어요.');
+    const to = newBookDir(id, !!shared);
+    if (path.resolve(to) === path.resolve(from)) return summarizeBook(book, place);
+    // 받지 않은 원본은 옮길 수 없으니 먼저 모두 받음
+    const got = await fetchBookFiles(id, sourceFiles(book));
+    if (!got.ok) throw new Error('교재 파일을 다 받지 못해 공유를 바꾸지 못했어요. 인터넷 연결을 확인해 주세요.');
+    // 먼저 복사하고(지난번에 옮기다 남은 것은 지움) 다 되면 예전 폴더를 지움 → 중간에 멈춰도 잃는 것이 없음
+    await fsp.rm(to, { recursive: true, force: true });
+    await copyBookFiles(from, to);
+    await fsp.rm(from, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    return summarizeBook(readJsonSync(path.join(to, 'book.json')) || book, shared ? 'shared' : 'private');
   });
 
   /** 책을 열 때: 아직 받지 않은 원본 파일을 미리 받음 → { ok, missing, error? } */
@@ -766,8 +860,9 @@ function registerIpc() {
   /** 책에서 문항 ID 가 바뀌었을 때(번호 고침 등) 오답노트의 선택도 따라 바꿈 (다른 선생님 것은 각자 열 때) */
   ipcMain.handle('books:renameItems', async (_e, { bookId, renames, removed }) => {
     if (!isValidId(bookId)) return 0;
-    const book = readJsonSync(bookFile(bookId));
-    if (!book || !canEdit(book)) return 0;
+    const { dir, place } = locateBook(bookId);
+    const book = readJsonSync(path.join(dir, 'book.json'));
+    if (!book || !canEditBook(book, place)) return 0;
     const r = loadRenames(bookId);
     const n = r.last + 1;
     await writeJsonAtomic(renamesFile(bookId), { last: n, log: [...r.log, { n, renames: renames || {}, removed: removed || [] }].slice(-RENAME_KEEP) });
@@ -956,9 +1051,9 @@ function registerIpc() {
   // 남의 책이면 책에 있는 것과 다른 것만 내 폴더(members/<나>/transcripts/<책 id>.json)에 — 읽을 때 합침
   ipcMain.handle('books:getTranscripts', async (_e, id) => mergedTranscripts(id));
   ipcMain.handle('books:saveTranscripts', async (_e, { bookId, data } = {}) => {
-    const dir = bookDir(bookId);
+    const { dir, place } = locateBook(bookId);
     if (!fs.existsSync(dir)) return false; // 그 사이 지워진 책
-    if (canEdit(readJsonSync(bookFile(bookId)))) {
+    if (canEditBook(readJsonSync(path.join(dir, 'book.json')), place)) {
       await writeJsonAtomic(path.join(dir, 'transcripts.json'), data || {});
       return true;
     }
@@ -1114,6 +1209,7 @@ function flushChanges() {
     }
     const rel = path.relative(sharedDir(), abs).split(path.sep);
     if (rel[0] === 'books' && isValidId(rel[1])) out.books.add(rel[1]);
+    else if (rel[0] === 'members' && rel[2] === 'books' && isValidId(rel[3])) out.books.add(rel[3]); // 나만 보기 교재
     else if (rel[0] === 'members' && rel[2] === 'notes' && JSON_ID.test(rel[3] || '')) out.notes.add(rel[3].slice(0, -5));
     else if (rel[0] === 'members' && rel[2] === 'profile.json') out.notes.add('*');
     else if (rel[0] === 'students') out.students = true;

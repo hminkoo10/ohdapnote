@@ -141,7 +141,8 @@ function readonlyBanner(b) {
   return h(
     'div.readonly-banner',
     icon('eye'),
-    h('span', `생성자: ${b.createdBy?.name || '알 수 없음'} · 보기만 할 수 있어요 (만든 사람과 원장만 고칠 수 있어요)`),
+    // 원장이 보는 다른 선생님의 나만 보기 책은 그 선생님만 고침
+    h('span', `생성자: ${b.createdBy?.name || '알 수 없음'} · ${b.$shared === false ? '나만 보기 책이라 만든 선생님만 고칠 수 있어요' : '보기만 할 수 있어요 (만든 사람과 원장만 고칠 수 있어요)'}`),
     h('button.btn.btn-small.btn-primary', { onclick: (e) => copyToMine(b, e.currentTarget) }, icon('bookPlus'), '내 책으로 복사'),
   );
 }
@@ -160,6 +161,32 @@ async function copyToMine(b, btn) {
     btn.disabled = false;
     label.textContent = '내 책으로 복사';
   }
+}
+
+/** 학원 공유 켜고 끄기 (학원 공간의 내 책). 끄면 다른 선생님에게는 지워진 책처럼 보여서 먼저 물어봄 */
+async function toggleShared(b, input) {
+  const on = input.checked;
+  input.checked = !on; // 바뀌기 전까지는 그대로
+  if (bookBusy(b)) {
+    toast('이 책에서 하는 작업(분석 등)이 끝난 뒤에 바꿔 주세요.');
+    return;
+  }
+  const msg = '학원 공유를 끄면 이 책은 나만 보기가 돼요 (원장은 볼 수 있어요).\n다른 선생님 책장에서 사라지고, 이 책을 쓰는 다른 선생님의 오답노트에는 ‘지워진 책’으로 보여요.\n다시 켜면 그대로 돌아와요.';
+  if (!on && !(await confirmDialog(msg, { title: '학원 공유 끄기', ok: '공유 끄기', danger: true }))) return;
+  input.disabled = true;
+  try {
+    // 고친 내용을 먼저 저장 (옮기는 폴더에 같이 가게)
+    saver.cancel();
+    if (dirtySeq !== savedSeq) await saver.flush();
+    flushRenamesSoon.cancel();
+    await flushRenames();
+    const s = await api.setBookShared(b.id, on);
+    b.$shared = s.shared;
+    toast(s.shared ? '학원에 공유했어요. 학원 선생님 모두가 이 책을 쓸 수 있어요.' : '나만 보기로 바꿨어요.', { type: 'success' });
+  } catch (err) {
+    toast(`공유를 바꾸지 못했어요: ${errMsg(err)}`, { type: 'error', timeout: 8000 });
+  }
+  if (bs.book === b && state.view === 'book') render();
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +225,7 @@ async function reloadBook(change) {
     return;
   }
   // 저장된 내용이 그대로면(원본 파일만 받았거나 옮긴 결과만 바뀜) 다시 그리지 않음
-  if (fresh.updatedAt === b.updatedAt && fresh.$canEdit === b.$canEdit) return;
+  if (fresh.updatedAt === b.updatedAt && fresh.$canEdit === b.$canEdit && fresh.$shared === b.$shared) return;
   fresh.docs ||= { problem: null, answer: null };
   fresh.answerOverrides ||= {};
   const sources = await getSources(fresh);
@@ -231,12 +258,23 @@ function render({ enter = false, tabAnim = null, thumbFrom = null } = {}) {
   });
   // 학원 공간에서는 누가 만든 책인지 (내 책도)
   const creator = state.appInfo?.academy && b.createdBy ? h('span.creator', `생성자: ${b.createdBy.name || '알 수 없음'}`) : null;
+  // 학원 공간의 내 책: 학원 공유 켜고 끄기 (끄면 나만 보기 — 원장은 볼 수 있음)
+  const share =
+    state.appInfo?.academy && b.createdBy?.id && b.createdBy.id === state.appInfo.user?.id
+      ? h(
+          'label.switch.small.share-switch',
+          { title: b.$shared ? '학원 선생님 모두가 이 책을 보고 오답노트에 써요' : '나만 봐요 (원장은 볼 수 있어요)' },
+          h('input', { type: 'checkbox', checked: !!b.$shared, onchange: (e) => toggleShared(b, e.target) }),
+          h('span.sw'),
+          '학원 공유',
+        )
+      : null;
   const tab = (key, ic, label, extra) => h(`button.seg-tab${bs.tab === key ? '.active' : ''}`, { dataset: { tab: key }, onclick: () => switchTab(key) }, icon(ic), h('span', label), extra);
   const flaggedN = ROLES.reduce((s, r) => s + flaggedPages(b.docs[r]).length, 0);
   // 보기만 하는 책은 페이지 검토(고치는 화면) 없이 인식 결과만
   const tabs = h('nav.seg-tabs', h('span.seg-thumb'), tab('result', 'list', '인식 결과', flaggedN ? h('span.seg-count.warn', String(flaggedN)) : null), ro ? null : tab('review', 'scan', '페이지 검토·수정'));
   root.append(
-    topbar(h('div.topbar-crumb', h('button.btn.btn-ghost.btn-round#back-btn', { onclick: () => nav.home({ tab: 'books' }), title: '책장으로' }, icon('back')), h('span.crumb-kind', icon('library'), '책장'), h('span.crumb-sep', '/'), nameInput, creator, ro ? null : h('span.save-status', ''))),
+    topbar(h('div.topbar-crumb', h('button.btn.btn-ghost.btn-round#back-btn', { onclick: () => nav.home({ tab: 'books' }), title: '책장으로' }, icon('back')), h('span.crumb-kind', icon('library'), '책장'), h('span.crumb-sep', '/'), nameInput, creator, share, ro ? null : h('span.save-status', ''))),
     h(
       `main.sheet${enter ? '.view-enter' : ''}`,
       ro ? readonlyBanner(b) : null,
