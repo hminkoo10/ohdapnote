@@ -85,10 +85,12 @@ try {
   await win.waitForSelector('.book-card', { timeout: 5000 });
   await win.waitForTimeout(500);
   await shot('2-home-books');
+  if (await win.$('.shelf-tabs')) throw new Error('학원이 없는데 책장이 내 책장/공유 책장으로 나뉩니다');
   await win.click('.card-new:has-text("새 책 등록")');
   await win.fill('.modal input', '테스트 수학Ⅰ');
   await win.click('.modal .btn-primary');
   await win.waitForSelector('.doc-card[data-role="problem"] .drop-zone');
+  if (await win.$('.share-switch')) throw new Error('학원이 없는데 학원 공유 스위치가 있습니다');
 
   step('문제집/답지 올리기');
   await stubOpen([join(FIX, 'book-unit.pdf')]);

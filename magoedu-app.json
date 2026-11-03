@@ -10,7 +10,7 @@
   "shared": {
     "include": ["**"],
     "exclude": ["**/*.tmp"],
-    "lazy": ["books/*/problem-*", "books/*/answer-*"]
+    "lazy": ["books/*/problem-*", "books/*/answer-*", "members/*/books/*/problem-*", "members/*/books/*/answer-*"]
   },
   "legacy": [
     { "id": "standalone", "label": "따로 설치해서 쓰던 오답노트", "from": "{APPDATA}/OhdapNote/data", "to": "local/legacy" }

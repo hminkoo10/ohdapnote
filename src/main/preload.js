@@ -10,13 +10,14 @@ contextBridge.exposeInMainWorld('ohdap', {
 
   // 책 (문제집 + 답지 + 분석 결과)
   listBooks: () => ipcRenderer.invoke('books:list'),
-  createBook: (name) => ipcRenderer.invoke('books:create', { name }),
+  createBook: (name, shared) => ipcRenderer.invoke('books:create', { name, shared }), // shared 를 빼면 학원 공유
   getBook: (id) => ipcRenderer.invoke('books:get', id),
   saveBook: (book) => ipcRenderer.invoke('books:save', book),
   saveBookSync: (book) => ipcRenderer.sendSync('books:saveSync', book),
   deleteBook: (id) => ipcRenderer.invoke('books:delete', id),
   renameBookItems: (bookId, renames, removed) => ipcRenderer.invoke('books:renameItems', { bookId, renames, removed }),
   copyBook: (id) => ipcRenderer.invoke('books:copy', id), // 남의 책을 내 책으로
+  setBookShared: (id, shared) => ipcRenderer.invoke('books:setShared', { id, shared }), // 학원 공유 켜고 끄기 (만든 사람만)
   ensureBookFiles: (id) => ipcRenderer.invoke('books:ensureFiles', id), // 아직 받지 않은 원본 받기
 
   // 학생 오답노트 (책에서 고른 문항)
