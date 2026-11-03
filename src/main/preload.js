@@ -4,6 +4,20 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('ohdap', {
   appInfo: () => ipcRenderer.invoke('app:info'),
+  requestUpdateRestart: () => ipcRenderer.invoke('app:restart-for-update'),
+  updateRestartReady: (state) => ipcRenderer.invoke('app:restart-ready', state),
+  finishUpdateRestart: (result) => ipcRenderer.invoke('app:finish-update-restart', result),
+  reportRestartState: (state) => ipcRenderer.send('app:restart-state', state),
+  onUpdateAvailable: (callback) => {
+    const listener = (_e, version) => callback(version);
+    ipcRenderer.on('app:update-available', listener);
+    return () => ipcRenderer.removeListener('app:update-available', listener);
+  },
+  onUpdateRestart: (callback) => {
+    const listener = (_e, request) => callback(request);
+    ipcRenderer.on('app:update-restart', listener);
+    return () => ipcRenderer.removeListener('app:update-restart', listener);
+  },
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),

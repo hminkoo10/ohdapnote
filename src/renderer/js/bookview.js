@@ -3,7 +3,7 @@
 import { h, clear, toast, confirmDialog, debounce, formatDate, icon, animateOut } from './ui.js';
 import { analyzeDocument, parsePageRange, reanalyzeSinglePage, replacePageItems } from './analyze.js';
 import { ROLES, ROLE_NAME, newDoc, addFiles, pageLabel, bookPage, computeMatches, normalizeDoc, findItem, flaggedPages, missingNumbers, missingCount } from './store.js';
-import { api, state, nav, leaveHooks, makeSaver, getSource, getSources, dropSources, clearPreviewCache, renderPreview, renderQTable, runGeminiPages, geminiReady, aiOff, jobs, findJob, startJob, holdBook, holdSource, liveBook, errMsg } from './shared.js';
+import { api, state, nav, leaveHooks, makeSaver, getSource, getSources, dropSources, clearPreviewCache, renderPreview, renderQTable, runGeminiPages, geminiReady, aiOff, jobs, findJob, startJob, holdBook, holdSource, liveBook, errMsg, restartSaveHooks, restartPendingChecks, setRestartBusy } from './shared.js';
 import { topbar } from './chrome.js';
 import { createEditor } from './editor.js';
 import { placeSegThumb } from './home.js';
@@ -20,6 +20,9 @@ const saver = makeSaver(async (b) => {
   await api.saveBook(b);
   savedSeq = seq;
 });
+const renameSaver = makeSaver((batch) => api.renameBookItems(batch.bookId, batch.renames, batch.removed));
+const jobSaver = makeSaver((book) => api.saveBook(book));
+const deferredRenames = new Set();
 
 const bs = {
   book: null,
@@ -62,8 +65,8 @@ async function saveJobBook(b) {
     await saver.flush();
     return;
   }
-  b.updatedAt = Date.now();
-  await api.saveBook(b).catch((err) => toast(`${b.name}: 저장하지 못했어요: ${err.message}`, { type: 'error', timeout: 8000 }));
+  jobSaver.set(b);
+  await jobSaver.flush();
 }
 
 /** 작업이 바꾼 문항 ID 를 오답노트에도 (그 책 화면이면 평소처럼 모아서) */
@@ -71,10 +74,18 @@ function noteRenamesFor(b, renames, removed = []) {
   if (!canSave(b)) return;
   if (bs.book === b) return noteRenames(renames, removed);
   if (!Object.keys(renames || {}).length && !removed.length) return;
-  const run = () => api.renameBookItems(b.id, renames || {}, removed).catch((err) => console.error(err));
+  const run = async () => {
+    if (!deferredRenames.delete(run)) return true;
+    restartSaveHooks.delete(run);
+    renameSaver.set({ bookId: b.id, renames: renames || {}, removed });
+    return renameSaver.flush();
+  };
+  deferredRenames.add(run);
   // 오답노트 화면이 열려 있으면 그 화면이 나가면서 저장할 때 덮어쓰지 않게, 나간 뒤에
-  if (state.view === 'note') leaveHooks.add(run);
-  else run();
+  if (state.view === 'note') {
+    leaveHooks.add(run);
+    restartSaveHooks.add(run);
+  } else run();
 }
 
 function markDirty() {
@@ -90,13 +101,16 @@ function noteRenames(renames, removed = []) {
   flushRenamesSoon();
 }
 const flushRenamesSoon = debounce(flushRenames, 800);
+restartSaveHooks.add(flushRenames);
+restartPendingChecks.add(() => deferredRenames.size > 0 || Object.keys(bs.pendingRenames).length > 0 || bs.pendingRemoved.length > 0);
 async function flushRenames() {
   const renames = bs.pendingRenames;
   const removed = bs.pendingRemoved;
   bs.pendingRenames = {};
   bs.pendingRemoved = [];
   if (!canSave(bs.book) || (!Object.keys(renames).length && !removed.length)) return;
-  await api.renameBookItems(bs.book.id, renames, removed).catch((err) => console.error(err));
+  renameSaver.set({ bookId: bs.book.id, renames, removed });
+  return renameSaver.flush();
 }
 
 function rematch() {
@@ -872,6 +886,7 @@ async function deepPage(role, page) {
   if (!doc || !src || !canSave(b)) return;
   const close = toast(`${pageLabel(doc, page)} 꼼꼼히 다시 찾는 중… (고해상도로 한 번 더 읽어요)`, { timeout: 0 });
   bs.working++;
+  setRestartBusy('deep-page', true);
   try {
     const before = (doc.items || []).filter((it) => it.page === page);
     const { items, page: info, meta } = await reanalyzeSinglePage(src, doc, page, { ocrLang: state.settings.ocrLang, deep: true, role });
@@ -916,6 +931,7 @@ async function deepPage(role, page) {
     toast(`다시 찾기 실패: ${err.message}`, { type: 'error' });
   } finally {
     bs.working--;
+    setRestartBusy('deep-page', false);
   }
 }
 
