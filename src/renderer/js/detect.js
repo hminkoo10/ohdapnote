@@ -721,6 +721,26 @@ function groupKey(c) {
 }
 const sigKey = (sig) => sig.key;
 
+/**
+ * 한 쪽 번호 사슬 고르기 (단 → 위→아래 순서).
+ * 줄마다 두 단을 건너 번호 매긴 쪽(105 | 106, 107 | 108 …)은 그 순서로는 번호가 거꾸로 가는 곳마다 깎여
+ * 두 줄뿐인 쪽에서 하나를 버리므로(129, 131 | 130, 132 → 129, 131, 132), 줄 순서(위→아래, 같은 높이면 왼쪽부터)로도 골라 보고
+ * 그쪽이 더 길면서 단을 번갈아 1씩 이어지는 모양일 때만 씀 (결과는 번호 순서)
+ */
+function chooseChainByRows(cands, prevLast, priorFn) {
+  const chain = chooseChain(cands, prevLast, priorFn);
+  if (cands.length < 3 || cands.every((c) => c.col === cands[0].col)) return chain;
+  const order = cands
+    .map((_, i) => i)
+    .sort((i, j) => {
+      const a = cands[i];
+      const b = cands[j];
+      return Math.abs(a.y0 - b.y0) < 0.5 * Math.max(a.h, b.h) ? a.x0 - b.x0 : a.y0 - b.y0;
+    });
+  const rows = chooseChain(order.map((i) => cands[i]), prevLast, (k) => priorFn(order[k]));
+  return rows.length > chain.length && readsAcrossColumns(rows, (c) => c.y0) ? rows : chain;
+}
+
 function runSelection(pages, opts, signatureIn) {
   // 1단계: 페이지별(스타일 정보 없이) 선택 → 대표 스타일 추정
   let signature = signatureIn || null;
@@ -728,7 +748,7 @@ function runSelection(pages, opts, signatureIn) {
     const firstPass = [];
     let prev = opts.prevLast ?? null;
     for (const p of pages) {
-      const chain = chooseChain(p.candidates, prev, (i) => priorLocal(p.candidates, i));
+      const chain = chooseChainByRows(p.candidates, prev, (i) => priorLocal(p.candidates, i));
       if (chain.length) prev = chain[chain.length - 1].num;
       firstPass.push(...chain);
     }
@@ -739,7 +759,7 @@ function runSelection(pages, opts, signatureIn) {
   let prev = opts.prevLast ?? null;
   for (const p of pages) {
     const priorFn = signature ? (i) => priorWithStyle(p.candidates, i, signature) : (i) => priorLocal(p.candidates, i);
-    const chain = chooseChain(p.candidates, prev, priorFn);
+    const chain = chooseChainByRows(p.candidates, prev, priorFn);
     if (chain.length) prev = chain[chain.length - 1].num;
     anchors.set(p.index, chain);
   }
@@ -1053,6 +1073,34 @@ export function dropStrayRuns(order, anchors, key) {
 }
 
 /**
+ * 한 쪽 번호(또는 문항)들의 읽는 순서. 보통은 받은 순서(단 → 위→아래) 그대로지만,
+ * 두 단에 문항을 짝지어 놓고 줄마다 왼쪽→오른쪽으로 번호 매긴 쪽(자이스토리 "잘 틀리는 유형 훈련": 105 | 106, 107 | 108 …)은 번호 순서.
+ * 단 순서로는 번호가 건너뛰는데, 번호 순서로 놓으면 1씩 빠짐없이 이어지고, 다음 번호가 늘 다른 단에 있으면서
+ * 오른쪽 단으로는 같은 줄(오른쪽이 조금 내려앉기도 함), 왼쪽 단으로는 아랫줄로 갈 때만 그렇게 봄
+ * (진짜 빠진 번호가 있는 쪽, 단 순서로 이미 이어지는 보통 쪽은 그대로)
+ * @param {object[]} list 단 → 위→아래 순서
+ * @param {(c:object)=>number} [yOf] 세로 위치
+ */
+export function rowMajorOrder(list, yOf = (c) => c.y0) {
+  if (list.every((c, i) => i === 0 || c.num === list[i - 1].num + 1)) return list;
+  const seq = [...list].sort((a, b) => a.num - b.num);
+  return readsAcrossColumns(seq, yOf) ? seq : list;
+}
+
+/** seq(번호 순서)가 1씩 빠짐없이 이어지며 줄마다 왼쪽→오른쪽으로 단을 건너가는 모양인지 (3개 이상, 같은 말머리) */
+function readsAcrossColumns(seq, yOf) {
+  if (seq.length < 3 || seq.some((c) => (c.prefix || '') !== (seq[0].prefix || ''))) return false;
+  const tol = 0.01;
+  for (let i = 1; i < seq.length; i++) {
+    const a = seq[i - 1];
+    const b = seq[i];
+    if (b.num !== a.num + 1 || a.col == null || b.col == null || a.col === b.col) return false;
+    if (b.col > a.col ? yOf(b) < yOf(a) - tol : yOf(b) <= yOf(a) + tol) return false;
+  }
+  return true;
+}
+
+/**
  * 페이지별 "확인 필요" 표시
  * @param {number[]} order 분석한 페이지 번호(순서대로)
  * @param {Map<number, object[]>} anchors
@@ -1313,12 +1361,21 @@ export function assignIds(items) {
   return items;
 }
 
-/** 문항을 읽는 순서로 정렬(쪽 → 구역 → 단 → 위치, 같은 줄에 나란하면 왼쪽부터) */
+/**
+ * 문항을 읽는 순서로 정렬(쪽 → 구역 → 단 → 위치, 같은 줄에 나란하면 왼쪽부터).
+ * 줄마다 두 단을 건너 번호 매긴 쪽(105 | 106, 107 | 108 …)은 번호 순서 (rowMajorOrder)
+ */
 export function sortItems(items) {
   const pos = (r, s) => (Math.abs(r.y - s.y) < 0.008 ? r.x - s.x : r.y - s.y);
-  return [...items].sort(
+  const sorted = [...items].sort(
     (a, b) => a.page - b.page || (a.zone ?? 0) - (b.zone ?? 0) || (a.col ?? 0) - (b.col ?? 0) || pos(a.rects[0], b.rects[0]),
   );
+  const out = [];
+  for (let i = 0, j; i < sorted.length; i = j) {
+    for (j = i + 1; j < sorted.length && sorted[j].page === sorted[i].page; j++);
+    out.push(...rowMajorOrder(sorted.slice(i, j), (it) => it.rects[0]?.y ?? 0));
+  }
+  return out;
 }
 
 /** rect 의 중심이 속한 단 번호 */

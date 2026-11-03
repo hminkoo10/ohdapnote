@@ -435,6 +435,56 @@ test('flagPages: 번호가 없는 쪽이라도 앞뒤 번호가 체계마다 그
   assert.deepEqual(flags.get(3), ['번호를 찾지 못함']);
 });
 
+test('rowMajorOrder + flagPages: 두 단에 짝지어 줄마다 왼쪽→오른쪽으로 번호 매긴 쪽(105 | 106, 107 | 108 …)은 빠진 번호가 아님, 진짜 빠진 쪽은 그대로 표시', async () => {
+  const { rowMajorOrder } = await import('../../src/renderer/js/detect.js');
+  // 자이스토리 "잘 틀리는 유형 훈련" 쪽 (실제 위치): 오른쪽 번호가 왼쪽보다 조금 내려앉아 있음
+  const mk = (num, col, y) => ({ num, digits: String(num), style: 'plain', prefix: '', col, x0: col ? 0.523 : 0.093, x1: col ? 0.553 : 0.123, y0: y, y1: y + 0.0194, h: 0.0194, relX: col ? -0.002 : 0.001, hRatio: 1.52, conf: 100, padded: false, font: 'sans-serif|100|-21|', ocr: false });
+  const L = [0.141, 0.398, 0.668];
+  const R = [0.175, 0.432, 0.702];
+  const paired = (first, rows, skip = []) => [0, 1, 2].slice(0, rows).flatMap((r) => [mk(first + 2 * r, 0, L[r]), mk(first + 2 * r + 1, 1, R[r])]).filter((c) => !skip.includes(c.num));
+  const colMajor = (first, n) => Array.from({ length: n }, (_, i) => mk(first + i, i < n / 2 ? 0 : 1, 0.12 + (i % (n / 2)) * 0.2));
+  const sorted = (cands) => cands.sort((a, b) => a.col - b.col || a.y0 - b.y0); // 단 → 위→아래
+  const pages = [
+    { index: 0, candidates: sorted(colMajor(97, 8)) }, // 보통 쪽 (왼쪽 97~100, 오른쪽 101~104)
+    { index: 1, candidates: sorted(paired(105, 3)) },
+    { index: 2, candidates: sorted(paired(111, 2)) }, // 두 줄뿐인 쪽 (자이 26쪽: 129 | 130, 131 | 132)
+    { index: 3, candidates: sorted(paired(115, 2, [116])) }, // 오른쪽 116 을 정말 놓친 쪽
+    { index: 4, candidates: sorted(paired(119, 3, [124])) }, // 마지막 줄은 왼쪽 123 만
+    { index: 5, candidates: sorted(colMajor(124, 6)) },
+  ];
+  const { anchors } = selectAnchors(pages);
+  assert.deepEqual(anchors.get(1).map((a) => a.num), [105, 107, 109, 106, 108, 110]); // 세 줄이면 단 순서로도 모두 고름
+  assert.deepEqual(anchors.get(2).map((a) => a.num), [111, 112, 113, 114]); // 단 순서로는 112 를 버렸던 쪽
+  for (const [idx, chain] of anchors) anchors.set(idx, rowMajorOrder(chain));
+  assert.deepEqual(anchors.get(0).map((a) => a.num), [97, 98, 99, 100, 101, 102, 103, 104]);
+  assert.deepEqual(anchors.get(1).map((a) => a.num), [105, 106, 107, 108, 109, 110]);
+  assert.deepEqual(anchors.get(3).map((a) => a.num), [115, 117, 118]); // 빠진 번호가 있으면 그대로
+  assert.deepEqual(anchors.get(4).map((a) => a.num), [119, 120, 121, 122, 123]); // 마지막 번호가 123 이라 다음 쪽 124 와 이어짐
+  assert.deepEqual(anchors.get(5).map((a) => a.num), [124, 125, 126, 127, 128, 129]);
+  const layouts = new Map([0, 1, 2, 3, 4, 5].map((i) => [i, { blank: false, inkRatio: 0.1 }]));
+  const flags = flagPages([0, 1, 2, 3, 4, 5], anchors, layouts);
+  assert.deepEqual([...flags.keys()], [3]);
+  assert.deepEqual(flags.get(3), ['중간에 빠진 번호가 있음']);
+  // 오른쪽 단 번호가 왼쪽 위로 올라가 있으면(단 순서로 읽는 쪽의 번호가 잘못 섞인 것) 짝 쪽으로 보지 않음
+  const odd = [mk(5, 0, 0.4), mk(7, 0, 0.7), mk(6, 1, 0.1)];
+  assert.deepEqual(rowMajorOrder(odd).map((c) => c.num), [5, 7, 6]);
+});
+
+test('sortItems: 줄마다 두 단을 건너 번호 매긴 쪽은 번호 순서로, 보통 쪽(단 → 위→아래)과 한 단 안에 나란한 문항은 그대로', async () => {
+  const { sortItems, assignIds } = await import('../../src/renderer/js/detect.js');
+  const it = (page, col, num, x, y, w = 0.389) => ({ page, zone: 0, col, number: String(num), num, prefix: '', rects: [{ page, x, y, w, h: 0.05 }], source: 'text', conf: 100 });
+  // 자이스토리 22쪽 (실제 영역 위치)
+  const p22 = [it(21, 0, 105, 0.086, 0.136), it(21, 0, 107, 0.086, 0.395), it(21, 0, 109, 0.086, 0.655), it(21, 1, 106, 0.519, 0.169), it(21, 1, 108, 0.519, 0.425), it(21, 1, 110, 0.519, 0.696)];
+  // 보통 2단 쪽, 한 단 안에 0001 | 0002 가 나란한 쪽
+  const p21 = [it(20, 1, 101, 0.519, 0.14), it(20, 0, 97, 0.086, 0.14), it(20, 0, 98, 0.086, 0.5), it(20, 1, 102, 0.519, 0.5)];
+  const row = [it(5, 0, 2, 0.27, 0.15, 0.18), it(5, 0, 1, 0.08, 0.15, 0.18), it(5, 0, 3, 0.08, 0.3, 0.18)];
+  // 오른쪽 번호(130)를 정말 놓친 쪽은 단 순서 그대로
+  const p26 = [it(25, 1, 132, 0.519, 0.57), it(25, 0, 129, 0.086, 0.136), it(25, 0, 131, 0.086, 0.533)];
+  const out = assignIds(sortItems([...p26, ...p22.reverse(), ...row, ...p21]));
+  assert.deepEqual(out.map((i) => i.num), [1, 2, 3, 97, 98, 101, 102, 105, 106, 107, 108, 109, 110, 129, 131, 132]);
+  assert.deepEqual(out.filter((i) => i.page === 21).map((i) => i.id), ['21:105', '21:106', '21:107', '21:108', '21:109', '21:110']);
+});
+
 test('computeItems: 해설이 단원 제목 띠 위쪽 오른쪽 단으로 이어질 때, 띠(구역 아래 끝)에서 닫지 않음', () => {
   const w = 120;
   const h = 160;
