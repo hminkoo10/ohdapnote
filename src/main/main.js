@@ -24,6 +24,9 @@ log.transports.file.level = 'info';
 
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
 const isSmokeTest = process.env.OHDAP_E2E === '1';
+// 배포본에서는 개발자 도구를 막는다 (창의 개발자 도구, 원격 디버깅으로 붙기). 개발 실행에서만 열 수 있음
+const devTools = !app.isPackaged;
+if (app.isPackaged && ['remote-debugging-port', 'remote-debugging-pipe', 'inspect', 'inspect-brk'].some((s) => app.commandLine.hasSwitch(s))) app.exit(1);
 
 if (process.env.OHDAP_USER_DATA) {
   app.setPath('userData', process.env.OHDAP_USER_DATA);
@@ -371,6 +374,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
+      devTools,
     },
   });
 
@@ -384,7 +388,7 @@ function createWindow() {
     if (!url.startsWith('app://bundle/')) event.preventDefault();
   });
   mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.type === 'keyDown' && (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i'))) {
+    if (devTools && input.type === 'keyDown' && (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i'))) {
       mainWindow.webContents.toggleDevTools();
       event.preventDefault();
     }
