@@ -531,3 +531,97 @@ test('extractCandidates: 소단원 제목 번호표("❶ 제곱근의 뜻과 표
   ];
   assert.deepEqual(extractCandidates(tokens, one).candidates.map((c) => c.digits), ['001', '002', '003', '4']);
 });
+
+// 자이스토리 글자 레이어 (실제 좌표·크기): 문항 번호 글꼴 N(0.0182~0.0194), 본문 수식 T·글 P(0.0127)
+const XN = 'sans-serif|100|-21|';
+const XT = 'serif|75|-25|';
+const XP = 'serif|80|-25|';
+const xt = (str, x0, x1, y, h = 0.0127, font = XT) => ({ str, x0, x1, y0: y, y1: y + h, font });
+const XI2 = { columns: [{ x0: 0.092, x1: 0.458 }, { x0: 0.521, x1: 0.908 }], bodyTop: 0.07, bodyBottom: 0.92 };
+
+test('extractCandidates: 한 줄에 문항이 둘이면 앞 문항 답 빈칸 "(    )" 바로 뒤 번호도 번호 (괄호 안에 글자가 있는 수식 뒤 숫자는 아님)', () => {
+  const row = (a, b, y) => [
+    xt(a, 0.523, 0.56, y, 0.0182, XN), xt('√2', 0.57, 0.588, y), xt('(', 0.657, 0.663, y, 0.0127, XP), xt(')', 0.699, 0.705, y, 0.0127, XP),
+    xt(b, 0.715, 0.752, y, 0.0182, XN), xt('-√2.1', 0.762, 0.81, y), xt('(', 0.859, 0.865, y, 0.0127, XP), xt(')', 0.901, 0.907, y, 0.0127, XP),
+  ];
+  const tokens = [
+    ...row('026', '027', 0.343),
+    ...row('028', '029', 0.376),
+    // 수식 "(−3)" 바로 뒤의 숫자: 괄호 안이 비어 있지 않음
+    xt('030', 0.523, 0.56, 0.408, 0.0182, XN), xt('(', 0.57, 0.576, 0.408, 0.0127, XP), xt('-3', 0.58, 0.6, 0.408), xt(')', 0.604, 0.61, 0.408, 0.0127, XP), xt('2', 0.62, 0.628, 0.408),
+  ];
+  const { candidates } = extractCandidates(tokens, XI2);
+  assert.deepEqual(candidates.map((c) => c.digits), ['026', '027', '028', '029', '030']);
+});
+
+test('extractCandidates: 앞 문항 수식 끝이 바로 앞까지 와도, 같은 줄 맨 앞 번호가 있고 위아래 번호들과 줄을 맞춘 같은 모양 번호는 한 줄에 나란한 둘째 문항', () => {
+  const tokens = [];
+  ['001', '003', '005'].forEach((n, i) => {
+    const y = 0.169 + i * 0.04;
+    tokens.push(xt(n, 0.093, 0.13, y, 0.0182, XN), xt('√2', 0.14, 0.16, y), xt(String(+n + 1).padStart(3, '0'), 0.285, 0.322, y, 0.0182, XN), xt('√3', 0.331, 0.35, y));
+  });
+  // 017 3√10÷√6÷√15  018 … (수식 끝 0.259, 018 시작 0.285)
+  tokens.push(xt('017', 0.093, 0.13, 0.745, 0.0182, XN), xt('3√10', 0.14, 0.176, 0.745), xt('÷√6', 0.185, 0.214, 0.745), xt('÷√15', 0.223, 0.259, 0.745), xt('018', 0.285, 0.319, 0.745, 0.0182, XN), xt('√2', 0.33, 0.35, 0.745));
+  // 같은 번호 글꼴이라도 다른 번호들과 줄이 안 맞으면, 줄이 맞아도 본문 글꼴이면 아님
+  tokens.push(xt('019', 0.093, 0.13, 0.82, 0.0182, XN), xt('x+y=', 0.14, 0.29, 0.82), xt('7', 0.3, 0.31, 0.82, 0.0182, XN));
+  tokens.push(xt('021', 0.093, 0.13, 0.86, 0.0182, XN), xt('a의', 0.14, 0.27, 0.86, 0.0127, XP), xt('8', 0.285, 0.294, 0.86));
+  const { candidates } = extractCandidates(tokens, XI2);
+  assert.deepEqual(candidates.map((c) => c.digits), ['001', '002', '003', '004', '005', '006', '017', '018', '019', '021']);
+});
+
+test('extractCandidates: 그래프 눈금 같은 작은 줄이 많은 쪽에서도 본문 크기 문항 글은 제목이 아님 (번호를 빼지 않음)', () => {
+  const tokens = [
+    // 진짜 제목 (본문보다 확실히 큼)
+    xt('이차함수의', 0.13, 0.2, 0.11, 0.016, XP), xt('그래프', 0.21, 0.26, 0.11, 0.016, XP),
+    xt('105', 0.093, 0.13, 0.443, 0.0194, XN), xt('이차함수', 0.144, 0.208, 0.446, 0.0127, XP), xt('y=2(x+1)²-3의', 0.216, 0.355, 0.446),
+    xt('대하여', 0.093, 0.13, 0.468, 0.0127, XP), xt('대칭이동시킨', 0.14, 0.22, 0.468, 0.0127, XP),
+    xt('106', 0.093, 0.13, 0.553, 0.0194, XN), xt('이차함수', 0.144, 0.207, 0.556, 0.0127, XP), xt('y=-3(x+1)²-2의', 0.211, 0.361, 0.556),
+    xt('대하여', 0.093, 0.13, 0.578, 0.0127, XP), xt('대칭이동한', 0.14, 0.21, 0.578, 0.0127, XP),
+  ];
+  // 오른쪽 단 그래프의 라벨 ("y", "O", "x") — 모든 줄의 가운데 높이가 0.0091 이 됨
+  for (let i = 0; i < 12; i++) tokens.push(xt(['y', 'O', 'x'][i % 3], 0.6 + (i % 4) * 0.05, 0.607 + (i % 4) * 0.05, 0.17 + i * 0.02, 0.0091));
+  const { candidates, headings } = extractCandidates(tokens, XI2);
+  assert.deepEqual(candidates.map((c) => c.digits), ['105', '106']);
+  assert.equal(headings.length, 1);
+  assert.ok(Math.abs(headings[0].y0 - 0.11) < 1e-9);
+});
+
+test('extractCandidates: 번호 뒤 꺾쇠 기호 "<x>는" 은 부등호가 아니고, 단 경계까지 뻗은 그림의 작은 라벨은 앞 글자가 아님', () => {
+  const tokens = [
+    xt('153', 0.523, 0.56, 0.385, 0.0194, XN), xt('<x>는', 0.574, 0.635, 0.389), xt('자연수', 0.642, 0.689, 0.389, 0.0127, XP),
+    // 줄 맨 앞 수식 "3 < x" 는 그대로 번호가 아님
+    xt('3', 0.523, 0.531, 0.45), xt('<', 0.545, 0.555, 0.45), xt('x', 0.565, 0.573, 0.45),
+    // 131 바로 왼쪽의 그림 라벨 "y", "O" (높이 0.0091)
+    xt('y', 0.502, 0.508, 0.608, 0.0091), xt('O', 0.513, 0.523, 0.629, 0.0091),
+    xt('131', 0.523, 0.556, 0.616, 0.0194, XN), xt('이차함수', 0.574, 0.639, 0.62, 0.0127, XP),
+    // 본문 크기 글자가 바로 앞이면 여전히 줄 가운데 숫자
+    xt('값은', 0.6, 0.64, 0.7, 0.0127, XP), xt('7', 0.645, 0.656, 0.7, 0.0194, XN),
+  ];
+  const { candidates } = extractCandidates(tokens, XI2);
+  assert.deepEqual(candidates.map((c) => c.digits), ['153', '131']);
+});
+
+test('selectAnchors·dropStrayRuns: 두 단에 걸쳐 가로로 번호가 이어지는 쪽("021 | 022 / 023 | 024")도 번호를 다 고르고 버리지 않음', async () => {
+  const { dropStrayRuns } = await import('../../src/renderer/js/detect.js');
+  const mk = (num, col, y) => {
+    const x0 = col ? 0.523 : 0.093;
+    return { num, digits: String(num).padStart(3, '0'), style: 'plain', prefix: '', col, x0, x1: x0 + 0.037, y0: y, y1: y + 0.0194, h: 0.0194, relX: 0.001, hRatio: 1.52, conf: 100, padded: true, font: XN, ocr: false };
+  };
+  // 보통 쪽(단 → 위아래) 사이에 가로로 이어지는 쪽 (오른쪽 단 번호가 왼쪽보다 조금 아래)
+  const colMajor = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => mk(a + i, i < (b - a + 1) / 2 ? 0 : 1, 0.12 + (i % Math.ceil((b - a + 1) / 2)) * 0.25));
+  const rowMajor = (a, rows) => Array.from({ length: 2 * rows }, (_, i) => mk(a + i, i % 2, 0.141 + Math.floor(i / 2) * 0.26 + (i % 2) * 0.034));
+  const sorted = (list) => list.sort((a, b) => a.col - b.col || a.y0 - b.y0); // 후보는 읽는 순서(단 → 위아래)로 들어옴
+  const pages = [colMajor(1, 6), colMajor(7, 12), rowMajor(13, 2), rowMajor(17, 3), colMajor(23, 28), colMajor(29, 34)].map((list, index) => ({ index, candidates: sorted(list) }));
+  const { anchors } = selectAnchors(pages);
+  assert.equal(dropStrayRuns(pages.map((p) => p.index), anchors, '|3'), 0);
+  const got = pages.flatMap((p) => anchors.get(p.index).map((a) => a.num)).sort((a, b) => a - b);
+  assert.deepEqual(got, Array.from({ length: 34 }, (_, i) => i + 1));
+  // 읽는 순서(단 → 위아래)로 들어온 쪽: 025 → 022 처럼 조금 거꾸로 가도 한 덩어리
+  const plain = (num) => ({ num, digits: String(num).padStart(3, '0'), padded: true, prefix: '' });
+  const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => plain(a + i));
+  const read = new Map([[0, range(1, 20)], [1, [21, 23, 25, 22, 24, 26].map(plain)], [2, [27, 29, 31, 28, 30, 32].map(plain)], [3, range(33, 50)]]);
+  assert.equal(dropStrayRuns([0, 1, 2, 3], read, '|3'), 0);
+  // 해설 쪽 가운데서 다음 단원이 25번부터 시작해도(앞 번호는 다른 곳) 앞 단원 끝 번호는 둠
+  const answers = new Map([[0, range(130, 149)], [1, [plain(150), plain(151), ...range(25, 31)]], [2, range(32, 45)]]);
+  assert.equal(dropStrayRuns([0, 1, 2], answers, '|3'), 0);
+});
