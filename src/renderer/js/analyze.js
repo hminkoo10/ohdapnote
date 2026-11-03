@@ -17,6 +17,7 @@ import {
   fillGapsFromCandidates,
   chooseExpectedChain,
   dropStrayRuns,
+  rowMajorOrder,
   byReadingOrder,
   schemeKey,
   mergeFigureColumns,
@@ -768,6 +769,8 @@ export async function analyzeDocument(src, opts) {
   if (ocrList.length) await fillOcrGaps(src, results, anchors, signature, { signal, onProgress });
   // 번호가 건너뛴 곳은 버려진 후보에서 다시 찾아 채움
   fillGapsFromCandidates(results, anchors, signatures);
+  // 줄마다 두 단을 건너 번호 매긴 쪽(105 | 106, 107 | 108 …)은 번호 순서가 읽는 순서 (단 순서로는 번호가 건너뛰어 보임)
+  for (const [idx, chain] of anchors) anchors.set(idx, rowMajorOrder(chain));
   // 앞뒤 번호 흐름과 동떨어진 짧은 덩어리(목차·만화 쪽, 부록 표에서 잘못 읽은 숫자)는 뺌
   if (signature) dropStrayRuns(pages, anchors, `${signature.prefix || ''}|${signature.padded ? signature.digitsLen : 0}`);
 
