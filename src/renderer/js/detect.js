@@ -408,6 +408,15 @@ export function extractCandidates(tokens, layout, opts = {}) {
     if (layout?.hasHeader && cy < bodyTop) continue;
     if (layout?.hasFooter && cy > bodyBottom) continue;
     if (hasLeftNeighbor(w)) continue;
+    // 소단원 제목의 번호표(자이스토리 "❶ 제곱근의 뜻과 표현"): 바로 뒤 한글 제목이 번호보다 확실히 크고 본문보다도 크면 번호가 아님
+    // (문항 번호는 뒤 글자보다 크거나 같음. 제목 글씨가 본문의 1.2배가 안 돼 위의 제목 줄 찾기에 걸리지 않는 책)
+    if (!opts.ocr && !prefix && parsed.style === 'plain') {
+      const hOf = (u) => u.h ?? u.y1 - u.y0;
+      const gap = 2.5 * hOf(numWord);
+      let title = null;
+      for (const u of neighbours(numWord)) if (u.x0 > numWord.x1 - 0.001 && u.x0 - numWord.x1 <= gap && (!title || u.x0 < title.x0)) title = u;
+      if (title && /^[가-힣]/.test(title.str) && hOf(title) >= 1.2 * hOf(numWord) && hOf(title) >= 1.1 * bodyH) continue;
+    }
     // 바로 뒤가 동그라미 답(①~⑤)이면 정답표 칸일 수 있음 (dropAnswerRows)
     candidates.push({ ...make(parsed, prefix, w, numWord), answerAfter: /^[①-⑤]/.test(str0(nextWord(numWord) || { str: '' })) });
   }
