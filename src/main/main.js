@@ -19,6 +19,7 @@ const ai = require('./ai');
 const mathocr = require('./mathocr');
 const cloud = require('./magoedu-cloud');
 const datasign = require('./datasign');
+const { mergeNote } = require('./notemerge');
 
 log.initialize();
 log.transports.file.level = 'info';
@@ -90,11 +91,14 @@ const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
 // 저장 위치
 //   학원 공간 (MAGOEDU_ACADEMY_DIR, 같은 학원 선생님 모두가 봄 — 통합 클라우드 docs/INTEGRATION.md 4-1)
 //     books/<id>/book.json · 원본 파일 · transcripts.json · renames.json   학원 공유 교재 (만든 사람·원장만 고침)
-//     students/<id>.json                                                   학생 명단 (누구나 등록, 등록한 사람·원장만 고침)
-//     academy.json                                                         학원 공용 AI 키 (원장만 고침)
-//     members/<계정>/notes/<id>.json · transcripts/<책 id>.json · profile.json   내 오답노트 (나와 원장만 봄, 나만 고침)
+//     students/<학생 id>/notes/<id>.json                                    학생 오답노트 (학원 사람 누구나 고침, 지운 학생은 보기만)
+//     members/<계정>/notes/<id>.json                                        학생을 정하지 않은 오답노트 (나와 원장만 봄, 나만 고침)
+//     members/<계정>/transcripts/<책 id>.json · profile.json
 //     members/<계정>/books/<id>/ (books/<id>/ 와 같은 구조)                   나만 보기 교재 (나와 원장만 봄, 나만 고침)
-//   학원이 없는 계정은 개인 공간의 shared/ 를 같은 구조로 씀 (공유는 안 됨)
+//   학생 명단·학원 AI 는 통합 클라우드에 있음 (MAGOEDU_ACADEMY_INFO 파일로 받고 고칠 때는 통합 클라우드에 부탁 — 4-2)
+//     예전 0.3 의 students/<id>.json · academy.json 은 읽지 않음 (서버가 명단·학원 AI 로 가져감)
+//   학원이 없는 계정은 개인 공간의 shared/ 를 같은 구조로 씀 (공유는 안 됨): 오답노트는 모두 members/<나>/notes/,
+//     학생 명단은 students/<id>.json
 //   개인 공간 (MAGOEDU_DATA_DIR): settings.json — 내 AI 키·화면 설정 (같은 아이디의 컴퓨터끼리)
 //   이 컴퓨터만 (MAGOEDU_LOCAL_DIR = userData): 수식 인식 모델, 로그, legacy/ (예전에 따로 깔아 쓰던 데이터 — 처음 켤 때 옮김)
 // ---------------------------------------------------------------------------
@@ -105,7 +109,6 @@ const sharedDir = () => session.academyDir || path.join(session.dataDir, 'shared
 const dataDir = sharedDir;
 const booksDir = () => path.join(sharedDir(), 'books');
 const studentsDir = () => path.join(sharedDir(), 'students');
-const academyFile = () => path.join(sharedDir(), 'academy.json');
 const membersDir = () => path.join(sharedDir(), 'members');
 const settingsFile = () => path.join(session.dataDir, 'settings.json');
 const legacyDir = () => path.join(session.localDir, 'legacy');
@@ -163,6 +166,19 @@ function noteFile(id, uid = me.id) {
   return path.join(notesDirOf(uid), `${id}.json`);
 }
 
+/** 학생 오답노트 폴더 (학원 공간에서만) */
+function studentNotesDir(sid) {
+  if (!isValidId(sid)) throw new Error('잘못된 학생 ID');
+  return path.join(studentsDir(), sid, 'notes');
+}
+
+/** 오답노트가 있는 곳 → 파일. loc: { sid } 학생 폴더 | { owner } 선생님 폴더 */
+function locFile(loc, id) {
+  if (!isValidId(id)) throw new Error('잘못된 오답노트 ID');
+  return loc.sid ? path.join(studentNotesDir(loc.sid), `${id}.json`) : noteFile(id, loc.owner);
+}
+
+// 학원이 없는 계정의 학생 명단 (개인 공간 students/<id>.json)
 function studentFile(id) {
   if (!isValidId(id)) throw new Error('잘못된 학생 ID');
   return path.join(studentsDir(), `${id}.json`);
@@ -210,6 +226,7 @@ function writeJsonAtomicSync(file, value) {
 
 const DEFAULT_SETTINGS = {
   aiEnabled: true, // false 면 AI 를 전혀 쓰지 않음 (디지털 PDF 는 PDF 글자로, 나머지는 그림으로)
+  aiSource: 'academy', // academy: 학원 AI 가 있으면 그것 (원장이 통합 클라우드에서 정함) | personal: 아래 내 AI 설정
   aiProvider: 'gemini', // gemini | openai(OpenAI 호환) | anthropic(Claude) | codex(ChatGPT 구독)
   geminiApiKey: '',
   geminiModel: 'gemini-flash-latest', // 1순위
@@ -261,23 +278,62 @@ async function loadSettings() {
   return s;
 }
 
-// 학원 공용 AI 키 (academy.json 의 ai, 원장만 고침): 내 키가 없으면 이것을 씀
-const ACADEMY_KEYS = ['geminiApiKey', 'openaiApiKey', 'anthropicApiKey'];
+// ---------------------------------------------------------------------------
+// 학원 학생 명단·학원 AI: 통합 클라우드가 academy-info.json 으로 넘겨 줌 (켤 때와 바뀔 때마다 새로 씀)
+//   { me, members, students(지운 학생 포함: deletedAt), purged, purgeDays, ai(이 프로그램용 학원 AI 또는 null), updatedAt }
+// ---------------------------------------------------------------------------
+let academyInfoCache;
+/** 학원 명단·AI (학원이 없거나 통합 클라우드가 1.2.0 보다 낮으면 null) */
+function academyInfo() {
+  if (!academyMode()) return null;
+  if (academyInfoCache === undefined) academyInfoCache = cloud.academyInfo(session);
+  return academyInfoCache;
+}
+const reloadAcademyInfo = () => {
+  academyInfoCache = undefined;
+  return academyInfo();
+};
 
-async function loadAcademyAi() {
-  if (!academyMode()) return {};
-  const a = await readJson(academyFile(), {});
-  return Object.fromEntries(ACADEMY_KEYS.filter((k) => typeof a?.ai?.[k] === 'string' && a.ai[k]).map((k) => [k, a.ai[k]]));
+/** 학원 명단의 그 학생 (지운 학생 포함, 없으면 null) */
+const rosterStudent = (sid) => (academyInfo()?.students || []).find((s) => s.id === sid) || null;
+
+/** 학생 폴더에 쓸 수 있는지: 지운 학생·완전히 지운 학생은 보기만 (서버도 같은 규칙 — 쓰면 통합 클라우드가 되돌림) */
+function studentWritable(sid) {
+  const info = academyInfo();
+  if (info?.purged?.includes(sid)) return false;
+  return !rosterStudent(sid)?.deletedAt;
 }
 
-/** 화면에는 학원 키가 있는지만 알려 줌 (선생님에게 키를 보이지 않음) */
-const academyAiFlags = (ai) => ({ gemini: !!ai.geminiApiKey, openai: !!ai.openaiApiKey, anthropic: !!ai.anthropicApiKey });
+const AI_PROVIDERS = ['gemini', 'openai', 'anthropic'];
+/**
+ * 이 프로그램이 쓸 학원 AI: 부를 주소와 키 자리 값 (없으면 null). 학원 AI 키는 통합 클라우드 서버에만 있고,
+ * 보통은 서버 중계 주소 + 실행 허가증, 학원 안 주소면 그 주소로 바로 (키 없음)
+ */
+function academyAi() {
+  const a = cloud.academyAi(session, academyInfo());
+  return a && AI_PROVIDERS.includes(a.provider) ? a : null;
+}
+/** 화면에 넘기는 학원 AI: 키는 있는지만 (선생님에게 키를 보이지 않음) */
+function academyAiView() {
+  const a = academyAi();
+  return a && { provider: a.provider, model: a.model || '', model2: a.model2 || '', rpm: a.rpm || null, baseUrl: a.baseUrl || '', hasKey: !!a.apiKey };
+}
 
-/** AI 를 부를 때 쓰는 설정: 내 키가 없으면 학원 공용 키 */
+/** AI 를 부를 때 쓰는 설정: 학원 AI 를 고르고(기본) 학원 AI 가 있으면 그 종류·키·모델, 아니면 내 설정 */
 async function effectiveSettings() {
-  const [s, ai] = await Promise.all([loadSettings(), loadAcademyAi()]);
-  for (const k of ACADEMY_KEYS) if (!s[k] && ai[k]) s[k] = ai[k];
-  return s;
+  const s = await loadSettings();
+  const a = academyAi();
+  if (s.aiSource === 'personal' || !a) return s;
+  const p = a.provider;
+  return {
+    ...s,
+    aiProvider: p,
+    [`${p}ApiKey`]: a.apiKey || '',
+    [`${p}Model`]: a.model || DEFAULT_SETTINGS[`${p}Model`],
+    [`${p}Model2`]: a.model2 || '',
+    [`${p}BaseUrl`]: a.baseUrl || '',
+    [`${p}Rpm`]: a.rpm || DEFAULT_SETTINGS[`${p}Rpm`],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -433,7 +489,7 @@ const count = (d) => (d && Array.isArray(d.items) ? d.items.length : 0);
 const flaggedPages = (d) => Object.values(d?.pageInfo || {}).filter((pi) => pi?.flags?.length).length;
 const createdByMe = () => ({ id: me.id, name: me.name || '' });
 
-/** 고칠 수 있는지 (교재·학생): 학원 공간에서는 만든 사람과 원장만. 서버도 같은 규칙이라 다른 사람이 고치면 통합 클라우드가 되돌림 */
+/** 교재를 고칠 수 있는지: 학원 공간에서는 만든 사람과 원장만. 서버도 같은 규칙이라 다른 사람이 고치면 통합 클라우드가 되돌림 */
 function canEdit(obj) {
   return !academyMode() || isManager() || obj?.createdBy?.id === me.id;
 }
@@ -469,19 +525,29 @@ function summarizeBook(book, place = 'shared') {
   };
 }
 
-function summarizeNote(note, owner, ownerName) {
+/** 오답노트를 고칠 수 있는지: 학생 폴더는 학원 사람 누구나 (지운 학생은 보기만), 선생님 폴더는 그 선생님만 */
+const canWriteLoc = (loc) => (loc.sid ? studentWritable(loc.sid) : loc.owner === me.id);
+
+/** 학생 폴더에 있으면 그 학생 (서버가 옮긴 0.3 노트는 studentId 가 비어 있을 수 있음) */
+const studentIdOf = (note, loc) => loc.sid || (isValidId(note.studentId) ? note.studentId : '');
+
+function summarizeNote(note, loc, ownerName) {
   const selected = note.selected || {};
+  const studentId = studentIdOf(note, loc);
   return {
     id: note.id,
     title: note.title,
     student: note.student || '',
-    studentId: note.studentId || '',
+    studentId,
     bookIds: note.bookIds || [],
     createdAt: note.createdAt,
     updatedAt: note.updatedAt,
+    updatedBy: note.updatedBy || null,
     selectedCount: Object.values(selected).reduce((s, list) => s + (Array.isArray(list) ? list.length : 0), 0),
-    mine: owner === me.id, // 원장이 보는 다른 선생님 오답노트는 false (보기·내보내기만)
-    owner,
+    shared: !!loc.sid, // 학생 폴더 (학원 사람 누구나)
+    canEdit: canWriteLoc(loc),
+    mine: !!loc.sid || loc.owner === me.id, // 원장이 보는 다른 선생님의 (학생을 정하지 않은) 오답노트는 false (보기·내보내기만)
+    owner: loc.owner || '',
     ownerName,
   };
 }
@@ -514,7 +580,6 @@ async function listBooks() {
   return [...shared, ...(await inDir(myBooksDir(), 'private')).filter((x) => !ids.has(x.book.id))];
 }
 const listNotesOf = (uid) => listJson(notesDirOf(uid), (e) => (e.isFile() && JSON_ID.test(e.name) ? path.join(notesDirOf(uid), e.name) : null));
-const listNotes = () => listNotesOf(me.id);
 const listStudents = () => listJson(studentsDir(), (e) => (e.isFile() && JSON_ID.test(e.name) ? path.join(studentsDir(), e.name) : null));
 
 /** 학원 공간 members/ 아래 계정들 (원장만 남의 것을 받음) */
@@ -543,23 +608,90 @@ async function saveProfile() {
   await writeJsonAtomic(file, { name: me.name || '', updatedAt: Date.now() });
 }
 
-/** 오답노트 목록: 내 것, 원장이면 학원 모든 선생님 것 → [{ note, owner }] */
+/** 학원 공간 students/ 아래 학생 폴더들 (예전 0.3 의 students/<id>.json 파일은 빼고) */
+function studentDirIds() {
+  if (!academyMode()) return [];
+  try {
+    return fs.readdirSync(studentsDir(), { withFileTypes: true }).filter((e) => e.isDirectory() && isValidId(e.name)).map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+const listNotesIn = (dir) => listJson(dir, (e) => (e.isFile() && JSON_ID.test(e.name) ? path.join(dir, e.name) : null));
+
+/**
+ * 오답노트 목록 → [{ note, loc }]: 내 (학생을 정하지 않은) 오답노트 + 학원의 모든 학생 오답노트,
+ * 원장이면 다른 선생님의 학생을 정하지 않은 오답노트도 (보기만)
+ */
 async function listAllNotes() {
   const uids = academyMode() && isManager() ? await memberIds() : [me.id];
   const out = [];
-  for (const uid of uids) for (const note of await listNotesOf(uid)) out.push({ note, owner: uid });
+  for (const uid of uids) for (const note of await listNotesOf(uid)) out.push({ note, loc: { owner: uid } });
+  for (const sid of studentDirIds()) for (const note of await listNotesIn(studentNotesDir(sid))) out.push({ note, loc: { sid } });
   return out;
 }
 
-/** 오답노트 파일 찾기: 내 것, 원장이면 다른 선생님 것도 → { file, owner } */
-async function findNote(id) {
-  const mine = noteFile(id);
-  if (fs.existsSync(mine) || !academyMode() || !isManager()) return { file: mine, owner: me.id };
-  for (const uid of await memberIds()) {
-    const f = noteFile(id, uid);
-    if (fs.existsSync(f)) return { file: f, owner: uid };
+/** 오답노트가 있는 곳 → { sid } | { owner } | null: 내 폴더 → 학생 폴더 → 원장이면 다른 선생님 폴더 */
+function findNote(id) {
+  if (fs.existsSync(noteFile(id))) return { owner: me.id };
+  for (const sid of studentDirIds()) if (fs.existsSync(locFile({ sid }, id))) return { sid };
+  if (academyMode() && isManager()) {
+    let uids = [];
+    try {
+      uids = fs.readdirSync(membersDir(), { withFileTypes: true }).filter((e) => e.isDirectory() && /^[A-Za-z0-9-]{1,64}$/.test(e.name) && e.name !== me.id).map((e) => e.name);
+    } catch {
+      /* members/ 없음 */
+    }
+    for (const uid of uids) if (fs.existsSync(noteFile(id, uid))) return { owner: uid };
   }
-  return { file: mine, owner: me.id };
+  return null;
+}
+
+/**
+ * 저장할 곳: 학생이 정해져 있으면 그 학생 폴더 (학원 공간에서, 명단에 있고 지우지 않은 학생),
+ * 아니면 내 폴더. 지금 학생 폴더에 있고 학생이 그대로면 그대로 (명단을 아직 못 받았어도 옮기지 않게)
+ */
+function targetLoc(note, cur) {
+  const sid = isValidId(note.studentId) ? note.studentId : '';
+  if (cur?.sid && cur.sid === sid) return cur;
+  const st = sid && academyMode() ? rosterStudent(sid) : null;
+  if (st && !st.deletedAt) return { sid };
+  return { owner: me.id };
+}
+
+const sameLoc = (a, b) => !!a && !!b && (a.sid || '') === (b.sid || '') && (a.owner || '') === (b.owner || '');
+
+// 3-way 병합의 '그사이 바뀌었는지': 오답노트마다 이 창이 마지막으로 읽거나 쓴 내용
+const noteSeen = new Map(); // id → JSON
+const noteSig = (note) => JSON.stringify(stripMeta(note));
+
+/**
+ * 오답노트 저장 (창을 닫을 때도 써서 동기로 — 오답노트 파일은 작음).
+ * base: 화면이 열 때(또는 지난번 저장 때) 받은 내용. 그사이 다른 사람이 파일을 고쳤으면 base·내 것·지금 파일을 합쳐서 씀.
+ * 학생을 바꿨으면 파일을 그 학생 폴더(또는 내 폴더)로 옮김 → 합쳤으면 { merged: true }, 아니면 true
+ */
+function saveNoteFile(note, base) {
+  const mine = stampRenames(stripMeta(note));
+  const cur = findNote(mine.id);
+  if (cur && !canWriteLoc(cur)) throw new Error(cur.sid ? '지운 학생의 오답노트는 고칠 수 없어요. 학생을 되살리면 고칠 수 있어요.' : '다른 선생님의 오답노트는 고칠 수 없어요.');
+  const onDisk = cur ? readJsonSync(locFile(cur, mine.id)) : null;
+  let out = mine;
+  let merged = false;
+  if (onDisk && base && noteSig(onDisk) !== noteSeen.get(mine.id)) {
+    out = mergeNote(stripMeta(base), mine, onDisk);
+    merged = noteSig(out) !== noteSig(mine);
+  }
+  out.updatedBy = createdByMe();
+  const to = targetLoc(out, cur);
+  if (to.sid) out.studentId = to.sid;
+  writeJsonAtomicSync(locFile(to, out.id), out);
+  if (cur && !sameLoc(cur, to)) {
+    markOwn(locFile(cur, out.id));
+    fs.rmSync(locFile(cur, out.id), { force: true });
+  }
+  noteSeen.set(out.id, noteSig(out));
+  return merged ? { merged: true } : true;
 }
 
 // 문항 ID 는 위치로 정해져서 책 주인이 번호를 고치면 바뀜. 다른 선생님의 오답노트는 내가 고칠 수 없으니
@@ -733,27 +865,20 @@ function registerIpc() {
     platform: process.platform,
     developer: '구현민',
     user: { id: me.id || '', name: me.name || '', role: me.role || '', academy: me.academy || '' },
-    academy: academyMode(), // 학원 선생님끼리 교재·학생 명단을 함께 씀
-    manager: isManager(), // 원장: 남의 교재도 고치고, 학원 오답노트를 모두 봄 (남의 오답노트는 보기만)
+    academy: academyMode(), // 학원 선생님끼리 교재·학생 오답노트를 함께 씀
+    manager: isManager(), // 원장: 남의 교재도 고치고, 선생님들의 학생을 정하지 않은 오답노트도 봄 (보기만)
+    roster: academyMode() ? (academyInfo() ? 'cloud' : 'missing') : 'local', // 학생 명단: 통합 클라우드 | 통합 클라우드가 낮은 버전 | 이 계정만
+    purgeDays: academyInfo()?.purgeDays || 30, // 지운 학생을 되살릴 수 있는 날 수
     settingsRejected: settingsRejectedAtStart, // 켤 때 앱 밖에서 고친 설정을 적용하지 않았음 (화면에 알림)
   }));
 
-  ipcMain.handle('settings:get', async () => ({ ...(await loadSettings()), academyAi: academyAiFlags(await loadAcademyAi()) }));
+  // academyAi: 이 프로그램이 쓸 학원 AI (키는 있는지만, 없으면 null)
+  ipcMain.handle('settings:get', async () => ({ ...(await loadSettings()), academyAi: academyAiView() }));
   ipcMain.handle('settings:set', async (_e, patch) => {
     const next = { ...(await loadSettings()), ...(patch || {}) };
     delete next.academyAi;
     settingsStore.write(next);
-    return { ...next, academyAi: academyAiFlags(await loadAcademyAi()) };
-  });
-
-  // ---- 학원 공용 AI 키 (원장만 보고 고침) ----
-  ipcMain.handle('academy:getAi', async () => (academyMode() && isManager() ? loadAcademyAi() : {}));
-  ipcMain.handle('academy:setAi', async (_e, ai) => {
-    if (!academyMode() || !isManager()) throw new Error('원장만 학원 공용 AI 키를 바꿀 수 있어요.');
-    const cur = await readJson(academyFile(), {});
-    const keys = Object.fromEntries(ACADEMY_KEYS.map((k) => [k, String(ai?.[k] || '').trim()]).filter(([, v]) => v));
-    await writeJsonAtomic(academyFile(), { ...cur, ai: keys });
-    return academyAiFlags(keys);
+    return { ...next, academyAi: academyAiView() };
   });
 
   // ---- 책 ----
@@ -821,13 +946,14 @@ function registerIpc() {
     const book = checkBookWrite(id);
     await removeRemoteOnly(id, sourceFiles(book));
     await fsp.rm(bookDir(id), { recursive: true, force: true });
-    // 내 오답노트에서 빼기 (다른 선생님 오답노트에는 '지워진 책'으로 남음)
-    for (const note of await listNotes()) {
-      if (!(note.bookIds || []).includes(id)) continue;
+    // 고칠 수 있는 오답노트(내 것 · 학생 오답노트)에서 빼기 (나머지에는 '볼 수 없는 교재'로 남음)
+    // 열어 둔 화면이 저장하면 그 노트의 base 와 견줘 합쳐지므로 noteSeen 은 그대로 둠
+    for (const { note, loc } of await listAllNotes()) {
+      if (!(note.bookIds || []).includes(id) || !canWriteLoc(loc)) continue;
       note.bookIds = note.bookIds.filter((b) => b !== id);
       if (note.selected) delete note.selected[id];
       if (note.renamesSeen) delete note.renamesSeen[id];
-      await writeJsonAtomic(noteFile(note.id), note);
+      await writeJsonAtomic(locFile(loc, note.id), note);
     }
     return true;
   });
@@ -893,9 +1019,9 @@ function registerIpc() {
     const n = r.last + 1;
     await writeJsonAtomic(renamesFile(bookId), { last: n, log: [...r.log, { n, renames: renames || {}, removed: removed || [] }].slice(-RENAME_KEEP) });
     let changed = 0;
-    for (const note of await listNotes()) {
-      if (!(note.bookIds || []).includes(bookId) || !catchUpRenames(note)) continue;
-      await writeJsonAtomic(noteFile(note.id), note);
+    for (const { note, loc } of await listAllNotes()) {
+      if (!(note.bookIds || []).includes(bookId) || !canWriteLoc(loc) || !catchUpRenames(note)) continue;
+      await writeJsonAtomic(locFile(loc, note.id), note);
       changed++;
     }
     return changed;
@@ -904,11 +1030,12 @@ function registerIpc() {
   // ---- 오답노트 ----
   ipcMain.handle('notes:list', async () => {
     const names = await memberNames();
-    const list = (await listAllNotes()).map(({ note, owner }) => summarizeNote(note, owner, names[owner] || ''));
+    const list = (await listAllNotes()).map(({ note, loc }) => summarizeNote(note, loc, loc.owner ? names[loc.owner] || '' : ''));
     list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     return list;
   });
 
+  // 학생을 고르면 학원 공간의 그 학생 폴더에 (학원 사람 누구나 이어서 고침), 아니면 내 폴더에
   ipcMain.handle('notes:create', async (_e, { title, student, studentId, bookIds } = {}) => {
     const id = crypto.randomUUID();
     const now = Date.now();
@@ -923,33 +1050,44 @@ function registerIpc() {
       bookIds: ids,
       selected: Object.fromEntries(ids.map((b) => [b, []])),
       exportOptions: null,
+      createdBy: createdByMe(),
       createdAt: now,
       updatedAt: now,
     });
-    await writeJsonAtomic(noteFile(id), note);
+    const loc = targetLoc(note);
+    if (loc.sid) note.studentId = loc.sid;
+    await writeJsonAtomic(locFile(loc, id), note);
+    noteSeen.set(id, noteSig(note));
     return note;
   });
 
-  // 다른 선생님 오답노트(원장만 열 수 있음)는 $readonly — 저장하지 않음
+  // 보기만 하는 오답노트는 $readonly ($why: deleted 지운 학생 | other 다른 선생님 것을 원장이 봄) — 저장하지 않음
   ipcMain.handle('notes:get', async (_e, id) => {
-    const { file, owner } = await findNote(id);
-    const note = await readJson(file, null);
+    const loc = findNote(id);
+    const note = loc && (await readJson(locFile(loc, id), null));
     if (!note) throw new Error('오답노트를 찾을 수 없습니다.');
-    if (catchUpRenames(note) && owner === me.id) await writeJsonAtomic(file, note);
-    if (owner === me.id) return note;
-    return { ...note, $readonly: true, $ownerName: (await memberNames())[owner] || '' };
+    const writable = canWriteLoc(loc);
+    if (catchUpRenames(note) && writable) await writeJsonAtomic(locFile(loc, id), note);
+    if (loc.sid) note.studentId = loc.sid;
+    const st = note.studentId ? rosterStudent(note.studentId) : null;
+    const meta = { $shared: !!loc.sid, $studentName: st?.name || '' };
+    if (writable) {
+      noteSeen.set(id, noteSig(readJsonSync(locFile(loc, id)) || note));
+      return { ...note, ...meta };
+    }
+    return { ...note, ...meta, $readonly: true, $why: loc.sid ? 'deleted' : 'other', $ownerName: loc.owner ? (await memberNames())[loc.owner] || '' : '' };
   });
 
-  ipcMain.handle('notes:save', async (_e, note) => {
+  // base: 화면이 열 때 받은 내용 (그사이 바뀐 파일과 합칠 때) → true | { merged: true } (합쳤으니 다시 읽어 주세요)
+  ipcMain.handle('notes:save', async (_e, note, base) => {
     if (!note || !isValidId(note.id)) throw new Error('잘못된 오답노트');
     if (note.$readonly) return false;
-    await writeJsonAtomic(noteFile(note.id), stampRenames(stripMeta(note)));
-    return true;
+    return saveNoteFile(note, base);
   });
 
-  ipcMain.on('notes:saveSync', (event, note) => {
+  ipcMain.on('notes:saveSync', (event, note, base) => {
     try {
-      if (note && isValidId(note.id) && !note.$readonly) writeJsonAtomicSync(noteFile(note.id), stampRenames(stripMeta(note)));
+      if (note && isValidId(note.id) && !note.$readonly) saveNoteFile(note, base);
       event.returnValue = true;
     } catch (err) {
       log.error('[notes:saveSync]', err);
@@ -958,21 +1096,73 @@ function registerIpc() {
   });
 
   ipcMain.handle('notes:delete', async (_e, id) => {
-    await fsp.rm(noteFile(id), { force: true });
+    const loc = findNote(id);
+    if (!loc) return true;
+    if (!canWriteLoc(loc)) throw new Error(loc.sid ? '지운 학생의 오답노트는 지울 수 없어요.' : '다른 선생님의 오답노트는 지울 수 없어요.');
+    await fsp.rm(locFile(loc, id), { force: true });
+    noteSeen.delete(id);
     return true;
   });
 
-  // ---- 학생 명단 (학원 공용: 누구나 등록, 등록한 선생님·원장만 고치고 지움) ----
+  // ---- 학생 명단 ----
+  //   학원: 통합 클라우드 명단 (학원 사람 누구나 추가·고치기·지우기·되살리기, 인터넷 필요 — 통합 클라우드에 부탁하면
+  //         명단 파일을 새로 써 준 뒤 답함). 지운 학생도 deletedAt 과 함께 (purgeAt 에 완전히 지워짐)
+  //   학원이 없는 계정: 개인 공간 students/<id>.json
   ipcMain.handle('students:list', async () => {
-    const list = (await listStudents()).map((s) => ({ ...s, canEdit: canEdit(s) }));
+    const list = academyMode() ? (academyInfo()?.students || []).map((s) => ({ ...s, canEdit: !s.deletedAt })) : (await listStudents()).map((s) => ({ ...s, canEdit: true }));
     list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
     return list;
   });
 
+  /** 학원 사람 (담당 선생님 고르기) */
+  ipcMain.handle('students:members', () => academyInfo()?.members || []);
+
+  const UPDATE_CLOUD = '학생 명단을 바꾸려면 통합 클라우드를 최신 버전으로 업데이트한 뒤 오답노트를 다시 켜 주세요.';
+  /** 통합 클라우드에 부탁한 결과 → 학생, 못 했으면 알아듣기 쉬운 말로 던짐 */
+  const rosterOp = async (run) => {
+    if (!academyInfo()) throw new Error(UPDATE_CLOUD); // 1.2.0 보다 낮은 통합 클라우드는 학생 부탁을 모름
+    const r = await run();
+    if (r.ok && !r.student) throw new Error(UPDATE_CLOUD);
+    if (r.ok) {
+      reloadAcademyInfo();
+      return { ...r.student, canEdit: !r.student?.deletedAt };
+    }
+    if (r.errorCode === 'conflict') reloadAcademyInfo();
+    const msg = {
+      conflict: '그사이 다른 사람이 이 학생을 고쳤어요. 새 내용을 보고 다시 고쳐 주세요.',
+      student_deleted: '지운 학생이에요. 되살린 뒤 고쳐 주세요.',
+      offline: '인터넷에 연결돼 있어야 학생 명단을 바꿀 수 있어요.',
+      timeout: '통합 클라우드가 답하지 않아요. 통합 클라우드가 켜져 있는지 확인해 주세요.',
+      no_request_dir: UPDATE_CLOUD,
+    }[r.errorCode];
+    throw new Error(msg || r.error || '하지 못했어요.');
+  };
+
   ipcMain.handle('students:save', async (_e, s = {}) => {
+    if (academyMode()) {
+      const text = (v) => String(v || '').trim();
+      const student = { name: text(s.name), school: text(s.school), grade: text(s.grade), memo: text(s.memo) };
+      if (s.teacherId !== undefined) student.teacherId = s.teacherId || null;
+      if (isValidId(s.id) && s.rev) Object.assign(student, { id: s.id, rev: s.rev });
+      else student.id = isValidId(s.id) ? s.id : crypto.randomUUID();
+      if (!student.name) throw new Error('학생 이름을 적어 주세요.');
+      return rosterOp(() => cloud.saveStudent(session, student));
+    }
+    return saveLocalStudent(s);
+  });
+
+  ipcMain.handle('students:delete', async (_e, id) => {
+    if (academyMode()) return rosterOp(() => cloud.deleteStudent(session, id));
+    await fsp.rm(studentFile(id), { force: true });
+    return true;
+  });
+
+  ipcMain.handle('students:restore', async (_e, id) => rosterOp(() => cloud.restoreStudent(session, id)));
+
+  /** 학원이 없는 계정의 학생 명단 (예전처럼 개인 공간에) */
+  async function saveLocalStudent(s) {
     const id = isValidId(s.id) ? s.id : crypto.randomUUID();
     const cur = readJsonSync(studentFile(id));
-    if (cur && !canEdit(cur)) throw new Error('학생을 등록한 선생님과 원장만 고칠 수 있어요.');
     const name = String(s.name || '').trim();
     if (!name) throw new Error('학생 이름을 적어 주세요.');
     const now = Date.now();
@@ -989,14 +1179,7 @@ function registerIpc() {
     };
     await writeJsonAtomic(studentFile(id), student);
     return { ...student, canEdit: true };
-  });
-
-  ipcMain.handle('students:delete', async (_e, id) => {
-    const cur = readJsonSync(studentFile(id));
-    if (cur && !canEdit(cur)) throw new Error('학생을 등록한 선생님과 원장만 지울 수 있어요.');
-    await fsp.rm(studentFile(id), { force: true });
-    return true;
-  });
+  }
 
   ipcMain.handle('files:pick', async (_e, { title } = {}) => {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -1225,11 +1408,17 @@ function watchData() {
       log.warn('[watch]', root, err.message);
     }
   }
+  // 학원 명단·학원 AI: 학생이 지워지거나 되살아나면 그 학생 오답노트를 고칠 수 있는지도 바뀜 → 오답노트도 '*'
+  const stop = cloud.watchAcademyInfo(session, (info) => {
+    academyInfoCache = info;
+    send('data:changed', { books: [], notes: ['*'], students: true, settings: true });
+  });
+  watchers.push({ close: stop });
 }
 
-/** 바뀐 파일 → { books: [책 id], notes: [오답노트 id], students, academy, settings } */
+/** 바뀐 파일 → { books: [책 id], notes: [오답노트 id], students, settings } */
 function flushChanges() {
-  const out = { books: new Set(), notes: new Set(), students: false, academy: false, settings: false };
+  const out = { books: new Set(), notes: new Set(), students: false, settings: false };
   for (const abs of changedPaths) {
     if (abs === path.resolve(settingsFile())) {
       settingsStore.read(); // 앱 밖에서 고친 것이면 여기서 되돌림 (화면에는 settingsRejected 로 알림)
@@ -1241,8 +1430,8 @@ function flushChanges() {
     else if (rel[0] === 'members' && rel[2] === 'books' && isValidId(rel[3])) out.books.add(rel[3]); // 나만 보기 교재
     else if (rel[0] === 'members' && rel[2] === 'notes' && JSON_ID.test(rel[3] || '')) out.notes.add(rel[3].slice(0, -5));
     else if (rel[0] === 'members' && rel[2] === 'profile.json') out.notes.add('*');
-    else if (rel[0] === 'students') out.students = true;
-    else if (rel[0] === 'academy.json') out.academy = true;
+    else if (rel[0] === 'students' && isValidId(rel[1]) && rel[2] === 'notes' && JSON_ID.test(rel[3] || '')) out.notes.add(rel[3].slice(0, -5)); // 학생 오답노트
+    else if (rel[0] === 'students' && rel.length === 2 && !academyMode()) out.students = true; // 학원이 없는 계정의 학생 명단
   }
   changedPaths = new Set();
   send('data:changed', { ...out, books: [...out.books], notes: [...out.notes] });

@@ -9,21 +9,30 @@ import { transcribeParts } from './pdfmath.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect, transcriptFiles } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiOptions, aiLabel, aiModelText, jobDialog, findJob, holdSource } from './shared.js';
 import { topbar } from './chrome.js';
-import { spineFor } from './home.js';
+import { spineFor, studentSearch } from './home.js';
 
 // 바뀐 횟수 / 저장할 때의 횟수 — 실시간으로 다시 읽을 때 고치는 중인지 보려고 (makeSaver 는 알려 주지 않음)
 let dirtySeq = 0;
 let savedSeq = 0;
+const snapshot = (n) => JSON.parse(JSON.stringify(n));
 const saver = makeSaver(async (n) => {
-  if (n.$readonly) return; // 다른 선생님의 오답노트는 저장하지 않음 (main 도 받지 않음)
+  if (n.$readonly) return; // 보기만 하는 오답노트는 저장하지 않음 (main 도 받지 않음)
   const seq = dirtySeq;
-  await api.saveNote(n);
+  const sent = snapshot(n);
+  // 학생 오답노트는 학원 사람 누구나 고침: 그사이 다른 사람이 고쳤으면 main 이 ns.base(열 때 받은 것)와 견줘 합쳐서 저장
+  const r = await api.saveNote(n, ns.note === n ? ns.base : null);
+  if (ns.note === n) ns.base = sent; // 다음 저장은 지금 보낸 것에서 바뀐 것만
   savedSeq = seq;
+  if (r?.merged && ns.note === n) {
+    toast('다른 선생님이 고친 내용과 합쳐서 저장했어요.');
+    noteDataChanged({ books: [], notes: [n.id] }); // 고치는 중이 아니면 합친 것을 다시 읽음
+  }
 });
 
 const ns = {
   note: null,
-  readonly: false, // 다른 선생님의 오답노트(원장이 봄) — 보기와 내보내기만
+  base: null, // 열 때(또는 지난번 저장 때) 받은 내용 — 저장할 때 다른 사람이 고친 것과 합치는 기준
+  readonly: false, // 보기만 (지운 학생의 오답노트 · 원장이 보는 다른 선생님 것) — 보기와 내보내기만
   books: new Map(), // id → book (읽지 못한 책은 없음 → '지워진 책')
   sources: new Map(), // id → {problem, answer}
   matches: new Map(), // id → Map
@@ -36,7 +45,7 @@ window.addEventListener('beforeunload', () => {
   if (ns.note && state.view === 'note' && !ns.note.$readonly) {
     saver.cancel();
     ns.note.updatedAt = Date.now();
-    api.saveNoteSync(ns.note);
+    api.saveNoteSync(ns.note, ns.base);
   }
 });
 
@@ -92,6 +101,7 @@ async function loadBooks(ids) {
 export async function openNote(id) {
   const note = prepareNote(await api.getNote(id));
   ns.note = note;
+  ns.base = snapshot(note);
   ns.readonly = !!note.$readonly;
   ns.books = new Map();
   ns.sources = new Map();
@@ -148,17 +158,14 @@ function render({ enter = false } = {}) {
       syncExamFields();
     },
   });
-  const studentInput = h('input.student-input', {
-    value: n.student || '',
-    placeholder: '학생 이름',
-    title: '학생 이름',
-    readOnly: ro,
-    onchange: (e) => {
-      n.student = e.target.value.trim();
-      markDirty();
-      syncExamFields();
-    },
-  });
+  // 누구의 오답노트인지: 누르면 학생 바꾸기 (명단의 학생이면 그 학생 오답노트로 옮겨짐)
+  const studentChip = h(
+    'button.student-chip',
+    { title: ro ? '학생' : '학생 바꾸기', disabled: ro, onclick: changeStudent },
+    icon('user'),
+    h('span.student-name', studentLabel(n)),
+  );
+  const why = n.$why === 'deleted' ? '지운 학생의 오답노트예요 · 학생을 되살리면 다시 고칠 수 있어요. 지금은 보기와 내보내기만 할 수 있어요' : `${n.$ownerName || '다른'} 선생님의 오답노트 · 보기와 내보내기만 할 수 있어요`;
   root.append(
     topbar(
       h(
@@ -167,17 +174,59 @@ function render({ enter = false } = {}) {
         h('span.crumb-kind', icon('notebook'), '오답노트'),
         h('span.crumb-sep', '/'),
         titleInput,
-        h('label.student-chip', icon('user'), studentInput),
+        studentChip,
         ro ? null : h('span.save-status', ''),
       ),
     ),
     h(
       `main.sheet.note-sheet${enter ? '.view-enter' : ''}`,
-      ro ? h('div.readonly-banner', icon('eye'), h('span', `${n.$ownerName || '다른'} 선생님의 오답노트 · 보기와 내보내기만 할 수 있어요`)) : null,
+      ro ? h('div.readonly-banner', icon('eye'), h('span', why)) : null,
       bookBar(),
       h('section.note-body', noteBody()),
     ),
   );
+}
+
+/** 위쪽 학생 칩: 명단의 학생이면 명단 이름, 아니면 적어 둔 이름 (시험지 머리의 학생 이름은 따로 고칠 수 있음) */
+const studentLabel = (n) => n.$studentName || n.student || '학생 미지정';
+
+/** 학생 바꾸기: 명단의 학생을 고르면 그 학생 오답노트가 됨 (저장할 때 그 학생 폴더로 옮겨짐), 명단에 없는 이름은 학생 미지정 */
+async function changeStudent() {
+  const n = ns.note;
+  if (!n || ns.readonly) return;
+  const students = (await api.listStudents().catch(() => [])).filter((st) => !st.deletedAt);
+  const cur = students.find((st) => st.id === n.studentId) || null;
+  const search = studentSearch(students, { picked: cur });
+  if (!cur) search.input.value = n.student || '';
+  const shared = state.appInfo.roster === 'cloud';
+  const r = await modal({
+    title: '학생 바꾸기',
+    body: h(
+      'div.form',
+      search.field,
+      shared ? h('p.small.muted', '명단의 학생을 고르면 그 학생의 오답노트가 돼요. 학원 사람 누구나 이어서 고칠 수 있어요. 명단에 없는 이름을 적으면 학생 미지정 오답노트가 되고 나만 고칠 수 있어요.') : null,
+    ),
+    width: 460,
+    onClose: () => search.close(),
+    buttons: [
+      { label: '취소', value: null },
+      { label: '바꾸기', primary: true, onClick: () => ({ st: search.picked(), name: search.input.value.trim() }) },
+    ],
+  });
+  if (!r || ns.note !== n) return;
+  const nextId = r.st?.id || '';
+  const nextName = r.st ? r.st.name : r.name;
+  if (nextId === (n.studentId || '') && nextName === (n.student || '')) return;
+  if (shared && n.$shared && !r.st && !(await confirmDialog('학생 미지정으로 바꾸면 이 오답노트는 내 폴더로 옮겨져서 다른 선생님은 볼 수 없어요. 바꿀까요?', { title: '학생 미지정', ok: '바꾸기' }))) return;
+  n.studentId = nextId;
+  n.student = nextName;
+  if (r.st) n.$studentName = r.st.name;
+  else delete n.$studentName;
+  n.$shared = shared && !!r.st;
+  markDirty();
+  syncExamFields();
+  const t = document.querySelector('.topbar .student-name');
+  if (t) t.textContent = studentLabel(n);
 }
 
 /** 이 노트에 쓰는 책들 (알약 모양) + 책 추가 */
@@ -185,15 +234,15 @@ function bookBar() {
   const n = ns.note;
   const bar = h('section.book-bar');
   n.bookIds.forEach((bid, i) => {
-    // 읽지 못한 책(다른 선생님이 지움 등)은 '지워진 책'으로 — 고른 문항은 보이지 않고 내보내기에서도 빠짐
+    // 읽지 못한 책(지워졌거나 다른 선생님의 나만 보기)은 '볼 수 없는 교재'로 — 고른 문항은 보이지 않고 내보내기에서도 빠짐
     const b = ns.books.get(bid);
     const cnt = b ? noteSelection(n, bid).length : 0;
     bar.append(
       h(
         `button.book-tab${ns.active === bid ? '.active' : ''}`,
-        { style: { '--spine': spineFor(bid), '--i': i }, onclick: () => switchBook(bid), dataset: { book: bid }, title: b ? null : '책장에서 지워진 책이에요' },
+        { style: { '--spine': spineFor(bid), '--i': i }, onclick: () => switchBook(bid), dataset: { book: bid }, title: b ? null : '지워졌거나 다른 선생님의 나만 보기 교재예요' },
         h('span.bt-spine'),
-        h('span.bt-name', b ? b.name : '지워진 책'),
+        h('span.bt-name', b ? b.name : '볼 수 없는 교재'),
         h('span.bt-count', cnt ? String(cnt) : ''),
         ns.readonly ? null : h('span.bt-x', { title: '이 오답노트에서 책 빼기', onclick: (e) => { e.stopPropagation(); removeBook(bid); } }, icon('x')),
       ),
@@ -262,7 +311,7 @@ async function removeBook(bid) {
   const n = ns.note;
   const b = ns.books.get(bid);
   const cnt = noteSelection(n, bid).length;
-  if (cnt && !(await confirmDialog(`"${b?.name || '지워진 책'}"에서 고른 ${cnt}문항이 이 오답노트에서 빠져요. 계속할까요?`, { ok: '빼기', danger: true }))) return;
+  if (cnt && !(await confirmDialog(`"${b?.name || '볼 수 없는 교재'}"에서 고른 ${cnt}문항이 이 오답노트에서 빠져요. 계속할까요?`, { ok: '빼기', danger: true }))) return;
   n.bookIds = n.bookIds.filter((x) => x !== bid);
   delete n.selected[bid];
   if (ns.active === bid) ns.active = n.bookIds[0] || null;
@@ -283,13 +332,13 @@ function noteBody() {
   const ro = ns.readonly; // 보기만: 문항 고르기·빼기 없음 (누르면 미리보기만)
   if (!b) {
     if (ns.active) {
-      // 다른 선생님이 지운 책 (읽지 못한 책)
+      // 읽지 못한 책: 지워졌거나 다른 선생님의 나만 보기 교재 (학생 오답노트는 학원 사람 누구나 열어서)
       left.append(
         h(
           'div.empty-state',
-          h('div.empty-art', icon('trash')),
-          h('h3', '지워진 책이에요'),
-          h('p.muted', '책장에서 지워져서 이 책에서 고른 문항은 보이지 않고 내보내기에서도 빠져요.'),
+          h('div.empty-art', icon('eye')),
+          h('h3', '볼 수 없는 교재예요'),
+          h('p.muted', '책장에서 지워졌거나 다른 선생님의 나만 보기 교재라서, 이 책에서 고른 문항은 보이지 않고 내보내기에서도 빠져요.'),
           ro ? null : h('button.btn', { onclick: () => removeBook(ns.active) }, icon('x'), '이 오답노트에서 빼기'),
         ),
       );
@@ -549,8 +598,8 @@ function exportPanel() {
             if (t) t.value = n.title;
           }
           if (key === 'student') {
-            const t = document.querySelector('.topbar .student-input');
-            if (t) t.value = n.student;
+            const t = document.querySelector('.topbar .student-name');
+            if (t) t.textContent = studentLabel(n);
           }
         },
       }),
@@ -895,7 +944,7 @@ function replaceInPlace(target, fresh) {
   return Object.assign(target, fresh);
 }
 
-/** change: {books: [책 id], notes: [오답노트 id | '*'], students, academy, settings} */
+/** change: {books: [책 id], notes: [오답노트 id | '*'], students, settings} */
 export function noteDataChanged(change) {
   changeQueue = changeQueue.then(() => applyChange(change)).catch((err) => console.error(err));
   return changeQueue;
@@ -936,6 +985,7 @@ async function applyChange(change) {
     if (fresh && ns.readonly) fresh.exportOptions = n.exportOptions; // 보기만: 이 화면에서 고른 내보내기 설정은 그대로
     if (fresh && canReload() && JSON.stringify(fresh) !== JSON.stringify(n)) {
       replaceInPlace(n, fresh);
+      ns.base = snapshot(n);
       ns.readonly = !!n.$readonly;
       await loadBooks(n.bookIds.filter((bid) => !ns.books.has(bid)));
       if (ns.note !== n) return;

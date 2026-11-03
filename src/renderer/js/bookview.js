@@ -163,7 +163,7 @@ async function copyToMine(b, btn) {
   }
 }
 
-/** 학원 공유 켜고 끄기 (학원 공간의 내 책). 끄면 다른 선생님에게는 지워진 책처럼 보여서 먼저 물어봄 */
+/** 학원 공유 켜고 끄기 (학원 공간의 내 책). 끄면 다른 선생님에게는 볼 수 없는 교재가 되어서 먼저 물어봄 */
 async function toggleShared(b, input) {
   const on = input.checked;
   input.checked = !on; // 바뀌기 전까지는 그대로
@@ -171,7 +171,7 @@ async function toggleShared(b, input) {
     toast('이 책에서 하는 작업(분석 등)이 끝난 뒤에 바꿔 주세요.');
     return;
   }
-  const msg = '학원 공유를 끄면 이 책은 나만 보기가 돼요 (원장은 볼 수 있어요).\n다른 선생님 책장에서 사라지고, 이 책을 쓰는 다른 선생님의 오답노트에는 ‘지워진 책’으로 보여요.\n다시 켜면 그대로 돌아와요.';
+  const msg = '학원 공유를 끄면 이 책은 나만 보기가 돼요 (원장은 볼 수 있어요).\n다른 선생님 책장에서 사라지고, 이 책을 쓰는 학생 오답노트를 다른 선생님이 열면 ‘볼 수 없는 교재’로 보여요 (고른 문항은 그대로 남아요).\n다시 켜면 그대로 돌아와요.';
   if (!on && !(await confirmDialog(msg, { title: '학원 공유 끄기', ok: '공유 끄기', danger: true }))) return;
   input.disabled = true;
   try {
@@ -204,7 +204,7 @@ const canReload = (b) =>
 
 let changeQueue = Promise.resolve();
 
-/** change: {books: [책 id], notes, students, academy, settings} */
+/** change: {books: [책 id], notes, students, settings} */
 export function bookDataChanged(change) {
   changeQueue = changeQueue.then(() => reloadBook(change)).catch((err) => console.error(err));
   return changeQueue;

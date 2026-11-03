@@ -717,28 +717,37 @@ select.input {
   align-items: center;
   gap: 4px;
   height: 32px;
-  padding: 0 4px 0 10px;
+  padding: 0 12px 0 10px;
   border-radius: 999px;
   background: var(--surface);
   border: 1px solid var(--line);
   color: var(--text-3);
+  font: inherit;
+  cursor: pointer;
   transition:
     border-color var(--fast),
     box-shadow var(--mid);
 }
-.student-chip:focus-within {
+.student-chip:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+.student-chip:focus-visible {
+  outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 4px rgba(240, 122, 69, 0.12);
+}
+.student-chip:disabled {
+  cursor: default;
 }
 .student-chip .icon {
   width: 14px;
   height: 14px;
 }
-.student-input {
-  width: 96px;
-  border: 0;
-  outline: none;
-  background: none;
+.student-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 650;
   color: var(--text);
 }
@@ -3537,4 +3546,214 @@ main.sheet {
   animation-delay: 0ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 1ms !important;
+}
+
+/* ==========================================================================
+   첫 화면: 학생별 오답노트 · 학생 명단 (0.4)
+   ========================================================================== */
+.home-stack,
+.home-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* 검색어·담당을 바꿀 때마다 카드가 다시 떠오르지 않게 */
+.home-list.quiet .card {
+  animation: none;
+}
+.home-hint {
+  margin: 0;
+  padding: 2px 4px;
+  font-size: 13.5px;
+}
+.roster-notice {
+  flex: 0 0 auto;
+}
+.roster-notice > .icon {
+  color: var(--warn);
+}
+
+/* 검색칸 · 내 담당/전체 · 지운 학생 */
+.home-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.home-search {
+  position: relative;
+  flex: 0 1 360px;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+}
+.home-search > .icon {
+  position: absolute;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.home-search .input {
+  width: 100%;
+  padding-left: 36px;
+}
+.scope-seg button.active .mini-count {
+  color: var(--primary-ink);
+}
+.gone-toggle {
+  height: 36px;
+}
+
+/* 학생 카드 (학생 오답노트 탭) */
+.student-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 160px;
+}
+.student-group .nc-top {
+  padding-right: 0;
+}
+.nc-avatar .icon {
+  width: 20px;
+  height: 20px;
+}
+.student-group.loose .nc-avatar,
+.student-head.loose .nc-avatar {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+.sg-teacher {
+  margin-top: -4px;
+}
+/* 검색어가 오답노트 제목에 맞았을 때 그 제목 */
+.sg-hit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 9px;
+  border-radius: var(--r-xs);
+  background: var(--primary-softer);
+  color: var(--primary-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.sg-hit .icon {
+  width: 13px;
+  height: 13px;
+}
+.sg-hit span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sg-count {
+  color: var(--text-2);
+  font-size: 13px;
+}
+.sg-count:not(:has(b)) {
+  color: var(--text-3);
+}
+.sg-count b {
+  margin: 0 1px;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 지운 학생: N일 뒤 완전 삭제 */
+.purge-badge {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.purge-badge .icon {
+  width: 13px;
+  height: 13px;
+}
+.gone-section {
+  margin-top: 10px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--line-2);
+}
+.gone-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-bottom: 14px;
+}
+.gone-head h3 {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 16px;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+}
+.student-group.gone,
+.roster-card.gone {
+  border-color: var(--line);
+  background: var(--surface-2);
+  box-shadow: none;
+}
+.student-group.gone .nc-avatar,
+.roster-card.gone .nc-avatar {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+.student-group.gone .nc-title,
+.roster-card.gone .nc-title {
+  color: var(--text-2);
+}
+
+/* 한 학생의 오답노트: 위쪽 줄 */
+.student-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.back-list {
+  margin-right: 6px;
+  padding: 0 14px 0 10px;
+}
+.sh-who {
+  min-width: 0;
+}
+.sh-who h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+}
+.sh-who p {
+  margin: 2px 0 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.student-head .purge-badge {
+  align-self: center;
+  margin-left: 4px;
+}
+
+/* 학생 명단 카드 · 지운 학생 되살리기 */
+.roster-card .nc-foot {
+  align-items: center;
+}
+.restore-btn {
+  flex: 0 0 auto;
 }

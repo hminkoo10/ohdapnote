@@ -75,6 +75,9 @@ try {
   await win.waitForSelector('.seg-tabs .seg-tab', { timeout: 20000 });
   await win.waitForTimeout(900);
   await shot('1-home-notes');
+  // 첫 화면은 학생별 묶음: 학생을 정하지 않은 오답노트는 '학생 미지정'
+  await win.click('.student-group[data-student=""]');
+  await win.waitForSelector('.note-card', { timeout: 5000 });
   const migratedNotes = await win.$$eval('.note-card .nc-title', (els) => els.map((e) => e.textContent));
   if (!migratedNotes.includes('예전 오답노트')) throw new Error('예전 오답노트가 옮겨지지 않았습니다: ' + migratedNotes);
   if (existsSync(join(userData, 'legacy'))) throw new Error('예전 폴더가 남아 있습니다');
@@ -544,6 +547,7 @@ try {
   app = await launch();
   win = await app.firstWindow();
   watch(win);
+  await win.click('.student-group[data-student=""]', { timeout: 20000 });
   await win.waitForSelector('.note-card', { timeout: 20000 });
   await win.waitForTimeout(1200);
   const stats = await win.$$eval('.note-card', (els) => els.map((e) => e.textContent));

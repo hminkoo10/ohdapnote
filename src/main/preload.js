@@ -24,20 +24,19 @@ contextBridge.exposeInMainWorld('ohdap', {
   listNotes: () => ipcRenderer.invoke('notes:list'),
   createNote: (args) => ipcRenderer.invoke('notes:create', args),
   getNote: (id) => ipcRenderer.invoke('notes:get', id),
-  saveNote: (note) => ipcRenderer.invoke('notes:save', note),
-  saveNoteSync: (note) => ipcRenderer.sendSync('notes:saveSync', note),
+  // base: 열 때 받은 내용 (그사이 다른 사람이 고쳤으면 합쳐서 저장 → { merged: true })
+  saveNote: (note, base) => ipcRenderer.invoke('notes:save', note, base),
+  saveNoteSync: (note, base) => ipcRenderer.sendSync('notes:saveSync', note, base),
   deleteNote: (id) => ipcRenderer.invoke('notes:delete', id),
 
-  // 학원 공용 학생 명단
+  // 학생 명단 (학원: 통합 클라우드 명단 — 지운 학생도 deletedAt 과 함께)
   listStudents: () => ipcRenderer.invoke('students:list'),
-  saveStudent: (student) => ipcRenderer.invoke('students:save', student),
+  saveStudent: (student) => ipcRenderer.invoke('students:save', student), // rev 가 있으면 고치기
   deleteStudent: (id) => ipcRenderer.invoke('students:delete', id),
+  restoreStudent: (id) => ipcRenderer.invoke('students:restore', id),
+  listMembers: () => ipcRenderer.invoke('students:members'), // 학원 사람 (담당 선생님)
 
-  // 학원 공용 AI 키 (원장만)
-  getAcademyAi: () => ipcRenderer.invoke('academy:getAi'),
-  setAcademyAi: (ai) => ipcRenderer.invoke('academy:setAi', ai),
-
-  // 다른 컴퓨터·선생님이 바꾼 데이터가 들어옴 { books, notes, students, academy, settings }
+  // 다른 컴퓨터·선생님이 바꾼 데이터가 들어옴 { books, notes, students, settings }
   onDataChanged: (callback) => {
     const listener = (_e, change) => callback(change);
     ipcRenderer.on('data:changed', listener);

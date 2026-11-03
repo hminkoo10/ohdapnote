@@ -2,9 +2,10 @@
 //  선생님(teacher-a)으로 켬 → 다른 선생님(teacher-b)이 공유한 책은 공유 책장에만, 보기만 / 나만 보기 책은 보이지 않음
 //  → 내 책 등록(학원 공유) → 공유 끄기(members/<나>/books/ 로 옮김, 그대로 열리고 고칠 수 있음) → 다시 켜기
 //  → 학생 명단에서 찾아 키보드로 고르기 → 원장으로 다시 켜서 선생님의 나만 보기 책을 보기만 할 수 있는지
-// 통합 클라우드 없이 개발용 환경 변수(MAGOEDU_DEV=1 …)로 학원 공간을 흉내냄
+// 통합 클라우드 없이 개발용 환경 변수(MAGOEDU_DEV=1 …)로 학원 공간을, test/lib/fake-cloud.mjs 로 학생 명단을 흉내냄
 // 실행: xvfb-run -a node test/e2e/shelves-e2e.mjs
 import { _electron as electron } from '../lib/playwright.mjs';
+import { fakeCloud } from '../lib/fake-cloud.mjs';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, copyFileSync, existsSync, readdirSync, readFileSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -35,8 +36,20 @@ const seedBook = (dir, id, name) => {
 seedBook(join(academy, 'books', otherShared), otherShared, '박선생 공유 문제집');
 seedBook(join(academy, 'members', 'teacher-b', 'books', otherPrivate), otherPrivate, '박선생 비밀 문제집');
 
-const launch = (user) =>
-  electron.launch({
+// 학생 명단·학원 AI 는 통합 클라우드에서 (academy-info.json · requests/)
+const cloud = fakeCloud({
+  dir: join(tmp, 'cloud'),
+  academyDir: academy,
+  members: [
+    { id: 'teacher-a', name: '김선생', role: 'teacher' },
+    { id: 'teacher-b', name: '박선생', role: 'teacher' },
+    { id: 'boss', name: '원장님', role: 'director' },
+  ],
+});
+
+const launch = (user) => {
+  cloud.as(user.MAGOEDU_USER_ID);
+  return electron.launch({
     executablePath: require('electron'),
     args: ['--no-sandbox', ROOT],
     env: {
@@ -48,9 +61,11 @@ const launch = (user) =>
       MAGOEDU_ACADEMY_DIR: academy,
       MAGOEDU_DATA_DIR: dataDir,
       MAGOEDU_LOCAL_DIR: userData,
+      ...cloud.env,
       ...user,
     },
   });
+};
 
 const step = (name) => console.log(`▶ ${name}`);
 const errors = [];
@@ -142,7 +157,7 @@ try {
   await win.click('.share-switch');
   await win.waitForSelector('.modal:has-text("학원 공유 끄기")');
   const confirmText = await win.textContent('.modal');
-  assert(confirmText.includes('지워진 책') && confirmText.includes('원장'), '확인 창 안내: ' + confirmText);
+  assert(confirmText.includes('볼 수 없는 교재') && confirmText.includes('원장'), '확인 창 안내: ' + confirmText);
   await shot('3-confirm-off');
   await win.click('.modal .btn-danger');
   await waitToast('나만 보기로 바꿨어요');
@@ -283,6 +298,7 @@ try {
   process.exitCode = 1;
 } finally {
   await app.close().catch(() => {});
+  cloud.stop();
   rmSync(tmp, { recursive: true, force: true });
 }
 if (errors.length) {

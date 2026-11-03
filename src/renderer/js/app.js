@@ -45,8 +45,8 @@ const SETTINGS_REJECTED = '앱 밖에서 바꾼 설정이라 적용하지 않았
 
 /** 다른 컴퓨터·선생님이 바꾼 데이터가 들어오면 지금 화면에 반영 */
 async function onDataChanged(change) {
-  if (change.settings || change.academy) {
-    state.settings = await api.getSettings(); // 학원 공용 AI 키가 생기거나 없어졌을 수도
+  if (change.settings) {
+    state.settings = await api.getSettings(); // 학원 AI 가 생기거나 바뀌었을 수도 (통합 클라우드에서 원장이 정함)
     if (state.view === 'note') renderFormatHint();
   }
   if (change.settingsRejected) toast(SETTINGS_REJECTED, { timeout: 6000 });
@@ -54,7 +54,7 @@ async function onDataChanged(change) {
   navigating = navigating.then(async () => {
     try {
       if (state.view === 'home') {
-        if (!(change.books?.length || change.notes?.length || change.students || change.academy)) return;
+        if (!(change.books?.length || change.notes?.length || change.students)) return;
         if (document.querySelector('.modal-overlay:not(.closing)')) return; // 창이 열려 있으면 그대로 둠
         const top = root.querySelector('main.home')?.scrollTop || 0;
         await showHome(); // 보던 탭 그대로

@@ -20,11 +20,34 @@ export function spineFor(id) {
 
 let homeTab = 'notes';
 let shelf = 'mine'; // 책장 안 (학원 공간에서만): mine 내 책장 | shared 공유 책장
+// 학생 오답노트 · 학생 명단 탭에서 보던 것 (실시간으로 다시 그려도 그대로)
+let openSid = null; // 학생 오답노트 탭에서 연 학생 (id, '' 학생 미지정). null 이면 학생 목록
+let noteQ = ''; // 학생 오답노트 탭 검색어
+let rosterQ = ''; // 학생 명단 탭 검색어
+let scope = null; // mine 내 담당 | all 전체 (null: 아직 안 고름 → 내 담당 학생이 있으면 mine)
+let showGone = false; // 학생 명단: 지운 학생 보기
+
+const DAY = 86400000;
+const stMeta = (st) => [st.school, st.grade].filter(Boolean).join(' · ');
+const initial = (name) => String(name || '').trim().slice(0, 1) || '?';
+/** 검색어(소문자)가 학생 이름·학교·학년에 들어 있는지 */
+const matchStudent = (st, q) => !q || [st.name, st.school, st.grade].some((v) => String(v || '').toLowerCase().includes(q));
+
+/** 지운 학생이 완전히 지워지기까지 */
+function purgeText(st) {
+  const at = st.purgeAt || st.deletedAt + (state.appInfo.purgeDays || 30) * DAY;
+  const days = Math.ceil((at - Date.now()) / DAY);
+  return days > 0 ? `${days}일 뒤 완전 삭제` : '곧 완전 삭제';
+}
+
+/** 통합 클라우드가 낮은 버전이라 학원 명단을 못 받음 */
+const rosterNotice = () => h('div.readonly-banner.roster-notice', icon('warn'), h('span', '학생 명단을 받으려면 통합 클라우드를 최신 버전으로 업데이트해 주세요.'));
 
 /** 탭마다 위쪽 제목·설명 */
 function heroText(key) {
-  if (key === 'books') return ['책장', state.appInfo.academy ? '내가 만든 책은 내 책장에, 다른 선생님이 학원에 공유한 책은 공유 책장에 있어요. 어느 책이든 학생 오답노트에 쓸 수 있어요.' : '문제집과 답지를 한 번만 올려 두면, 여러 학생 오답노트에서 같이 써요.'];
-  if (key === 'students') return ['학생 명단', state.appInfo.academy ? '학원 선생님들이 함께 쓰는 학생 명단이에요. 오답노트를 만들 때 골라 쓸 수 있어요.' : '학생을 적어 두면 오답노트를 만들 때 골라 쓸 수 있어요.'];
+  const { academy, purgeDays } = state.appInfo;
+  if (key === 'books') return ['책장', academy ? '내가 만든 책은 내 책장에, 다른 선생님이 학원에 공유한 책은 공유 책장에 있어요. 어느 책이든 학생 오답노트에 쓸 수 있어요.' : '문제집과 답지를 한 번만 올려 두면, 여러 학생 오답노트에서 같이 써요.'];
+  if (key === 'students') return ['학생 명단', academy ? `학원 사람 모두가 함께 쓰는 학생 명단이에요. 누구나 추가·고치기·지우기를 할 수 있고, 지운 학생은 ${purgeDays || 30}일 안에 되살릴 수 있어요.` : '학생을 적어 두면 오답노트를 만들 때 골라 쓸 수 있어요.'];
   return ['학생 오답노트', '책장에 등록한 책에서 틀린 문제만 골라 시험지처럼 묶어 드려요.'];
 }
 
@@ -32,6 +55,28 @@ export async function showHome({ tab } = {}) {
   if (tab) homeTab = tab;
   const [notes, books, students] = await Promise.all([api.listNotes(), api.listBooks(), api.listStudents()]);
   const bookById = new Map(books.map((b) => [b.id, b]));
+  const { roster, purgeDays = 30 } = state.appInfo;
+  const cloud = roster === 'cloud'; // 학원 명단 (담당 선생님·지운 학생이 있음)
+  const myId = state.appInfo.user?.id || '';
+  const stById = new Map(students.map((st) => [st.id, st]));
+  const active = students.filter((st) => !st.deletedAt);
+  // 학생마다 오답노트 (새것 먼저). 학생을 안 정했거나 명단에 없는 학생이면 '' (학생 미지정)
+  const notesOf = new Map();
+  for (const n of notes) {
+    const sid = stById.has(n.studentId) ? n.studentId : '';
+    if (!notesOf.has(sid)) notesOf.set(sid, []);
+    notesOf.get(sid).push(n);
+  }
+  const isMine = (st) => !!myId && st.teacher?.id === myId;
+  const mineCount = active.filter(isMine).length;
+  const curScope = () => scope || (mineCount ? 'mine' : 'all');
+  const inScope = (st) => !cloud || curScope() === 'all' || isMine(st);
+  // 연 학생이 명단에서 없어졌으면(완전히 지움 등) 학생 목록으로
+  if (openSid && !stById.has(openSid)) openSid = null;
+  if (openSid === '' && !notesOf.has('')) openSid = null;
+  // 검색칸에 쓰던 중이었으면 다시 그린 뒤에도 이어서
+  const focused = document.activeElement;
+  const typing = focused?.matches?.('.home-search input') ? [focused.selectionStart, focused.selectionEnd] : null;
   const root = document.getElementById('app');
   clear(root);
   state.view = 'home';
@@ -40,7 +85,7 @@ export async function showHome({ tab } = {}) {
   const segBtn = (key, ic, label, n) =>
     h(`button.seg-tab${homeTab === key ? '.active' : ''}`, { dataset: { tab: key }, onclick: () => switchTab(key) }, icon(ic), h('span', label), h('span.seg-count', String(n)));
   const thumb = h('span.seg-thumb');
-  const tabs = h('nav.seg-tabs', thumb, segBtn('notes', 'notebook', '학생 오답노트', notes.length),segBtn('books', 'library', '책장', books.length), segBtn('students', 'user', '학생 명단', students.length));
+  const tabs = h('nav.seg-tabs', thumb, segBtn('notes', 'notebook', '학생 오답노트', notes.length), segBtn('books', 'library', '책장', books.length), segBtn('students', 'user', '학생 명단', active.length));
   const [heroTitle, heroSub] = heroText(homeTab);
 
   root.append(
@@ -58,9 +103,21 @@ export async function showHome({ tab } = {}) {
   );
   requestAnimationFrame(() => placeSegThumb(tabs));
   renderBody();
+  if (typing) {
+    const input = body.querySelector('.home-search input');
+    input?.focus();
+    input?.setSelectionRange(...typing);
+  }
 
   async function switchTab(key) {
-    if (key === homeTab) return;
+    if (key === homeTab) {
+      // 학생 화면에서 학생 오답노트 탭을 또 누르면 학생 목록으로
+      if (key === 'notes' && openSid != null) {
+        openSid = null;
+        renderBody();
+      }
+      return;
+    }
     homeTab = key;
     tabs.querySelectorAll('.seg-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === key));
     placeSegThumb(tabs);
@@ -76,86 +133,285 @@ export async function showHome({ tab } = {}) {
     body.classList.remove('swap-in');
     void body.offsetWidth;
     body.classList.add('swap-in');
-    if (homeTab === 'notes') body.append(notesGrid());
-    else if (homeTab === 'students') body.append(studentsGrid());
+    if (homeTab === 'notes') body.append(notesView());
+    else if (homeTab === 'students') body.append(studentsView());
     else body.append(booksGrid());
   }
 
-  function notesGrid() {
+  /**
+   * 검색칸 + 내 담당/전체 (학원 명단에서만) + extra. 검색어·담당을 바꾸면 refill (목록만 다시 그림)
+   * → { el, seg }
+   */
+  function toolbar({ value, placeholder, onInput, refill, extra = null }) {
+    const input = h('input.input', { type: 'search', value, placeholder, autocomplete: 'off', spellcheck: 'false' });
+    input.addEventListener('input', () => {
+      onInput(input.value);
+      refill();
+    });
+    const scopeBtn = (key, label, n) => h(`button${curScope() === key ? '.active' : ''}`, { dataset: { scope: key }, onclick: () => setScope(key) }, label, h('span.mini-count', String(n)));
+    const seg = cloud ? h('div.seg-toggle.scope-seg', scopeBtn('mine', '내 담당', mineCount), scopeBtn('all', '전체', active.length)) : null;
+    function setScope(key) {
+      if (key === curScope()) return;
+      scope = key;
+      seg.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.scope === key));
+      refill();
+    }
+    return { el: h('div.home-tools', h('label.home-search', icon('search'), input), h('span.spacer'), seg, extra), seg };
+  }
+
+  // ---- 학생 오답노트 탭: 학생 목록 → 한 학생의 오답노트 ----
+  function notesView() {
+    if (roster === 'missing') return h('div.home-stack', rosterNotice(), notesGrid(notes));
+    if (openSid != null) return groupView(openSid);
+    const list = h('div.home-list');
+    const refill = (quiet = true) => {
+      clear(list).classList.toggle('quiet', quiet); // 글자마다 카드가 다시 떠오르지 않게
+      list.append(...groupList());
+    };
+    const tools = toolbar({ value: noteQ, placeholder: '학생 이름·학교·학년, 오답노트 제목으로 찾기', onInput: (v) => (noteQ = v), refill });
+    refill(false);
+    return h('div.home-stack', tools.el, list);
+  }
+
+  /** 새 오답노트, 학생 카드 (오답노트가 있는 학생 먼저 — 최근에 고친 순, 나머지는 이름순), 학생 미지정, 지운 학생 */
+  function groupList() {
+    const q = noteQ.trim().toLowerCase();
+    const has = (v) => String(v || '').toLowerCase().includes(q);
+    // 학생 이름·학교·학년이 맞으면 true, 아니면 제목(미지정은 적어 둔 학생 이름도)이 맞는 오답노트 (카드에 보여 줌)
+    const hitOf = (st, list) => (st ? matchStudent(st, q) : !q) || list.find((n) => has(n.title) || (!st && has(n.student))) || null;
+    const groups = [];
+    for (const st of students) {
+      const list = notesOf.get(st.id) || [];
+      if (!inScope(st) || (st.deletedAt && !list.length)) continue;
+      const hit = hitOf(st, list);
+      if (hit) groups.push({ st, list, hit: hit === true ? null : hit });
+    }
+    const recent = (a, b) => (b.list[0]?.updatedAt || 0) - (a.list[0]?.updatedAt || 0);
+    const live = groups.filter((g) => !g.st.deletedAt);
+    const shown = [...live.filter((g) => g.list.length).sort(recent), ...live.filter((g) => !g.list.length)];
+    const gone = groups.filter((g) => g.st.deletedAt).sort(recent);
+    const loose = notesOf.get('') || [];
+    const looseHit = loose.length ? hitOf(null, loose) : null;
+    let i = 1;
+    const out = [h('div.card-grid', newNoteCard(), shown.map((g) => groupCard(g, i++)), looseHit ? groupCard({ st: null, list: loose, hit: looseHit === true ? null : looseHit }, i++) : null)];
+    if (!shown.length) {
+      const why = q ? `"${noteQ.trim()}"에 맞는 학생이 없어요.` : active.length ? '내 담당 학생이 없어요. 전체를 누르면 모든 학생이 보여요.' : '학생 명단에 학생을 추가하면 학생마다 오답노트를 모아 볼 수 있어요.';
+      out.push(h('p.muted.home-hint', why));
+    }
+    if (gone.length) {
+      out.push(
+        h(
+          'section.gone-section',
+          h('div.gone-head', h('h3', '지운 학생'), h('span.muted.small', `오답노트는 보기만 할 수 있어요. ${purgeDays}일 안에 학생 명단에서 되살리지 않으면 오답노트도 함께 완전히 지워져요.`)),
+          h('div.card-grid', gone.map((g) => groupCard(g, i++))),
+        ),
+      );
+    }
+    return out;
+  }
+
+  function teacherLine(st) {
+    return h('div.creator.sg-teacher', icon('user'), st.teacher?.name ? `담당 ${st.teacher.name}${isMine(st) ? ' (나)' : ''}` : '담당 없음');
+  }
+
+  /** 학생 카드 (st 가 없으면 학생 미지정). hit: 검색어가 제목에 맞은 오답노트 */
+  function groupCard({ st, list, hit }, i) {
+    const sid = st?.id || '';
+    const open = () => openGroup(sid);
     return h(
-      'div.card-grid',
-      h(
-        'button.card.card-new',
-        { onclick: () => createNote(books), style: { '--i': 0 } },
-        h('div.new-plus', icon('plus')),
-        h('div.cn-title', '새 오답노트'),
-        h('div.cn-sub', books.length ? '학생 이름을 쓰고 책을 고르면 시작' : '먼저 책장에 책을 등록해 주세요'),
-      ),
-      notes.map((n, i) => {
-        const statNum = h('strong');
-        countUp(statNum, n.selectedCount);
-        return h(
-          'div.card.note-card',
-          {
-            tabIndex: 0,
-            onclick: () => nav.note(n.id),
-            onkeydown: (e) => e.key === 'Enter' && nav.note(n.id),
-            style: { '--i': Math.min(i + 1, 14) },
-          },
-          h('div.nc-top', h('span.nc-avatar', (n.student || n.title || '?').trim().slice(0, 1)), h('div.nc-who', h('div.nc-title', n.title), h('div.nc-student', n.student ? `${n.student} 학생` : '학생 이름 없음'))),
-          // 원장이 보는 다른 선생님 오답노트: 누구 것인지 (열면 보기·내보내기만)
-          n.mine === false ? h('div.creator', icon('user'), `${n.ownerName || '다른'} 선생님`) : null,
-          h(
-            'div.nc-books',
-            n.bookIds.length
-              ? n.bookIds.map((id) => h('span.book-pill', { style: { '--spine': spineFor(id) } }, bookById.get(id)?.name || '지워진 책'))
-              : h('span.muted.small', '책 없음'),
-          ),
-          h('div.nc-foot', h('span.nc-count', statNum, '문항 고름'), h('span.nc-date', formatDate(n.updatedAt))),
-          n.mine !== false
-            ? h(
-                'div.card-actions',
-                h('button.btn.btn-ghost.btn-icon', { title: '이름 바꾸기', onclick: (e) => { e.stopPropagation(); renameNote(n); } }, icon('edit')),
-                h('button.btn.btn-ghost.btn-icon', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteNote(n); } }, icon('trash')),
-              )
-            : null,
-        );
-      }),
+      `div.card.student-group${st ? '' : '.loose'}${st?.deletedAt ? '.gone' : ''}`,
+      { tabIndex: 0, dataset: { student: sid }, onclick: open, onkeydown: (e) => e.key === 'Enter' && open(), style: { '--i': Math.min(i, 14) } },
+      h('div.nc-top', h('span.nc-avatar', st ? initial(st.name) : icon('files')), h('div.nc-who', h('div.nc-title', st ? st.name : '학생 미지정'), h('div.nc-student', st ? stMeta(st) || '학교·학년 없음' : '학생을 정하지 않은 오답노트'))),
+      st?.deletedAt ? h('div.purge-badge', icon('trash'), purgeText(st)) : st && cloud ? teacherLine(st) : null,
+      hit ? h('div.sg-hit', icon('search'), h('span', hit.title)) : null,
+      h('div.nc-foot', h('span.sg-count', list.length ? ['노트 ', h('b', String(list.length)), '개'] : '노트 없음'), h('span.nc-date', list.length ? formatDate(list[0].updatedAt) : '')),
     );
   }
 
-  function studentsGrid() {
+  function openGroup(sid) {
+    openSid = sid;
+    renderBody();
+    root.querySelector('main.home')?.scrollTo({ top: 0 });
+  }
+
+  /** 한 학생의 오답노트 (지운 학생은 보기만) */
+  function groupView(sid) {
+    const st = sid ? stById.get(sid) : null;
+    const gone = !!st?.deletedAt;
+    const sub = st ? [stMeta(st), cloud ? (st.teacher?.name ? `담당 ${st.teacher.name}` : '담당 없음') : ''].filter(Boolean).join(' · ') || '학교·학년 없음' : '학생을 정하지 않은 오답노트예요.';
+    const back = () => {
+      openSid = null;
+      renderBody();
+    };
     return h(
-      'div.card-grid',
+      'div.home-stack',
       h(
-        'button.card.card-new',
-        { onclick: () => editStudent(), style: { '--i': 0 } },
-        h('div.new-plus', icon('plus')),
-        h('div.cn-title', '새 학생'),
-        h('div.cn-sub', '이름·학교·학년을 적어 두면 오답노트를 만들 때 골라요'),
+        `div.student-head${st ? '' : '.loose'}`,
+        h('button.btn.back-list', { onclick: back }, icon('back'), '학생 목록'),
+        h('span.nc-avatar', st ? initial(st.name) : icon('files')),
+        h('div.sh-who', h('h2', st ? st.name : '학생 미지정'), h('p', sub)),
+        gone ? h('span.purge-badge', icon('trash'), purgeText(st)) : null,
       ),
-      students.map((st, i) =>
-        h(
-          `div.card.student-card${st.canEdit ? '.can-edit' : ''}`,
-          {
-            tabIndex: st.canEdit ? 0 : null,
-            onclick: st.canEdit ? () => editStudent(st) : null,
-            onkeydown: st.canEdit ? (e) => e.key === 'Enter' && editStudent(st) : null,
-            style: { '--i': Math.min(i + 1, 14) },
-          },
-          h('div.nc-top', h('span.nc-avatar', (st.name || '?').trim().slice(0, 1)), h('div.nc-who', h('div.nc-title', st.name), h('div.nc-student', [st.school, st.grade].filter(Boolean).join(' · ') || '학교·학년 없음'))),
-          st.memo ? h('div.sc-memo', st.memo) : null,
-          h('div.nc-foot', st.createdBy?.name ? h('span.creator', `등록: ${st.createdBy.name}`) : h('span'), h('span.nc-date', formatDate(st.updatedAt))),
-          st.canEdit
-            ? h(
-                'div.card-actions',
-                h('button.btn.btn-ghost.btn-icon', { title: '고치기', onclick: (e) => { e.stopPropagation(); editStudent(st); } }, icon('edit')),
-                h('button.btn.btn-ghost.btn-icon', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteStudent(st); } }, icon('trash')),
-              )
-            : null,
-        ),
-      ),
+      gone ? h('div.readonly-banner', icon('eye'), h('span', '지운 학생이라 오답노트를 보기만 할 수 있어요. 학생 명단에서 되살리면 다시 고칠 수 있어요.')) : null,
+      notesGrid(notesOf.get(sid) || [], { newCard: !gone, student: st }),
     );
+  }
+
+  /** 새 오답노트 카드 (student: 그 학생을 골라 둔 채로) */
+  function newNoteCard(student = null) {
+    return h(
+      'button.card.card-new',
+      { onclick: () => createNote(books, { student }), style: { '--i': 0 } },
+      h('div.new-plus', icon('plus')),
+      h('div.cn-title', '새 오답노트'),
+      h('div.cn-sub', !books.length ? '먼저 책장에 책을 등록해 주세요' : student ? `${student.name} 학생으로 시작해요` : '학생 이름을 쓰고 책을 고르면 시작'),
+    );
+  }
+
+  function notesGrid(list, { newCard = true, student = null } = {}) {
+    return h('div.card-grid', newCard ? newNoteCard(student) : null, list.map((n, i) => noteCard(n, i + 1)));
+  }
+
+  function noteCard(n, i) {
+    const statNum = h('strong');
+    countUp(statNum, n.selectedCount);
+    const name = stById.get(n.studentId)?.name || n.student;
+    // 학생 폴더의 오답노트를 다른 사람이 마지막으로 고쳤으면
+    const editor = n.shared && n.updatedBy?.id && n.updatedBy.id !== myId ? n.updatedBy.name || '다른 사람' : '';
+    return h(
+      'div.card.note-card',
+      {
+        tabIndex: 0,
+        onclick: () => nav.note(n.id),
+        onkeydown: (e) => e.key === 'Enter' && nav.note(n.id),
+        style: { '--i': Math.min(i, 14) },
+      },
+      h('div.nc-top', h('span.nc-avatar', initial(name || n.title)), h('div.nc-who', h('div.nc-title', n.title), h('div.nc-student', name ? `${name} 학생` : '학생 이름 없음'))),
+      // 원장이 보는 다른 선생님 오답노트: 누구 것인지 (열면 보기·내보내기만)
+      n.mine === false ? h('div.creator', icon('user'), `${n.ownerName || '다른'} 선생님`) : null,
+      editor ? h('div.creator', icon('edit'), `고친 사람: ${editor}`) : null,
+      h(
+        'div.nc-books',
+        n.bookIds.length
+          ? n.bookIds.map((id) => {
+              const b = bookById.get(id);
+              return h('span.book-pill', { style: { '--spine': spineFor(id) }, title: b ? null : '지워졌거나 다른 선생님의 나만 보기 교재예요' }, b?.name || '볼 수 없는 교재');
+            })
+          : h('span.muted.small', '책 없음'),
+      ),
+      h('div.nc-foot', h('span.nc-count', statNum, '문항 고름'), h('span.nc-date', formatDate(n.updatedAt))),
+      n.canEdit
+        ? h(
+            'div.card-actions',
+            h('button.btn.btn-ghost.btn-icon', { title: '이름 바꾸기', onclick: (e) => { e.stopPropagation(); renameNote(n); } }, icon('edit')),
+            h('button.btn.btn-ghost.btn-icon', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteNote(n); } }, icon('trash')),
+          )
+        : null,
+    );
+  }
+
+  // ---- 학생 명단 탭 ----
+  function studentsView() {
+    if (roster === 'missing') return h('div.home-stack', rosterNotice());
+    if (!cloud) showGone = false;
+    const goneCount = students.filter((st) => st.deletedAt).length;
+    const list = h('div.home-list');
+    const refill = (quiet = true) => {
+      clear(list).classList.toggle('quiet', quiet);
+      list.append(...(showGone ? goneList() : rosterList()));
+    };
+    // 지운 학생은 담당과 상관없이 모두 (내 담당/전체는 잠금)
+    const lockScope = () => tools.seg?.querySelectorAll('button').forEach((b) => (b.disabled = showGone));
+    const goneBtn = cloud
+      ? h(
+          `button.btn.btn-small.gone-toggle${showGone ? '.btn-active' : ''}`,
+          {
+            onclick: () => {
+              showGone = !showGone;
+              goneBtn.classList.toggle('btn-active', showGone);
+              lockScope();
+              refill(false);
+            },
+          },
+          icon('trash'),
+          `지운 학생 (${goneCount})`,
+        )
+      : null;
+    const tools = toolbar({ value: rosterQ, placeholder: '학생 이름·학교·학년으로 찾기', onInput: (v) => (rosterQ = v), refill, extra: goneBtn });
+    lockScope();
+    refill(false);
+    return h('div.home-stack', tools.el, list);
+  }
+
+  function rosterList() {
+    const q = rosterQ.trim().toLowerCase();
+    const shown = active.filter((st) => inScope(st) && matchStudent(st, q));
+    const out = [
+      h(
+        'div.card-grid',
+        h(
+          'button.card.card-new',
+          { onclick: () => editStudent(), style: { '--i': 0 } },
+          h('div.new-plus', icon('plus')),
+          h('div.cn-title', '새 학생'),
+          h('div.cn-sub', '이름·학교·학년을 적어 두면 오답노트를 만들 때 골라요'),
+        ),
+        shown.map((st, i) => rosterCard(st, i + 1)),
+      ),
+    ];
+    if (!shown.length && active.length) out.push(h('p.muted.home-hint', q ? `"${rosterQ.trim()}"에 맞는 학생이 없어요.` : '내 담당 학생이 없어요. 전체를 누르면 모든 학생이 보여요.'));
+    return out;
+  }
+
+  function rosterCard(st, i) {
+    const by = st.updatedBy?.name ? `고친 사람: ${st.updatedBy.name}` : st.createdBy?.name ? `등록: ${st.createdBy.name}` : '';
+    const edit = () => editStudent(st);
+    return h(
+      `div.card.student-card.roster-card${st.canEdit ? '.can-edit' : ''}`,
+      {
+        tabIndex: st.canEdit ? 0 : null,
+        dataset: { student: st.id },
+        onclick: st.canEdit ? edit : null,
+        onkeydown: st.canEdit ? (e) => e.key === 'Enter' && edit() : null,
+        style: { '--i': Math.min(i, 14) },
+      },
+      h('div.nc-top', h('span.nc-avatar', initial(st.name)), h('div.nc-who', h('div.nc-title', st.name), h('div.nc-student', stMeta(st) || '학교·학년 없음'))),
+      cloud ? teacherLine(st) : null,
+      st.memo ? h('div.sc-memo', st.memo) : null,
+      h('div.nc-foot', by ? h('span.creator', by) : h('span'), h('span.nc-date', formatDate(st.updatedAt))),
+      st.canEdit
+        ? h(
+            'div.card-actions',
+            h('button.btn.btn-ghost.btn-icon', { title: '고치기', onclick: (e) => { e.stopPropagation(); edit(); } }, icon('edit')),
+            h('button.btn.btn-ghost.btn-icon', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteStudent(st); } }, icon('trash')),
+          )
+        : null,
+    );
+  }
+
+  /** 지운 학생 (최근에 지운 학생 먼저) — 되살리기만 */
+  function goneList() {
+    const q = rosterQ.trim().toLowerCase();
+    const shown = students.filter((st) => st.deletedAt && matchStudent(st, q)).sort((a, b) => b.deletedAt - a.deletedAt);
+    if (!shown.length) {
+      return [h('div.empty-state', h('div.empty-art', icon('trash')), h('h3', q ? '맞는 학생이 없어요' : '지운 학생이 없어요'), h('p.muted', `지운 학생은 ${purgeDays}일 동안 여기 있다가 오답노트와 함께 완전히 지워져요.`))];
+    }
+    return [
+      h(
+        'div.card-grid',
+        shown.map((st, i) => {
+          const k = (notesOf.get(st.id) || []).length;
+          return h(
+            'div.card.student-card.roster-card.gone',
+            { dataset: { student: st.id }, style: { '--i': Math.min(i, 14) } },
+            h('div.nc-top', h('span.nc-avatar', initial(st.name)), h('div.nc-who', h('div.nc-title', st.name), h('div.nc-student', stMeta(st) || '학교·학년 없음'))),
+            h('div.purge-badge', icon('trash'), purgeText(st)),
+            st.memo ? h('div.sc-memo', st.memo) : null,
+            h('div.nc-foot', h('span.creator', k ? `오답노트 ${k}개` : '오답노트 없음'), h('button.btn.btn-small.restore-btn', { onclick: (e) => restoreStudent(st, e.currentTarget) }, icon('refresh'), '되살리기')),
+          );
+        }),
+      ),
+    ];
   }
 
   // 학원 공간: 내 책장(내가 만든 책 — 학원 공유든 나만 보기든) / 공유 책장(다른 선생님이 학원에 공유한 책). 학원이 없으면 책장 하나
@@ -305,8 +561,8 @@ async function copyBook(b, btn) {
   if (state.view === 'home') showHome({ tab: 'books' }); // 받는 동안 다른 화면으로 갔으면 그대로
 }
 
-/** 새 오답노트: 제목·학생 이름·책 고르기 */
-export async function createNote(books) {
+/** 새 오답노트: 제목·학생 이름·책 고르기 (student: 학생 화면에서 열면 그 학생을 골라 둠) */
+export async function createNote(books, { student: preset = null } = {}) {
   if (!books.length) {
     const go = await confirmDialog('오답노트는 책장에 등록한 책에서 문제를 골라 만들어요.\n먼저 책을 등록할까요?', { title: '책이 없어요', ok: '책 등록하기' });
     if (go) {
@@ -317,7 +573,7 @@ export async function createNote(books) {
     return;
   }
   const titleInput = h('input.input', { placeholder: '예: 1학기 중간고사 대비 오답', value: '' });
-  const student = studentSearch(await api.listStudents().catch(() => []));
+  const student = studentSearch((await api.listStudents().catch(() => [])).filter((st) => !st.deletedAt), { picked: preset });
   const picked = new Set(books.length === 1 ? [books[0].id] : []);
   const list = h(
     'div.book-pick',
@@ -347,7 +603,7 @@ export async function createNote(books) {
     h('label.field-v', h('span', '오답노트 제목'), titleInput),
     h('div.field-v', h('span', '어떤 책에서 고를까요? (여러 권 가능)'), list),
   );
-  const r = await modal({
+  const asked = modal({
     title: '새 오답노트',
     body,
     width: 520,
@@ -369,6 +625,8 @@ export async function createNote(books) {
       },
     ],
   });
+  if (preset) titleInput.focus(); // 학생은 골라 뒀으니 제목부터
+  const r = await asked;
   if (!r) return;
   const note = await api.createNote(r);
   await nav.note(note.id);
@@ -378,13 +636,20 @@ const STUDENT_MAX = 50; // 찾은 학생 목록에 보이는 수 (더 있으면 
 
 /**
  * 학생 이름 칸 + 학생 명단에서 찾기: 이름·학교·학년 일부를 적으면 맞는 학생 목록 (↑↓ Enter 로 고르고 Esc 로 닫음, 눌러도 고름).
- * 고르면 이름을 채우고 그 학생을 기억, 이름을 다르게 고치면 직접 입력으로. 명단이 비었으면 이름 칸만
+ * 고르면 이름을 채우고 그 학생을 기억, 이름을 다르게 고치면 직접 입력으로. 명단이 비었으면 이름 칸만.
+ * students 는 고를 수 있는 학생만 (지운 학생 빼고), picked: 처음부터 골라 둘 학생
  * → { field, input, picked(): 고른 학생 | null, close() }
  */
-function studentSearch(students) {
+export function studentSearch(students, { picked: preset = null } = {}) {
   const input = h('input.input', { placeholder: students.length ? '학생 이름 (명단에서 찾기)' : '학생 이름', autocomplete: 'off' });
   let picked = null;
-  if (!students.length) return { field: h('label.field-v', h('span', '학생 이름'), input), input, picked: () => picked, close() {} };
+  if (!students.length) {
+    if (preset) {
+      picked = preset;
+      input.value = preset.name || '';
+    }
+    return { field: h('label.field-v', h('span', '학생 이름'), input), input, picked: () => picked, close() {} };
+  }
   const meta = (st) => [st.school, st.grade].filter(Boolean).join(' · ');
   const list = h('div.student-results', { role: 'listbox', hidden: true });
   const info = h('div.student-picked', { hidden: true });
@@ -478,40 +743,67 @@ function studentSearch(students) {
     const same = students.filter((st) => st.name === input.value.trim());
     return same.length === 1 ? same[0] : null;
   };
+  if (preset) pick(preset);
   return { field: h('div.field-v', h('span', '학생 이름'), h('div.student-search', input, list), info), input, picked: () => picked || exact(), close };
 }
 
 async function renameNote(n) {
   const name = await promptDialog('새 제목', { title: '오답노트 제목 바꾸기', value: n.title });
   if (!name) return;
-  const note = await api.getNote(n.id);
-  note.title = name.trim();
-  note.updatedAt = Date.now();
-  await api.saveNote(note);
+  try {
+    const note = await api.getNote(n.id);
+    const base = structuredClone(note); // 그사이 다른 사람이 고쳤으면 합쳐서 저장
+    note.title = name.trim();
+    note.updatedAt = Date.now();
+    await api.saveNote(note, base);
+  } catch (err) {
+    toast(`제목을 바꾸지 못했어요: ${errMsg(err)}`, { type: 'error' });
+  }
   showHome();
 }
 
 async function deleteNote(n) {
   if (!(await confirmDialog(`"${n.title}" 오답노트를 삭제할까요?\n고른 문항 목록만 지워지고, 책장의 책은 그대로 남아요.`, { title: '오답노트 삭제', ok: '삭제', danger: true }))) return;
-  await api.deleteNote(n.id);
+  try {
+    await api.deleteNote(n.id);
+  } catch (err) {
+    toast(`지우지 못했어요: ${errMsg(err)}`, { type: 'error' });
+  }
   showHome();
 }
 
 // ---------------------------------------------------------------------------
-/** 학생 등록 / 고치기: 이름·학교·학년·메모 */
+/** 학생 등록 / 고치기: 이름·학교·학년·담당 선생님(학원 명단)·메모 */
 async function editStudent(st = null) {
+  const { roster, user } = state.appInfo;
+  const cloud = roster === 'cloud';
   const nameInput = h('input.input', { value: st?.name || '', placeholder: '학생 이름' });
   const schoolInput = h('input.input', { value: st?.school || '', placeholder: '예: 한빛고' });
   const gradeInput = h('input.input', { value: st?.grade || '', placeholder: '예: 고2' });
   const memoInput = h('textarea.input', { rows: 3, placeholder: '예: 함수 단원이 약해요 (선택)' }, st?.memo || '');
+  // 담당 선생님: 학원 사람 중에서 (새 학생은 나). 담당이 학원을 나간 사람이면 그 이름도 남겨 둠
+  let teacherSel = null;
+  if (cloud) {
+    const members = await api.listMembers().catch(() => []);
+    const left = st?.teacher?.id && !members.some((m) => m.id === st.teacher.id) ? st.teacher : null;
+    teacherSel = h(
+      'select.input',
+      h('option', { value: '' }, '담당 없음'),
+      members.map((m) => h('option', { value: m.id }, m.roleLabel ? `${m.name} · ${m.roleLabel}` : m.name)),
+      left ? h('option', { value: left.id }, `${left.name || '알 수 없음'} (학원에 없음)`) : null,
+    );
+    teacherSel.value = st ? st.teacher?.id || '' : members.some((m) => m.id === user?.id) ? user.id : '';
+  }
+  const form = h(
+    'div.form',
+    h('label.field-v', h('span', '학생 이름'), nameInput),
+    h('div.form-2', h('label.field-v', h('span', '학교'), schoolInput), h('label.field-v', h('span', '학년'), gradeInput)),
+    teacherSel ? h('label.field-v', h('span', '담당 선생님'), teacherSel) : null,
+    h('label.field-v', h('span', '메모'), memoInput),
+  );
   const r = await modal({
     title: st ? '학생 정보 고치기' : '새 학생',
-    body: h(
-      'div.form',
-      h('label.field-v', h('span', '학생 이름'), nameInput),
-      h('div.form-2', h('label.field-v', h('span', '학교'), schoolInput), h('label.field-v', h('span', '학년'), gradeInput)),
-      h('label.field-v', h('span', '메모'), memoInput),
-    ),
+    body: form,
     buttons: [
       { label: '취소', value: null },
       {
@@ -523,10 +815,18 @@ async function editStudent(st = null) {
             toast('학생 이름을 적어 주세요.', { type: 'error' });
             return false;
           }
+          const btn = form.closest('.modal')?.querySelector('.modal-footer .btn-primary');
+          if (btn) btn.disabled = true; // 통합 클라우드가 답할 때까지 두 번 누르지 않게
           try {
-            await api.saveStudent({ id: st?.id, name, school: schoolInput.value.trim(), grade: gradeInput.value.trim(), memo: memoInput.value.trim() });
+            await api.saveStudent({ id: st?.id, rev: st?.rev, name, school: schoolInput.value.trim(), grade: gradeInput.value.trim(), memo: memoInput.value.trim(), teacherId: teacherSel ? teacherSel.value : undefined });
           } catch (err) {
+            if (btn) btn.disabled = false;
             toast(`저장하지 못했어요: ${errMsg(err)}`, { type: 'error' });
+            // 그사이 다른 사람이 고쳤거나 지웠으면 창을 닫고 새 명단으로 (명단은 이미 새로 읽혀 있음)
+            if (st && cloud) {
+              const now = (await api.listStudents().catch(() => [])).find((x) => x.id === st.id);
+              if (!now || now.rev !== st.rev || now.deletedAt) return 'stale';
+            }
             return false;
           }
           return true;
@@ -534,16 +834,33 @@ async function editStudent(st = null) {
       },
     ],
   });
-  if (r) showHome({ tab: 'students' });
+  if (r && state.view === 'home') showHome({ tab: 'students' });
 }
 
 async function deleteStudent(st) {
-  if (!(await confirmDialog(`"${st.name}" 학생을 명단에서 지울까요?\n이 학생으로 만든 오답노트는 그대로 남아요.`, { title: '학생 삭제', ok: '삭제', danger: true }))) return;
+  const { roster, purgeDays = 30 } = state.appInfo;
+  const cloud = roster === 'cloud';
+  const msg = cloud
+    ? `"${st.name}" 학생을 지울까요?\n학원 사람 누구나 ${purgeDays}일 안에 되살릴 수 있어요. 그 뒤에는 이 학생의 오답노트도 함께 완전히 지워져요.`
+    : `"${st.name}" 학생을 명단에서 지울까요?\n이 학생으로 만든 오답노트는 그대로 남아요.`;
+  if (!(await confirmDialog(msg, { title: '학생 삭제', ok: '삭제', danger: true }))) return;
   try {
     await api.deleteStudent(st.id);
+    if (cloud) toast(`"${st.name}" 학생을 지웠어요.`, { type: 'success', actions: [{ label: '되살리기', onClick: () => restoreStudent(st) }] });
   } catch (err) {
     toast(`지우지 못했어요: ${errMsg(err)}`, { type: 'error' });
-    return;
   }
-  showHome({ tab: 'students' });
+  if (state.view === 'home') showHome(); // 못 지웠어도 새 명단으로
+}
+
+/** 지운 학생 되살리기 (학원 명단) */
+async function restoreStudent(st, btn = null) {
+  if (btn) btn.disabled = true; // 통합 클라우드가 답할 때까지
+  try {
+    await api.restoreStudent(st.id);
+    toast(`"${st.name}" 학생을 되살렸어요.`, { type: 'success' });
+  } catch (err) {
+    toast(`되살리지 못했어요: ${errMsg(err)}`, { type: 'error' });
+  }
+  if (state.view === 'home') showHome();
 }

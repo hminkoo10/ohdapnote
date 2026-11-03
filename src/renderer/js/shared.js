@@ -623,9 +623,24 @@ export const liveBook = (id) => liveBooks.get(id)?.book || null;
 // ===========================================================================
 // AI (기본 Gemini, 설정 → 세부 설정에서 다른 AI): 사용자가 고른 쪽만 보내고, 진행 상황·즉시 취소
 // ===========================================================================
+/**
+ * AI 를 부를 때 쓰는 설정: 학원 AI 를 고르고(기본) 학원 AI 가 있으면 그 종류·모델 (메인 프로세스의 effectiveSettings 와 같은 규칙).
+ * 학원 AI 키는 메인 프로세스만 가져서 여기서는 있는지만
+ */
+export function aiConf() {
+  const s = state.settings || {};
+  const a = s.academyAi;
+  if (s.aiSource === 'personal' || !a || !PROVIDERS[a.provider]) return s;
+  const p = a.provider;
+  return { ...s, aiProvider: p, [`${p}ApiKey`]: a.hasKey ? '(학원 AI)' : '', [`${p}Model`]: a.model, [`${p}Model2`]: a.model2, [`${p}Rpm`]: a.rpm || PROVIDERS[p].defaultRpm, [`${p}BaseUrl`]: a.baseUrl };
+}
+
+/** 학원 AI 를 쓰는 중인지 */
+export const usingAcademyAi = () => !!state.settings && aiConf() !== state.settings;
+
 /** 설정에서 고른 AI 종류 (gemini | openai | anthropic | codex) */
 export function aiProvider() {
-  const p = state.settings?.aiProvider;
+  const p = aiConf()?.aiProvider;
   return PROVIDERS[p] ? p : 'gemini';
 }
 
@@ -635,15 +650,15 @@ export const aiLabel = () => providerOf(aiProvider()).label;
 /** 설정에서 AI 를 껐는지 */
 export const aiOff = () => state.settings?.aiEnabled === false;
 
-/** 고른 AI 를 쓸 준비가 됐는지 (이름은 예전 그대로) — 꺼 두었으면 false. 내 키가 없어도 학원 공용 키가 있으면 됨 */
+/** 고른 AI 를 쓸 준비가 됐는지 (이름은 예전 그대로) — 꺼 두었으면 false. 학원 AI 를 쓰면 학원 AI 기준 */
 export function geminiReady() {
-  const s = state.settings || {};
+  const s = aiConf();
   if (aiOff()) return false;
   const p = aiProvider();
   if (p === 'openai') return !!String(s.openaiModel || '').trim(); // 로컬 서버는 키 없이도 됨
-  if (p === 'anthropic') return !!s.anthropicApiKey || !!s.academyAi?.anthropic;
+  if (p === 'anthropic') return !!s.anthropicApiKey;
   if (p === 'codex') return true; // CLI·로그인은 설정 화면에서 확인, 안 되면 요청할 때 알려 줌
-  return !!s.geminiApiKey || !!s.academyAi?.gemini;
+  return !!s.geminiApiKey;
 }
 
 /** 메인 프로세스가 던진 오류에서 "Error invoking remote method '…': Error: " 를 떼고 우리 말만 */
@@ -651,7 +666,7 @@ export const errMsg = (err) => String(err?.message || err || '').replace(/^Error
 
 /** 1순위·2순위 모델 (Codex 는 '' = CLI 기본 모델) */
 export function geminiModels() {
-  const s = state.settings || {};
+  const s = aiConf();
   const p = aiProvider();
   if (p === 'codex') return [String(s.codexModel || '').trim()];
   return [s[`${p}Model`] || PROVIDERS[p].defaultModel, s[`${p}Model2`]].filter(Boolean);
@@ -659,7 +674,7 @@ export function geminiModels() {
 
 /** AI 호출에 넘기는 공통 설정 */
 export function aiOptions() {
-  const s = state.settings || {};
+  const s = aiConf();
   const provider = aiProvider();
   const clamp = (v, d) => Math.max(1, Math.min(8, v | 0 || d));
   // batch: 한글 내보내기에서 한 요청에 담는 문항 수

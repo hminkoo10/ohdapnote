@@ -1,8 +1,8 @@
 // 위쪽 막대, 뒤에서 도는 작업 표시, 설정 창 (업데이트는 통합 클라우드가 맡음)
 
 import { h, toast, modal, icon } from './ui.js';
-import { api, state, nav, jobs, jobListeners, findJob, errMsg } from './shared.js';
-import { aiSettingsCard, academyAiCard } from './aisettings.js';
+import { api, state, nav, jobs, jobListeners, findJob } from './shared.js';
+import { aiSettingsCard } from './aisettings.js';
 
 const fmtMB = (b) => (b ? `${(b / 1048576).toFixed(1)}MB` : '');
 
@@ -127,8 +127,7 @@ export function applyMotion(motion) {
 
 export async function openSettings() {
   const s = { ...state.settings };
-  const ai = aiSettingsCard(s); // AI 보조 인식 (기본 Gemini, 세부 설정에서 다른 AI)
-  const academyAi = academyAiCard(s); // 학원 공용 AI 키 (학원 공간에서만, 고치기는 원장만)
+  const ai = aiSettingsCard(s); // AI 보조 인식 (학원 AI 또는 내 키 — 기본 Gemini, 세부 설정에서 다른 AI)
   const ocrSelect = h(
     'select.input',
     [
@@ -155,7 +154,6 @@ export async function openSettings() {
       h('label.field', h('span', '선생님 이름'), teacherInput),
     ),
     ai.card,
-    academyAi?.card,
     h('section.set-card',
       h('h4', icon('scan'), '스캔본 글자 인식 (OCR)'),
       h('label.field', h('span', '언어'), ocrSelect),
@@ -180,13 +178,6 @@ export async function openSettings() {
         label: '저장',
         primary: true,
         onClick: async () => {
-          // 학원 키 먼저 (그래야 아래에서 돌려받는 설정의 academyAi 가 새 키 기준)
-          try {
-            await academyAi?.save();
-          } catch (err) {
-            toast(`학원 공용 AI 키를 저장하지 못했어요: ${errMsg(err)}`, { type: 'error', timeout: 8000 });
-            return false;
-          }
           state.settings = await api.setSettings({
             ...ai.values(),
             ocrLang: ocrSelect.value,

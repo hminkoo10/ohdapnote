@@ -160,11 +160,12 @@ export function aiSettingsCard(s) {
   const concInput = h('input.input.input-tiny', { type: 'number', min: 1, max: 8, value: String(s.aiConcurrency || 3) });
   const batchInput = h('input.input.input-tiny', { type: 'number', min: 1, max: 8, value: String(s.aiBatch || 4) });
   const only = (id, ...nodes) => h('div.ai-only', { dataset: { provider: id } }, nodes);
+  const kindField = h('label.field', h('span', 'AI 종류'), select);
   const adv = h(
     'details.set-adv',
     { open: provider !== 'gemini' },
     h('summary', icon('gear'), '세부 설정', h('span.small.muted', '다른 AI · 게이트웨이 · 속도')),
-    h('label.field', h('span', 'AI 종류'), select),
+    kindField,
     only(
       'gemini',
       h('label.field', h('span', '게이트웨이 주소'), gemBase),
@@ -180,26 +181,73 @@ export function aiSettingsCard(s) {
   const onInput = h('input', { type: 'checkbox', checked: s.aiEnabled !== false });
   const offNote = h('p.small.muted', 'AI 를 쓰지 않아요. 디지털 PDF 는 PDF 글자 그대로 옮기고, 스캔본 문항은 그림으로 넣어요. 넣어 둔 키·모델은 그대로 남아요.');
 
+  // 학원 AI / 내 키 (학원 공간에서만): 학원 AI 는 원장이 통합 클라우드에서 정하고, 키는 보이지 않음
+  const academy = !!state.appInfo?.academy;
+  const a = s.academyAi;
+  let source = s.aiSource === 'personal' ? 'personal' : 'academy';
+  const sourceNote = h('div.small.muted.ai-source-note');
+  const sourceRow = academy
+    ? h(
+        'div.ai-source',
+        h(
+          'div.seg',
+          [
+            ['academy', '학원 AI 쓰기'],
+            ['personal', '내 키 쓰기'],
+          ].map(([v, label]) =>
+            h(
+              'label',
+              h('input', {
+                type: 'radio',
+                name: 'ai-source',
+                value: v,
+                checked: source === v,
+                onchange: () => {
+                  source = v;
+                  show();
+                },
+              }),
+              h('span', label),
+            ),
+          ),
+        ),
+        sourceNote,
+      )
+    : null;
+  const cloudBtn = () => (state.appInfo?.manager ? h('button.link', { onclick: () => api.openCloud() }, '통합 클라우드에서 바꾸기') : null);
+  const renderSource = () => {
+    if (!academy) return;
+    clear(sourceNote);
+    if (source === 'personal') sourceNote.append('아래에 넣은 내 키·모델로 써요.');
+    else if (a) sourceNote.append(`원장님이 통합 클라우드에서 정한 학원 AI 를 써요: ${PROVIDERS[a.provider]?.label || a.provider}${a.model ? ` · ${a.model}` : ''}. `, cloudBtn());
+    else sourceNote.append(`아직 학원 AI 가 없어요. ${state.appInfo?.manager ? '통합 클라우드의 ‘학원 AI’에서 정하면' : '원장님이 통합 클라우드에서 정하면'} 학원 사람 모두가 같이 써요. 그때까지는 아래 내 설정을 써요. `, cloudBtn());
+  };
+
   const show = () => {
     const on = onInput.checked;
+    const viaAcademy = academy && source === 'academy' && !!a; // 학원 AI 를 쓰면 내 키·모델 칸은 숨김
     offNote.hidden = on;
     adv.hidden = !on;
-    for (const [id, el] of Object.entries(panels)) el.hidden = !on || id !== provider;
-    for (const el of adv.querySelectorAll('.ai-only')) el.hidden = el.dataset.provider !== provider;
-    if (on && provider === 'codex' && !codexChecked) checkCodex();
+    if (sourceRow) sourceRow.hidden = !on;
+    renderSource();
+    for (const [id, el] of Object.entries(panels)) el.hidden = !on || viaAcademy || id !== provider;
+    kindField.hidden = viaAcademy;
+    for (const el of adv.querySelectorAll('.ai-only')) el.hidden = viaAcademy || el.dataset.provider !== provider;
+    if (on && !viaAcademy && provider === 'codex' && !codexChecked) checkCodex();
   };
   onInput.addEventListener('change', show);
   select.addEventListener('change', () => {
     provider = select.value;
     show();
   });
-  const card = h('section.set-card', h('h4', icon('sparkle'), 'AI 보조 인식 (선택)', h('span.spacer'), h('label.switch.small', onInput, h('span.sw'), 'AI 쓰기')), offNote, Object.values(panels), adv);
+  const card = h('section.set-card', h('h4', icon('sparkle'), 'AI 보조 인식 (선택)', h('span.spacer'), h('label.switch.small', onInput, h('span.sw'), 'AI 쓰기')), offNote, sourceRow, Object.values(panels), adv);
   show();
 
   return {
     card,
     values: () => ({
       aiEnabled: onInput.checked,
+      aiSource: source,
       aiProvider: provider,
       geminiApiKey: gem.key.value.trim(),
       geminiModel: gem.models.m1.value.trim() || PROVIDERS.gemini.defaultModel,
@@ -221,64 +269,5 @@ export function aiSettingsCard(s) {
       aiConcurrency: num(concInput, 1, 8, 3),
       aiBatch: num(batchInput, 1, 8, 4),
     }),
-  };
-}
-
-// 학원 공용 키: AI 종류 · 설정 이름
-const ACADEMY_KEYS = [
-  ['gemini', 'geminiApiKey'],
-  ['openai', 'openaiApiKey'],
-  ['anthropic', 'anthropicApiKey'],
-];
-
-/**
- * 설정 창의 학원 공용 AI 키 카드 (학원 공간에서만)
- * 원장: 키를 넣고 [저장] 때 save() / 선생님: AI 종류마다 어떤 키를 쓰는지만 (키는 보이지 않음)
- * @param {object} s 지금 설정 (academyAi = 학원 키가 있는지)
- * @returns {{card: HTMLElement, save: () => Promise<void>} | null}
- */
-export function academyAiCard(s) {
-  if (!state.appInfo?.academy) return null;
-  const head = h('h4', icon('school'), '학원 공용 AI 키');
-  if (!state.appInfo.manager) {
-    const has = s.academyAi || {};
-    return {
-      card: h(
-        'section.set-card',
-        head,
-        h('p.small.muted', '원장님이 넣어 둔 학원 키예요. 내 키를 넣지 않으면 이 키를 써요.'),
-        ACADEMY_KEYS.map(([p, k]) =>
-          h('div.field', h('span', PROVIDERS[p].label), !has[p] ? h('span.small.muted', '학원 키 없음') : s[k] ? h('span.small', '내 키 사용 중') : h('span.small.ok-text', '학원 키 사용 중')),
-        ),
-      ),
-      save: async () => {},
-    };
-  }
-  const inputs = Object.fromEntries(ACADEMY_KEYS.map(([, k]) => [k, h('input.input', { type: 'password', autocomplete: 'off', spellcheck: false, placeholder: '(없음)' })]));
-  const msg = h('p.small.muted', '불러오는 중…');
-  let loaded = null; // 불러온 키 — 불러오기 전에는 저장하지 않음 (빈 칸으로 덮어쓰지 않게)
-  api
-    .getAcademyAi()
-    .then((ai) => {
-      loaded = ai || {};
-      for (const [k, input] of Object.entries(inputs)) if (!input.value) input.value = loaded[k] || '';
-      msg.textContent = '';
-      msg.hidden = true;
-    })
-    .catch((err) => (msg.textContent = `학원 키를 불러오지 못했어요: ${errMsg(err)}`));
-  return {
-    card: h(
-      'section.set-card',
-      head,
-      h('p.small.muted', '선생님이 자기 키를 넣지 않으면 이 키를 써요. 같은 학원 선생님들에게는 키가 보이지 않아요.'),
-      ACADEMY_KEYS.map(([p, k]) => h('label.field', h('span', PROVIDERS[p].label), inputs[k])),
-      msg,
-    ),
-    save: async () => {
-      if (!loaded) return;
-      const next = Object.fromEntries(Object.entries(inputs).map(([k, input]) => [k, input.value.trim()]));
-      if (ACADEMY_KEYS.every(([, k]) => (loaded[k] || '') === next[k])) return; // 그대로면 쓰지 않음 (다른 선생님들에게 바뀜 알림이 가지 않게)
-      await api.setAcademyAi(next);
-    },
   };
 }
