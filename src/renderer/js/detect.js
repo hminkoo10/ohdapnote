@@ -175,6 +175,12 @@ export function extractCandidates(tokens, layout, opts = {}) {
   const headings = [];
   const headingWords = new Set();
   if (!opts.ocr) {
+    // 견줄 본문 글자 높이는 한글이 든 줄로 (그래프 눈금·Σ 아래위 첨자 같은 작은 줄이 많은 쪽은 모든 줄의 가운데 값이 작아서
+    // 문항 글 "065 높이가 …" 까지 제목으로 보고 번호를 빼거나 영역을 끊던 것). 그 값보다 작게는 잡지 않고,
+    // 한글 줄도 본문이라기엔 너무 작은 쪽(책 소개 쪽의 견본 그림 속 글자)은 그대로
+    const hangulOf = (ws) => ws.reduce((n, w) => n + (w.str.match(HANGUL)?.length || 0), 0);
+    const hangulH = median(lines.filter((L) => hangulOf(L.words) >= 2).map((L) => L.h));
+    const textH = hangulH >= 0.006 ? Math.max(bodyH, hangulH) : bodyH;
     for (const L of lines) {
       // 줄을 큰 빈칸 기준으로 조각내기 (단이 여러 개면 같은 높이의 다른 단 글자와 분리)
       const segs = [];
@@ -190,10 +196,9 @@ export function extractCandidates(tokens, layout, opts = {}) {
         const first = seg.words[0].str;
         if (PREFIXES.some((p) => first === p || (first.startsWith(p) && /^\d/.test(first.slice(p.length))))) continue;
         const textWords = seg.words.filter((w) => !/^[\d.()[\]]+$/.test(w.str));
-        const hangul = textWords.reduce((n, w) => n + (w.str.match(HANGUL)?.length || 0), 0);
-        if (hangul < 2) continue;
+        if (hangulOf(textWords) < 2) continue;
         const hText = median(textWords.map((w) => w.h ?? w.y1 - w.y0));
-        if (hText >= 1.2 * bodyH) {
+        if (hText >= 1.2 * textH) {
           const y0 = Math.min(...seg.words.map((w) => w.y0));
           const y1 = Math.max(...seg.words.map((w) => w.y1));
           headings.push({ x0: seg.x0, x1: seg.x1, y0, y1 });
@@ -230,9 +235,20 @@ export function extractCandidates(tokens, layout, opts = {}) {
   const SYMBOL_ONLY = /^[\u25A0-\u25FF\u2605\u2606\u2610-\u2612\u2713-\u2718\u27A4\u25B6\u25B7\u2022\u203B\u2766-\u2793]+$/u;
   // 같은 단 안의 왼쪽 글자만 봄 (단 사이가 아주 좁으면 옆 단 글자가 가까이 있을 수 있음)
   const sameCol = (u, w) => cols.length < 2 || colOf((u.x0 + u.x1) / 2) === colOf((w.x0 + w.x1) / 2);
+  // 답을 적는 빈칸 "(      )" 도 앞 글자로 치지 않음 (한 줄에 문항이 둘: "026 √2 (    )  027 −√2.1 (    )")
+  // 괄호 안이 비어 있어야 함 — "f(x)", "(−3)" 처럼 안에 글자가 있으면 수식
+  const isBlank = (u) => {
+    if (/^[(（[]\s*[)）\]]$/.test(u.str)) return true;
+    if (!/^[)）\]]$/.test(u.str)) return false;
+    let open = null;
+    for (const v of neighbours(u)) if (v.x1 <= u.x0 + 0.001 && sameCol(v, u) && (!open || v.x1 > open.x1)) open = v;
+    return !!open && /^[(（[]$/.test(open.str) && u.x0 - open.x1 >= u.y1 - u.y0;
+  };
+  // 글자 레이어에서 번호의 절반 남짓도 안 되는 작은 글자는 단 경계까지 뻗은 그림의 눈금·라벨("O", "x", "y")
+  const tiny = (u, w) => !opts.ocr && u.y1 - u.y0 < 0.55 * (w.y1 - w.y0);
   const hasLeftNeighbor = (w) => {
     const gap = Math.max(1.6 * (w.y1 - w.y0), 0.012);
-    return neighbours(w).some((u) => u.x0 < w.x0 && u.x1 >= w.x0 - gap && !SYMBOL_ONLY.test(u.str) && sameCol(u, w));
+    return neighbours(w).some((u) => u.x0 < w.x0 && u.x1 >= w.x0 - gap && !SYMBOL_ONLY.test(u.str) && sameCol(u, w) && !isBlank(u) && !tiny(u, w));
   };
   // 번호 바로 앞의 체크 칸·별 같은 기호가 있으면 그 기호 위치를 줄 시작으로 봄
   const lineStartX = (w) => {
@@ -373,6 +389,7 @@ export function extractCandidates(tokens, layout, opts = {}) {
   }
   // 번호 없이 말머리만 있는 줄 맨 앞 이름표("유제" 띠 등): 그 아래부터 새 묶음이라 앞 문항 영역을 여기서 끊음
   const sectionLabels = [];
+  const beside = []; // 앞 글자에 막힌 번호 (아래에서 한 줄에 나란한 둘째 문항인지 다시 봄)
   for (const w of words) {
     if (headingWords.has(w) || inRangeHeader(w)) continue;
     let str = opts.ocr ? normalizeOcrWord(w.str) : w.str;
@@ -399,15 +416,17 @@ export function extractCandidates(tokens, layout, opts = {}) {
     if (!parsed) continue;
     // 바로 뒤에 =, +, × 같은 연산 기호가 오면 줄 맨 앞의 수식("1 + 2 + 3 = 6", "8 = 2³")이고,
     // 조사·어미("8 이므로", "16 이다")가 오면 앞 줄에서 넘어온 문장 끝이라 번호가 아님
+    // ("<x>는 자연수 x의 …" 처럼 꺾쇠로 싼 기호는 부등호가 아님)
     if (!prefix && parsed.style === 'plain') {
       const after = (nextWord(numWord)?.str || '').replace(/[.,)]+$/, '');
-      if (OPERATOR_START.test(after) || PARTICLES.has(after)) continue;
+      if ((OPERATOR_START.test(after) && !/^<[^<>]+>/.test(after)) || PARTICLES.has(after)) continue;
     }
     const cy = (w.y0 + w.y1) / 2;
     // 머리말/꼬리말(쪽번호) 제외
     if (layout?.hasHeader && cy < bodyTop) continue;
     if (layout?.hasFooter && cy > bodyBottom) continue;
-    if (hasLeftNeighbor(w)) continue;
+    const blocked = hasLeftNeighbor(w);
+    if (blocked && (opts.ocr || prefix || !numWord.font)) continue;
     // 소단원 제목의 번호표(자이스토리 "❶ 제곱근의 뜻과 표현"): 바로 뒤 한글 제목이 번호보다 확실히 크고 본문보다도 크면 번호가 아님
     // (문항 번호는 뒤 글자보다 크거나 같음. 제목 글씨가 본문의 1.2배가 안 돼 위의 제목 줄 찾기에 걸리지 않는 책)
     if (!opts.ocr && !prefix && parsed.style === 'plain') {
@@ -418,7 +437,18 @@ export function extractCandidates(tokens, layout, opts = {}) {
       if (title && /^[가-힣]/.test(title.str) && hOf(title) >= 1.2 * hOf(numWord) && hOf(title) >= 1.1 * bodyH) continue;
     }
     // 바로 뒤가 동그라미 답(①~⑤)이면 정답표 칸일 수 있음 (dropAnswerRows)
-    candidates.push({ ...make(parsed, prefix, w, numWord), answerAfter: /^[①-⑤]/.test(str0(nextWord(numWord) || { str: '' })) });
+    const cand = { ...make(parsed, prefix, w, numWord), answerAfter: /^[①-⑤]/.test(str0(nextWord(numWord) || { str: '' })) };
+    if (blocked) beside.push(cand);
+    else candidates.push(cand);
+  }
+  // 앞 글자가 가까이 붙어 빠진 번호라도, 같은 줄 왼쪽 단 끝에 같은 글꼴·크기 번호가 있고 그런 번호 둘 이상과 x 가 같으면
+  // 한 줄에 나란히 놓인 둘째 문항 ("017 3√10×√6÷√15  018 …": 앞 문항 수식 끝이 번호 바로 앞까지 옴).
+  // 줄 가운데 수식·문장 속 숫자는 번호 글꼴이 아니거나 다른 번호들과 줄을 맞춰 놓이지 않음
+  const alike = (a, b) => !a.prefix && a.col === b.col && a.font === b.font && Math.abs(hOf(a) / hOf(b) - 1) <= 0.04;
+  for (const c of beside) {
+    const rowStart = candidates.some((d) => alike(d, c) && sameRow(d, c) && d.relX < 0.03 && d.x1 < c.x0);
+    const aligned = candidates.filter((d) => alike(d, c) && Math.abs(d.x0 - c.x0) <= 0.003).length;
+    if (rowStart && aligned >= 2) candidates.push(c);
   }
   candidates.sort(byReadingOrder);
   const { kept, boxes } = dropAnswerRows(candidates);
