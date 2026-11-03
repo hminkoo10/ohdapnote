@@ -8,3 +8,4 @@ test/fixtures/generated/
 dist-update/
 build/models/
 test/e2e/local-books.json
+.env
