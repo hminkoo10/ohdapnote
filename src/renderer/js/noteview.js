@@ -7,7 +7,7 @@ import { geminiTranscribeBatch, canvasToBase64Jpeg } from './gemini.js';
 import { scanTranscribe } from './scanocr.js';
 import { transcribeParts } from './pdfmath.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect, transcriptFiles } from './store.js';
-import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiOptions, aiLabel, aiModelText, jobDialog, findJob, holdSource } from './shared.js';
+import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiOptions, aiLabel, aiModelText, jobDialog, findJob, holdSource, restartGuard, restartSaveHooks, restartPendingChecks } from './shared.js';
 import { topbar } from './chrome.js';
 import { spineFor, studentSearch } from './home.js';
 
@@ -830,7 +830,14 @@ function renderExportSummary() {
   );
 }
 
-async function doExport(mode) {
+function doExport(mode) {
+  return restartGuard.track('export', () => buildExport(mode));
+}
+
+const pendingExports = new Map();
+restartPendingChecks.add(() => pendingExports.size > 0);
+
+async function buildExport(mode) {
   const n = ns.note;
   const entries = allEntries();
   if (!entries.length) {
@@ -871,6 +878,7 @@ async function doExport(mode) {
   if (btn) btn.dataset.run = run;
   btn?.classList.add('working');
   const closeToast = toast(`${modeName} ${kindName} 만드는 중…`, { timeout: 0 });
+  const pendingKey = `${n.id}:${mode}`;
   exporting.set(n.id, (exporting.get(n.id) || 0) + 1);
   try {
     const safe = (s) => String(s || '').replace(/[\\/:*?"<>|]/g, '_').trim();
@@ -879,6 +887,8 @@ async function doExport(mode) {
     let note = '';
     const saved = (r) => {
       if (r.canceled) return;
+      if (pendingExports.get(pendingKey) === run) pendingExports.delete(pendingKey);
+      restartGuard.report();
       toast(`저장했어요${note} — ${r.path}`, {
         type: 'success',
         timeout: 10000,
@@ -894,7 +904,10 @@ async function doExport(mode) {
       if (bytes.stats?.picture && bytes.stats?.text) note = ` (그림으로 넣은 문항 ${bytes.stats.picture}개)`;
       const save = () => api.saveFile({ defaultName: `${fname}.hwpx`, data: bytes, filters: [{ name: '한글 문서', extensions: ['hwpx'] }], title: '한글 문서 저장' });
       // 옮기기를 뒤로 보내 둔 채 끝났으면 저장 창을 바로 띄우지 않고 알림의 [저장하기]로 (다른 화면을 보고 있을 수 있음)
-      if (bytes.job?.finish({ message: `${info.student ? `${info.student} · ` : ''}${modeName} 한글 문서가 준비됐어요`, actions: [{ label: '저장하기', onClick: async () => saved(await save()) }] })) return;
+      if (bytes.job?.finish({ message: `${info.student ? `${info.student} · ` : ''}${modeName} 한글 문서가 준비됐어요`, actions: [{ label: '저장하기', onClick: async () => saved(await save()) }] })) {
+        pendingExports.set(pendingKey, run);
+        return;
+      }
       res = await save();
     } else {
       const bytes = await buildPdf({ blocks, options: opts, title: info.title, info: { ...info, subtitle: sub } });
@@ -1009,6 +1022,8 @@ function exportSig(mode, blocks, opts, info) {
 const TRANSCRIBE_WIDTH = 1500; // AI·OCR 에 넘기는 그림 폭(px)
 const MAX_TRANSCRIPTS = 3000; // 책 하나에 저장해 두는 개수
 const transcripts = new Map(); // 책 id → {items: {열쇠: {blocks, model, at}}, dirty}  (책 폴더의 transcripts.json)
+restartPendingChecks.add(() => [...transcripts.values()].some((t) => t.dirty));
+restartSaveHooks.add(saveTranscripts);
 
 async function loadTranscripts(bookId) {
   if (!transcripts.has(bookId)) {

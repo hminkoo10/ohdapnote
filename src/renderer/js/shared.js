@@ -1,14 +1,25 @@
 // 여러 화면이 같이 쓰는 것들: 상태, 화면 이동, 원본 파일 열기, 문항 표, 미리보기, 뒤에서 도는 작업, AI 실행 창
 
-import { h, clear, toast, modal, confirmDialog, icon, debounce } from './ui.js';
+import { h, clear, toast, modal, confirmDialog, icon } from './ui.js';
 import { openDocSource, bookFileUrl } from './docsource.js';
 import { detectPageWithGemini, replacePageItems } from './analyze.js';
 import { itemName } from './exporter.js';
 import { ROLE_NAME, pageLabel, bookPage, itemsByPage, findItem, flaggedPages, normalizeDoc } from './store.js';
 import { sortItems } from './detect.js';
 import { PROVIDERS, providerOf } from './aiproviders.js';
+import { createSaveQueue } from './save-queue.js';
+import { createRestartGuard } from './restart.js';
 
 export const api = window.ohdap;
+export const restartGuard = createRestartGuard({
+  api,
+  hasWork: () => jobs.size > 0,
+  hasDraft: () => !!document.querySelector('.modal-overlay') || !!document.activeElement?.matches('input, textarea, select, [contenteditable="true"]'),
+  lock: (locked) => { document.body.inert = locked; },
+});
+export const setRestartBusy = (key, busy) => restartGuard.busy(key, busy);
+export const restartSaveHooks = restartGuard.saveHooks;
+export const restartPendingChecks = restartGuard.pendingChecks;
 
 export const state = {
   appInfo: null,
@@ -41,42 +52,29 @@ export async function runLeaveHooks() {
 // 저장 도우미: 바뀐 뒤 잠깐 기다렸다가 저장
 // ===========================================================================
 export function makeSaver(saveFn) {
-  let target = null;
+  let failed = false;
   const setStatus = (text) => {
     const el = document.querySelector('.save-status');
     if (!el) return;
     el.textContent = text;
     el.classList.toggle('saving', text.endsWith('…'));
   };
-  const now = async () => {
-    if (!target) return;
+  const saver = createSaveQueue(async (target) => {
     target.updatedAt = Date.now();
-    try {
-      await saveFn(target);
-      setStatus('저장됨');
-    } catch (err) {
-      setStatus('저장 실패');
+    await saveFn(target);
+    failed = false;
+  }, {
+    changed: () => {
+      setStatus(failed ? '저장 실패' : saver.pending || saver.saving ? '저장 중…' : '저장됨');
+      restartGuard.report();
+    },
+    failed: (err) => {
+      failed = true;
       toast(`저장하지 못했어요: ${err.message}`, { type: 'error' });
-    }
-  };
-  const soon = debounce(now, 600);
-  return {
-    set(obj) {
-      target = obj;
     },
-    dirty() {
-      setStatus('저장 중…');
-      soon();
-    },
-    async flush() {
-      soon.cancel();
-      await now();
-    },
-    cancel: () => soon.cancel(),
-    get target() {
-      return target;
-    },
-  };
+  });
+  restartGuard.savers.add(saver);
+  return saver;
 }
 
 // ===========================================================================
@@ -422,6 +420,7 @@ function tellJobs() {
     jobsTimer = null;
     jobListeners.forEach((fn) => fn());
   }, 100);
+  restartGuard.report();
 }
 
 /**

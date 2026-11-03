@@ -3212,6 +3212,10 @@ main.sheet {
   gap: 8px;
   pointer-events: none;
 }
+#update-notice {
+  top: 22px;
+  bottom: auto;
+}
 .toast {
   pointer-events: auto;
   position: relative;

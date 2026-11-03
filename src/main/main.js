@@ -18,6 +18,7 @@ const log = require('electron-log/main');
 const ai = require('./ai');
 const mathocr = require('./mathocr');
 const cloud = require('./magoedu-cloud');
+const { createUpdateMonitor } = require('./update-restart');
 const datasign = require('./datasign');
 const { mergeNote } = require('./notemerge');
 
@@ -434,6 +435,10 @@ async function copyBookFiles(from, to) {
 // ---------------------------------------------------------------------------
 
 let mainWindow = null;
+const updateMonitor = createUpdateMonitor({
+  app, ipcMain, cloud, session, isSmokeTest,
+  isBusy: () => fetching.size > 0 || changedPaths.size > 0,
+});
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -456,6 +461,7 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
+  updateMonitor.attach(mainWindow);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
@@ -858,9 +864,12 @@ function stopMathocrWorker() {
 }
 
 function registerIpc() {
-  ipcMain.handle('app:info', () => ({
+  // 저장·파일 받기·내보내기·AI 요청이 끝나기 전에는 재시작하지 않는다.
+  const handle = (channel, fn) => ipcMain.handle(channel, (...args) => updateMonitor.track(() => fn(...args)));
+  handle('app:info', () => ({
     version: app.getVersion(),
     isPackaged: app.isPackaged,
+    updateRestartEnabled: updateMonitor.enabled,
     dataDir: dataDir(),
     platform: process.platform,
     developer: '구현민',
@@ -873,8 +882,8 @@ function registerIpc() {
   }));
 
   // academyAi: 이 프로그램이 쓸 학원 AI (키는 있는지만, 없으면 null)
-  ipcMain.handle('settings:get', async () => ({ ...(await loadSettings()), academyAi: academyAiView() }));
-  ipcMain.handle('settings:set', async (_e, patch) => {
+  handle('settings:get', async () => ({ ...(await loadSettings()), academyAi: academyAiView() }));
+  handle('settings:set', async (_e, patch) => {
     const next = { ...(await loadSettings()), ...(patch || {}) };
     delete next.academyAi;
     settingsStore.write(next);
@@ -882,14 +891,14 @@ function registerIpc() {
   });
 
   // ---- 책 ----
-  ipcMain.handle('books:list', async () => {
+  handle('books:list', async () => {
     const list = (await listBooks()).map(({ book, place }) => summarizeBook(book, place));
     list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     return list;
   });
 
   // 새 책은 학원 공유가 기본 (shared: false 면 나만 보기)
-  ipcMain.handle('books:create', async (_e, { name, shared = true } = {}) => {
+  handle('books:create', async (_e, { name, shared = true } = {}) => {
     const id = crypto.randomUUID();
     const now = Date.now();
     const book = {
@@ -908,7 +917,7 @@ function registerIpc() {
   });
 
   // $shared: 학원 공유인지 (학원 공간에서만 true 가 될 수 있음)
-  ipcMain.handle('books:get', async (_e, id) => {
+  handle('books:get', async (_e, id) => {
     const { dir, place } = locateBook(id);
     const book = await readJson(path.join(dir, 'book.json'), null);
     if (!book) throw new Error('책을 찾을 수 없습니다.');
@@ -924,7 +933,7 @@ function registerIpc() {
   }
   const toSave = (book, cur) => ({ ...stripMeta(book), createdBy: cur?.createdBy || book.createdBy || createdByMe() });
 
-  ipcMain.handle('books:save', async (_e, book) => {
+  handle('books:save', async (_e, book) => {
     if (!book || !isValidId(book.id)) throw new Error('잘못된 책');
     const cur = checkBookWrite(book.id);
     await writeJsonAtomic(bookFile(book.id), toSave(book, cur));
@@ -942,7 +951,7 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle('books:delete', async (_e, id) => {
+  handle('books:delete', async (_e, id) => {
     const book = checkBookWrite(id);
     await removeRemoteOnly(id, sourceFiles(book));
     await fsp.rm(bookDir(id), { recursive: true, force: true });
@@ -959,7 +968,7 @@ function registerIpc() {
   });
 
   /** 남의 책을 내 책으로 복사 (원본 파일을 먼저 받음): 새 ID, 만든 사람 = 나, 이름에 (복사본) */
-  ipcMain.handle('books:copy', async (_e, id) => {
+  handle('books:copy', async (_e, id) => {
     const book = await readJson(bookFile(id), null);
     if (!book) throw new Error('책을 찾을 수 없습니다.');
     const files = sourceFiles(book);
@@ -985,7 +994,7 @@ function registerIpc() {
    * 학원 공유 켜고 끄기 (만든 사람만): 책 폴더를 books/<id> ↔ members/<나>/books/<id> 로 옮김 → 새 요약.
    * 끄면 다른 선생님에게는 지워진 책처럼 보임 (원장은 볼 수 있음)
    */
-  ipcMain.handle('books:setShared', async (_e, { id, shared } = {}) => {
+  handle('books:setShared', async (_e, { id, shared } = {}) => {
     if (!academyMode()) throw new Error('학원 공간에서만 공유를 바꿀 수 있어요.');
     const { dir: from, place } = locateBook(id);
     const book = readJsonSync(path.join(from, 'book.json'));
@@ -1004,13 +1013,13 @@ function registerIpc() {
   });
 
   /** 책을 열 때: 아직 받지 않은 원본 파일을 미리 받음 → { ok, missing, error? } */
-  ipcMain.handle('books:ensureFiles', async (_e, id) => {
+  handle('books:ensureFiles', async (_e, id) => {
     const book = await readJson(bookFile(id), null);
     return book ? fetchBookFiles(id, sourceFiles(book)) : { ok: false, missing: [] };
   });
 
   /** 책에서 문항 ID 가 바뀌었을 때(번호 고침 등) 오답노트의 선택도 따라 바꿈 (다른 선생님 것은 각자 열 때) */
-  ipcMain.handle('books:renameItems', async (_e, { bookId, renames, removed }) => {
+  handle('books:renameItems', async (_e, { bookId, renames, removed }) => {
     if (!isValidId(bookId)) return 0;
     const { dir, place } = locateBook(bookId);
     const book = readJsonSync(path.join(dir, 'book.json'));
@@ -1028,7 +1037,7 @@ function registerIpc() {
   });
 
   // ---- 오답노트 ----
-  ipcMain.handle('notes:list', async () => {
+  handle('notes:list', async () => {
     const names = await memberNames();
     const list = (await listAllNotes()).map(({ note, loc }) => summarizeNote(note, loc, loc.owner ? names[loc.owner] || '' : ''));
     list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
@@ -1036,7 +1045,7 @@ function registerIpc() {
   });
 
   // 학생을 고르면 학원 공간의 그 학생 폴더에 (학원 사람 누구나 이어서 고침), 아니면 내 폴더에
-  ipcMain.handle('notes:create', async (_e, { title, student, studentId, bookIds } = {}) => {
+  handle('notes:create', async (_e, { title, student, studentId, bookIds } = {}) => {
     const id = crypto.randomUUID();
     const now = Date.now();
     const ids = (Array.isArray(bookIds) ? bookIds : []).filter(isValidId);
@@ -1062,7 +1071,7 @@ function registerIpc() {
   });
 
   // 보기만 하는 오답노트는 $readonly ($why: deleted 지운 학생 | other 다른 선생님 것을 원장이 봄) — 저장하지 않음
-  ipcMain.handle('notes:get', async (_e, id) => {
+  handle('notes:get', async (_e, id) => {
     const loc = findNote(id);
     const note = loc && (await readJson(locFile(loc, id), null));
     if (!note) throw new Error('오답노트를 찾을 수 없습니다.');
@@ -1079,7 +1088,7 @@ function registerIpc() {
   });
 
   // base: 화면이 열 때 받은 내용 (그사이 바뀐 파일과 합칠 때) → true | { merged: true } (합쳤으니 다시 읽어 주세요)
-  ipcMain.handle('notes:save', async (_e, note, base) => {
+  handle('notes:save', async (_e, note, base) => {
     if (!note || !isValidId(note.id)) throw new Error('잘못된 오답노트');
     if (note.$readonly) return false;
     return saveNoteFile(note, base);
@@ -1095,7 +1104,7 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle('notes:delete', async (_e, id) => {
+  handle('notes:delete', async (_e, id) => {
     const loc = findNote(id);
     if (!loc) return true;
     if (!canWriteLoc(loc)) throw new Error(loc.sid ? '지운 학생의 오답노트는 지울 수 없어요.' : '다른 선생님의 오답노트는 지울 수 없어요.');
@@ -1108,14 +1117,14 @@ function registerIpc() {
   //   학원: 통합 클라우드 명단 (학원 사람 누구나 추가·고치기·지우기·되살리기, 인터넷 필요 — 통합 클라우드에 부탁하면
   //         명단 파일을 새로 써 준 뒤 답함). 지운 학생도 deletedAt 과 함께 (purgeAt 에 완전히 지워짐)
   //   학원이 없는 계정: 개인 공간 students/<id>.json
-  ipcMain.handle('students:list', async () => {
+  handle('students:list', async () => {
     const list = academyMode() ? (academyInfo()?.students || []).map((s) => ({ ...s, canEdit: !s.deletedAt })) : (await listStudents()).map((s) => ({ ...s, canEdit: true }));
     list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
     return list;
   });
 
   /** 학원 사람 (담당 선생님 고르기) */
-  ipcMain.handle('students:members', () => academyInfo()?.members || []);
+  handle('students:members', () => academyInfo()?.members || []);
 
   const UPDATE_CLOUD = '학생 명단을 바꾸려면 통합 클라우드를 최신 버전으로 업데이트한 뒤 오답노트를 다시 켜 주세요.';
   /** 통합 클라우드에 부탁한 결과 → 학생, 못 했으면 알아듣기 쉬운 말로 던짐 */
@@ -1138,7 +1147,7 @@ function registerIpc() {
     throw new Error(msg || r.error || '하지 못했어요.');
   };
 
-  ipcMain.handle('students:save', async (_e, s = {}) => {
+  handle('students:save', async (_e, s = {}) => {
     if (academyMode()) {
       const text = (v) => String(v || '').trim();
       const student = { name: text(s.name), school: text(s.school), grade: text(s.grade), memo: text(s.memo) };
@@ -1151,13 +1160,13 @@ function registerIpc() {
     return saveLocalStudent(s);
   });
 
-  ipcMain.handle('students:delete', async (_e, id) => {
+  handle('students:delete', async (_e, id) => {
     if (academyMode()) return rosterOp(() => cloud.deleteStudent(session, id));
     await fsp.rm(studentFile(id), { force: true });
     return true;
   });
 
-  ipcMain.handle('students:restore', async (_e, id) => rosterOp(() => cloud.restoreStudent(session, id)));
+  handle('students:restore', async (_e, id) => rosterOp(() => cloud.restoreStudent(session, id)));
 
   /** 학원이 없는 계정의 학생 명단 (예전처럼 개인 공간에) */
   async function saveLocalStudent(s) {
@@ -1181,7 +1190,7 @@ function registerIpc() {
     return { ...student, canEdit: true };
   }
 
-  ipcMain.handle('files:pick', async (_e, { title } = {}) => {
+  handle('files:pick', async (_e, { title } = {}) => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: title || '파일 선택',
       properties: ['openFile', 'multiSelections'],
@@ -1194,7 +1203,7 @@ function registerIpc() {
   });
 
   // 선택한 파일(들)을 책 폴더로 복사. add 면 그 쪽의 지금 파일은 그대로 두고 더함 (화면에서 지금 파일 뒤에 이어 붙임)
-  ipcMain.handle('files:import', async (_e, { bookId, role, paths, add = false }) => {
+  handle('files:import', async (_e, { bookId, role, paths, add = false }) => {
     if (!['problem', 'answer'].includes(role)) throw new Error('잘못된 문서 종류');
     if (!Array.isArray(paths) || paths.length === 0) throw new Error('파일이 없습니다.');
     const cur = checkBookWrite(bookId);
@@ -1235,7 +1244,7 @@ function registerIpc() {
     return { files, originalName };
   });
 
-  ipcMain.handle('files:savePdf', async (_e, { defaultName, data }) => {
+  handle('files:savePdf', async (_e, { defaultName, data }) => {
     const result = await dialog.showSaveDialog(mainWindow, {
       title: 'PDF 저장',
       defaultPath: path.join(app.getPath('documents'), defaultName || '오답노트.pdf'),
@@ -1247,7 +1256,7 @@ function registerIpc() {
   });
 
   // 아무 종류의 파일 저장 (한글 문서 등): 저장 창에서 고른 곳에
-  ipcMain.handle('files:saveFile', async (_e, { defaultName, data, filters, title } = {}) => {
+  handle('files:saveFile', async (_e, { defaultName, data, filters, title } = {}) => {
     const result = await dialog.showSaveDialog(mainWindow, {
       title: title || '파일 저장',
       defaultPath: path.join(app.getPath('documents'), path.basename(String(defaultName || '오답노트'))),
@@ -1260,8 +1269,8 @@ function registerIpc() {
 
   // 한글 문서로 내보낼 때 AI 로 옮긴 글자·수식 (다시 묻지 않게 저장): 책을 고칠 수 있으면 책 폴더(모두가 함께 씀),
   // 남의 책이면 책에 있는 것과 다른 것만 내 폴더(members/<나>/transcripts/<책 id>.json)에 — 읽을 때 합침
-  ipcMain.handle('books:getTranscripts', async (_e, id) => mergedTranscripts(id));
-  ipcMain.handle('books:saveTranscripts', async (_e, { bookId, data } = {}) => {
+  handle('books:getTranscripts', async (_e, id) => mergedTranscripts(id));
+  handle('books:saveTranscripts', async (_e, { bookId, data } = {}) => {
     const { dir, place } = locateBook(bookId);
     if (!fs.existsSync(dir)) return false; // 그 사이 지워진 책
     if (canEditBook(readJsonSync(path.join(dir, 'book.json')), place)) {
@@ -1274,21 +1283,21 @@ function registerIpc() {
     return true;
   });
 
-  ipcMain.handle('shell:openPath', (_e, p) => shell.openPath(p));
-  ipcMain.handle('shell:showItem', (_e, p) => shell.showItemInFolder(p));
-  ipcMain.handle('cloud:open', () => cloud.openCloud());
-  ipcMain.handle('shell:openExternal', (_e, url) => {
+  handle('shell:openPath', (_e, p) => shell.openPath(p));
+  handle('shell:showItem', (_e, p) => shell.showItemInFolder(p));
+  handle('cloud:open', () => cloud.openCloud());
+  handle('shell:openExternal', (_e, url) => {
     if (/^https:\/\//.test(url)) return shell.openExternal(url);
     return false;
   });
 
   // ---- AI (선택 기능) ----
-  ipcMain.handle('ai:abort', (_e, requestId) => {
+  handle('ai:abort', (_e, requestId) => {
     const ctrl = aiRequests.get(requestId);
     if (ctrl) ctrl.abort();
     return !!ctrl;
   });
-  ipcMain.handle('ai:generate', async (_e, { provider, model, body, requestId } = {}) => {
+  handle('ai:generate', async (_e, { provider, model, body, requestId } = {}) => {
     const settings = await effectiveSettings();
     const ctrl = new AbortController();
     if (requestId) aiRequests.set(requestId, ctrl);
@@ -1301,17 +1310,17 @@ function registerIpc() {
       if (requestId) aiRequests.delete(requestId);
     }
   });
-  ipcMain.handle('ai:listModels', async (_e, { provider, apiKey, baseUrl } = {}) =>
+  handle('ai:listModels', async (_e, { provider, apiKey, baseUrl } = {}) =>
     ai.listModels({ provider, apiKey, baseUrl, settings: await effectiveSettings(), fetch: (...a) => net.fetch(...a) }),
   );
-  ipcMain.handle('ai:codexStatus', async (_e, { path: exe } = {}) => ai.codexStatus(exe ?? (await effectiveSettings()).codexPath));
+  handle('ai:codexStatus', async (_e, { path: exe } = {}) => ai.codexStatus(exe ?? (await effectiveSettings()).codexPath));
 
   // ---- 수식 인식 (선택 기능, 모델을 한 번 받아 두면 인터넷 없이) ----
-  ipcMain.handle('mathocr:status', () => {
+  handle('mathocr:status', () => {
     const dir = mathocrDir();
     return { ...mathocr.modelStatus(dir), bundled: dir !== mathocrDownloadDir() };
   });
-  ipcMain.handle('mathocr:install', async () => {
+  handle('mathocr:install', async () => {
     if (mathocrInstall) return { ok: false, error: '이미 받고 있어요.' };
     const ctrl = new AbortController();
     mathocrInstall = ctrl;
@@ -1333,16 +1342,16 @@ function registerIpc() {
       mathocrInstall = null;
     }
   });
-  ipcMain.handle('mathocr:cancelInstall', () => {
+  handle('mathocr:cancelInstall', () => {
     if (mathocrInstall) mathocrInstall.abort();
     return !!mathocrInstall;
   });
-  ipcMain.handle('mathocr:abort', (_e, requestId) => {
+  handle('mathocr:abort', (_e, requestId) => {
     const id = mathocrRequests.get(requestId);
     if (id && mathocrWorker) mathocrWorker.proc.postMessage({ type: 'abort', id });
     return !!id;
   });
-  ipcMain.handle('mathocr:recognize', async (_e, { images, requestId, maxTokens } = {}) => {
+  handle('mathocr:recognize', async (_e, { images, requestId, maxTokens } = {}) => {
     if (mathocrInstall) return { ok: false, error: '모델을 받는 중이에요.' };
     if (!mathocr.modelStatus(mathocrDir()).installed) return { ok: false, error: '수식 인식 모델이 아직 설치되지 않았어요.' };
     const id = ++mathocrSeq;

@@ -1,7 +1,7 @@
 // 위쪽 막대, 뒤에서 도는 작업 표시, 설정 창 (업데이트는 통합 클라우드가 맡음)
 
 import { h, toast, modal, icon } from './ui.js';
-import { api, state, nav, jobs, jobListeners, findJob } from './shared.js';
+import { api, state, nav, jobs, jobListeners, findJob, setRestartBusy } from './shared.js';
 import { aiSettingsCard } from './aisettings.js';
 
 const fmtMB = (b) => (b ? `${(b / 1048576).toFixed(1)}MB` : '');
@@ -87,6 +87,7 @@ function mathOcrCard() {
   const install = async () => {
     if (mathocrDl.running) return;
     mathocrDl.running = true;
+    setRestartBusy('mathocr', true);
     mathocrDl.percent = 0;
     mathocrDl.render?.();
     const off = api.onMathocrProgress((p) => {
@@ -101,6 +102,7 @@ function mathOcrCard() {
     } finally {
       off();
       mathocrDl.running = false;
+      setRestartBusy('mathocr', false);
     }
     if (r?.ok) toast('수식 인식 모델을 받았어요. 이제 스캔본도 이 컴퓨터에서 옮길 수 있어요.', { type: 'success' });
     else if (!r?.aborted) toast(`수식 인식 모델을 받지 못했어요: ${r?.error || '알 수 없는 오류'}`, { type: 'error', timeout: 8000 });

@@ -1,7 +1,7 @@
 // 오답노트 화면 시작점: 화면 이동(첫 화면 ↔ 책 ↔ 오답노트), 설정, 실시간 반영
 
 import { h, toast, ripple, animateOut } from './ui.js';
-import { api, state, nav, runLeaveHooks } from './shared.js';
+import { api, state, nav, restartGuard, runLeaveHooks } from './shared.js';
 import { openSettings, applyMotion } from './chrome.js';
 import { showHome } from './home.js';
 import { openBook, bookDataChanged } from './bookview.js';
@@ -13,6 +13,7 @@ let navigating = Promise.resolve();
 
 /** 지금 화면을 나가는 애니메이션 → 저장 등 정리 → 새 화면 */
 function go(view, fn, ...args) {
+  restartGuard.busy('navigation', true);
   navigating = navigating.then(async () => {
     const main = root.querySelector('main');
     const dir = view === 'home' ? 'leave-down' : 'leave-up';
@@ -26,7 +27,20 @@ function go(view, fn, ...args) {
     }
     window.scrollTo(0, 0);
   });
-  return navigating;
+  return navigating.finally(() => restartGuard.busy('navigation', false));
+}
+
+function onUpdateAvailable() {
+  if (document.getElementById('update-notice')) return;
+  const notice = h('div.toasts#update-notice',
+    h('div.toast.toast-info', h('div.toast-msg', '새 버전이 설치됐어요. 쉬는 동안 자동으로 다시 켜요.'),
+      h('div.toast-actions', h('button.btn.btn-small', {
+        onclick: async () => {
+          restartGuard.report();
+          if (!(await api.requestUpdateRestart())) toast('저장·작업을 마치고 입력 창을 닫은 뒤 다시 켤 수 있어요.', { timeout: 6000 });
+        },
+      }, '지금 다시 켜기'))));
+  document.body.append(notice);
 }
 
 nav.home = (opts) => go('home', showHome, opts);
@@ -62,14 +76,15 @@ async function onDataChanged(change) {
         if (main) main.scrollTop = top;
       } else if (state.view === 'book') {
         // 기다리지 않음: 책 화면이 첫 화면으로 돌아가면(지워진 책) 그 이동이 이 뒤에 줄을 섬
-        Promise.resolve(bookDataChanged(change)).catch((err) => console.error(err));
+        restartGuard.track('sync', () => bookDataChanged(change)).catch((err) => console.error(err));
       } else if (state.view === 'note') {
-        Promise.resolve(noteDataChanged(change)).catch((err) => console.error(err));
+        restartGuard.track('sync', () => noteDataChanged(change)).catch((err) => console.error(err));
       }
     } catch (err) {
       console.error(err);
     }
   });
+  await navigating;
 }
 
 // 아직 받지 않은 교재 원본을 받는 동안 알림 하나 (책마다 받는 중인 묶음 수)
@@ -95,14 +110,25 @@ async function boot() {
   if (state.appInfo.settingsRejected) toast(SETTINGS_REJECTED, { timeout: 6000 });
   applyMotion(state.settings.motion);
   document.fonts?.load('600 14px "Pretendard Variable"').catch(() => {});
-  api.onDataChanged((change) => onDataChanged(change).catch((err) => console.error(err)));
+  api.onDataChanged((change) => restartGuard.track('sync', () => onDataChanged(change)).catch((err) => console.error(err)));
   api.onFilesFetching(onFilesFetching);
+  if (state.appInfo.updateRestartEnabled) {
+    api.onUpdateAvailable(onUpdateAvailable);
+    api.onUpdateRestart(async (request) => {
+      if (!(await restartGuard.prepare(request)) && request.manual) toast('저장·작업이 끝나지 않아 다시 켜기를 미뤘어요.', { timeout: 6000 });
+    });
+    for (const type of ['keydown', 'pointerdown', 'pointermove', 'touchstart', 'wheel', 'input']) {
+      window.addEventListener(type, () => restartGuard.activity(), { capture: true, passive: true });
+    }
+    window.addEventListener('pagehide', () => restartGuard.stop());
+  }
   // 누른 자리에서 퍼지는 물결
   document.addEventListener('pointerdown', (e) => {
     const el = e.target.closest('.btn, .export-btn, .card, .seg-tab, .book-tab');
     if (el && !el.disabled) ripple({ currentTarget: el, clientX: e.clientX, clientY: e.clientY });
   });
   await showHome();
+  if (state.appInfo.updateRestartEnabled) await restartGuard.start();
 }
 
 boot().catch((err) => {
