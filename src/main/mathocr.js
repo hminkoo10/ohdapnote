@@ -336,6 +336,16 @@ const BYTE_OF_CHAR = (() => {
   return map;
 })();
 
+// 고정 모델의 사전은 기본값을 만들 수 없으므로 원본 해시가 맞는 것만 읽음.
+function sanitizeTokenizer(bytes) {
+  const spec = MODEL_FILES.find((f) => f.name === 'tokenizer.json');
+  if (bytes.length !== spec.size || crypto.createHash('sha256').update(bytes).digest('hex') !== spec.sha256) {
+    console.info('[data] 잘못된 값 무시 (tokenizer.json)');
+    return null;
+  }
+  return JSON.parse(bytes.toString('utf8'));
+}
+
 /** tokenizer.json(객체) → { decode(ids) } — skip_special_tokens=True, clean_up_tokenization_spaces=False */
 function createTokenizer(json) {
   if (json?.model?.type !== 'BPE' || json?.decoder?.type !== 'ByteLevel') throw new Error('알 수 없는 tokenizer.json 형식이에요.');
@@ -528,11 +538,15 @@ function createMathOcr({ modelDir, threads } = {}) {
       loading = (async () => {
         const status = modelStatus(modelDir);
         if (!status.installed) throw new Error('수식 인식 모델이 아직 설치되지 않았어요.');
+        const tokenFile = path.join(modelDir, 'tokenizer.json');
+        const tokenSize = MODEL_FILES.find((f) => f.name === 'tokenizer.json').size;
+        const json = sanitizeTokenizer((await fsp.stat(tokenFile)).size === tokenSize ? await fsp.readFile(tokenFile) : Buffer.alloc(0));
+        if (!json) throw new Error('수식 인식 사전이 손상됐어요. 모델을 다시 받아 주세요.');
         const ort = require('onnxruntime-node');
         const options = { executionProviders: ['cpu'], intraOpNumThreads, interOpNumThreads: 1, graphOptimizationLevel: 'all' };
         const encoder = await ort.InferenceSession.create(path.join(modelDir, 'encoder_model.onnx'), options);
         const decoder = await ort.InferenceSession.create(path.join(modelDir, 'decoder_model.onnx'), options);
-        const tokenizer = createTokenizer(JSON.parse(await fsp.readFile(path.join(modelDir, 'tokenizer.json'), 'utf8')));
+        const tokenizer = createTokenizer(json);
         return { ort, encoder, decoder, tokenizer };
       })();
       loading.catch(() => (loading = null)); // 실패하면 다음에 다시 시도
@@ -623,5 +637,6 @@ module.exports = {
   preprocess,
   resizeBicubicRGB,
   createTokenizer,
+  sanitizeTokenizer,
   postProcess,
 };
