@@ -23,6 +23,20 @@ export function newDoc(role, imported) {
   };
 }
 
+/**
+ * 파일 추가: 지금 파일 뒤에 이어 붙임 → 새 쪽은 맨 뒤에 생기니 지금 쪽 번호(문항·영역·쪽 정보가 가리키는 쪽)는 그대로.
+ * 더한 파일은 added 로 표시 (옮긴 결과의 열쇠에서 빼려고 — transcriptFiles)
+ */
+export function addFiles(doc, imported) {
+  doc.files = [...(doc.files || []), ...imported.files.map((f) => ({ ...f, added: true }))];
+  const first = doc.files[0]?.originalName || imported.originalName;
+  doc.originalName = doc.files.length === 1 ? first : `${first} 외 ${doc.files.length - 1}개`;
+  return doc;
+}
+
+/** 한글 내보내기에서 저장해 둔 옮긴 결과의 열쇠에 넣는 원본 파일: 처음 올린 파일만 (파일을 더해도 열쇠가 그대로) */
+export const transcriptFiles = (files) => (files || []).filter((f) => !f.added).map((f) => f.name);
+
 export function bookPage(doc, pageIndex) {
   return pageIndex + 1 + (doc?.pageOffset || 0);
 }

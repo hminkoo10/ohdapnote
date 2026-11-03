@@ -2,7 +2,7 @@
 
 import { h, clear, toast, confirmDialog, debounce, formatDate, icon, animateOut } from './ui.js';
 import { analyzeDocument, parsePageRange, reanalyzeSinglePage, replacePageItems } from './analyze.js';
-import { ROLES, ROLE_NAME, newDoc, pageLabel, bookPage, computeMatches, normalizeDoc, findItem, flaggedPages, missingNumbers, missingCount } from './store.js';
+import { ROLES, ROLE_NAME, newDoc, addFiles, pageLabel, bookPage, computeMatches, normalizeDoc, findItem, flaggedPages, missingNumbers, missingCount } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSource, getSources, dropSources, clearPreviewCache, renderPreview, renderQTable, runGeminiPages, geminiReady, aiOff, jobs, findJob, startJob, holdBook, holdSource, liveBook, errMsg } from './shared.js';
 import { topbar } from './chrome.js';
 import { createEditor } from './editor.js';
@@ -328,6 +328,10 @@ function docCard(role, i) {
     const paths = await api.pickFiles(`${ROLE_NAME[role]} 파일 선택 (PDF 1개 또는 사진 여러 장)`);
     if (paths.length) await importFiles(role, paths);
   };
+  const pickMore = async () => {
+    const paths = await api.pickFiles(`${ROLE_NAME[role]}에 더할 파일 선택 (지금 파일 뒤에 이어 붙여요)`);
+    if (paths.length) await importFiles(role, paths, { add: true });
+  };
   card.addEventListener('dragover', (e) => {
     if (ro) return;
     e.preventDefault();
@@ -347,6 +351,7 @@ function docCard(role, i) {
       'div.doc-head',
       h('span.doc-icon', icon(role === 'problem' ? 'book' : 'bookCheck')),
       h('div.doc-titles', h('div.doc-title', ROLE_NAME[role]), doc ? h('div.doc-file', { title: doc.originalName }, doc.originalName, h('span.muted', src ? ` · ${src.numPages}쪽` : ' · 여는 중…')) : h('div.doc-file.muted', '아직 파일이 없어요')),
+      doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pickMore, disabled: locked, title: '지금 파일과 분석 결과는 그대로 두고 뒤에 이어 붙여요' }, icon('plus'), '파일 추가') : null,
       doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pick, disabled: locked }, icon('refresh'), '파일 바꾸기') : null,
     ),
   );
@@ -475,7 +480,8 @@ function showResult(role) {
   else render();
 }
 
-async function importFiles(role, paths) {
+/** add: 파일 추가 — 지금 파일·분석 결과는 그대로 두고 뒤에 이어 붙임 (분석한 쪽이면 새 쪽만 분석) */
+async function importFiles(role, paths, { add = false } = {}) {
   const b = bs.book;
   if (!canSave(b)) return;
   if (bookBusy(b)) {
@@ -483,6 +489,7 @@ async function importFiles(role, paths) {
     return;
   }
   const old = b.docs[role];
+  if (add && old) return addMoreFiles(role, paths);
   if (old?.items?.length && !(await confirmDialog(`${ROLE_NAME[role]} 파일을 바꾸면 기존 분석 결과가 지워집니다. 계속할까요?`, { ok: '바꾸기', danger: true }))) return;
   const pdfs = paths.filter((x) => /\.pdf$/i.test(x));
   if (pdfs.length > 1 && !(await confirmDialog(`PDF ${pdfs.length}개를 이름 순서대로 이어 붙여 하나의 ${ROLE_NAME[role]}(으)로 씁니다. 계속할까요?`))) return;
@@ -504,10 +511,47 @@ async function importFiles(role, paths) {
   }
 }
 
+/**
+ * 파일 추가: 지금 파일 뒤에 이어 붙임. 새 쪽은 맨 뒤에 생겨서 지금 문항·영역·쪽 정보, 오답노트에서 고른 문항,
+ * 저장해 둔 옮긴 결과는 그대로. 이미 분석했으면 새 쪽만 분석해서 더함
+ */
+async function addMoreFiles(role, paths) {
+  const b = bs.book;
+  const doc = b.docs[role];
+  const pdfs = paths.filter((x) => /\.pdf$/i.test(x));
+  if (pdfs.length > 1 && !(await confirmDialog(`PDF ${pdfs.length}개를 이름 순서대로 지금 ${ROLE_NAME[role]} 뒤에 이어 붙입니다. 계속할까요?`))) return;
+  try {
+    const before = doc.files.length;
+    const imported = await api.importFiles(b.id, role, paths, true);
+    dropSources(b.id, role);
+    addFiles(doc, imported);
+    await saver.flush();
+    const src = await getSource(b, role);
+    if (!onBook(b)) return; // 그 사이 다른 화면으로 감 (파일은 더해 두었음)
+    bs.sources[role] = src;
+    rematch();
+    bs.role = role;
+    render();
+    if (!src) return; // 열지 못함 (getSource 가 알림)
+    const pages = src.pages.flatMap((p, i) => (p.fileIndex >= before ? [i] : []));
+    // 쪽 범위를 정해 두었으면 새 쪽도 넣음 (다시 분석할 때 빠지지 않게)
+    if (doc.range && pages.length) {
+      doc.range = `${doc.range}, ${pages[0] + 1}-${pages[pages.length - 1] + 1}`;
+      markDirty();
+      render();
+    }
+    if (doc.analyzedAt && pages.length) await analyzeRole(role, { only: pages });
+    else toast(`${ROLE_NAME[role]}에 ${pages.length}쪽을 더했어요.${doc.analyzedAt ? '' : ` [${ROLE_NAME[role]} 분석]을 눌러 주세요.`}`, { type: 'success' });
+  } catch (err) {
+    toast(err.message, { type: 'error', timeout: 8000 });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 분석
 // ---------------------------------------------------------------------------
-async function analyzeRole(role) {
+/** only: 이 쪽만 분석해서 지금 결과에 더함 (파일 추가로 생긴 쪽 — 지금 문항·쪽 정보는 그대로) */
+async function analyzeRole(role, { only = null } = {}) {
   const b = bs.book;
   const doc = b.docs[role];
   const src = bs.sources[role];
@@ -519,10 +563,10 @@ async function analyzeRole(role) {
     else running.open();
     return;
   }
-  if (doc.edited && !(await confirmDialog(`${ROLE_NAME[role]}에서 직접 고친 내용이 있습니다. 다시 분석하면 사라집니다. 계속할까요?`, { ok: '다시 분석', danger: true }))) return;
+  if (!only && doc.edited && !(await confirmDialog(`${ROLE_NAME[role]}에서 직접 고친 내용이 있습니다. 다시 분석하면 사라집니다. 계속할까요?`, { ok: '다시 분석', danger: true }))) return;
   let pages;
   try {
-    pages = parsePageRange(doc.range, src.numPages);
+    pages = only || parsePageRange(doc.range, src.numPages);
   } catch (err) {
     toast(err.message, { type: 'error' });
     return;
@@ -572,13 +616,19 @@ async function analyzeRole(role) {
         updateProgress();
       },
     });
-    doc.items = res.items;
-    doc.pageInfo = res.pageInfo;
-    doc.signature = res.signature;
-    doc.signatures = res.signatures || (res.signature ? [res.signature] : []);
+    if (only) {
+      // 새 쪽 것만 더함 (번호 모양·쪽 번호 맞춤·직접 고친 표시는 처음 분석한 대로)
+      doc.items = [...doc.items.filter((it) => !only.includes(it.page)), ...res.items];
+      doc.pageInfo = { ...doc.pageInfo, ...res.pageInfo };
+    } else {
+      doc.items = res.items;
+      doc.pageInfo = res.pageInfo;
+      doc.signature = res.signature;
+      doc.signatures = res.signatures || (res.signature ? [res.signature] : []);
+      doc.edited = false;
+      if (doc.pageOffsetAuto !== false && res.pageOffset != null) doc.pageOffset = res.pageOffset;
+    }
     doc.analyzedAt = Date.now();
-    doc.edited = false;
-    if (doc.pageOffsetAuto !== false && res.pageOffset != null) doc.pageOffset = res.pageOffset;
     const ids = new Set(doc.items.map((it) => it.id));
     if (role === 'problem') {
       for (const k of Object.keys(b.answerOverrides)) if (!ids.has(k)) delete b.answerOverrides[k];
@@ -591,7 +641,7 @@ async function analyzeRole(role) {
     const sec = Math.round((Date.now() - t0) / 1000);
     const flagged = flaggedPages(doc).length;
     const miss = role === 'problem' ? missingCount(doc) : 0;
-    const msg = `${ROLE_NAME[role]}: ${doc.items.length}개 인식 (${sec}초${res.ocrPages ? `, OCR ${res.ocrPages}쪽` : ''})${flagged ? ` · 확인할 쪽 ${flagged}` : ''}${miss ? ` · 빠진 번호 ${miss}` : ''}`;
+    const msg = `${ROLE_NAME[role]}: ${only ? `새 쪽에서 ${res.items.length}개, 모두 ` : ''}${doc.items.length}개 인식 (${sec}초${res.ocrPages ? `, OCR ${res.ocrPages}쪽` : ''})${flagged ? ` · 확인할 쪽 ${flagged}` : ''}${miss ? ` · 빠진 번호 ${miss}` : ''}`;
     if (!job.finish({ message: `${b.name} · ${msg}`, actions: openAction })) toast(msg, { type: 'success', timeout: 6000 });
     if (onBook(b)) bs.role = role;
   } catch (err) {

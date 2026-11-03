@@ -40,12 +40,16 @@ nav.refresh = () => {
   return null;
 };
 
+// 서명이 없거나 맞지 않는 settings.json (통합 클라우드가 서명 키를 줄 때만 — src/main/datasign.js)
+const SETTINGS_REJECTED = '앱 밖에서 바꾼 설정이라 적용하지 않았어요.';
+
 /** 다른 컴퓨터·선생님이 바꾼 데이터가 들어오면 지금 화면에 반영 */
 async function onDataChanged(change) {
   if (change.settings || change.academy) {
     state.settings = await api.getSettings(); // 학원 공용 AI 키가 생기거나 없어졌을 수도
     if (state.view === 'note') renderFormatHint();
   }
+  if (change.settingsRejected) toast(SETTINGS_REJECTED, { timeout: 6000 });
   // 화면 이동이 끝난 뒤에 (이동 중인 화면을 덮어쓰지 않게)
   navigating = navigating.then(async () => {
     try {
@@ -88,6 +92,7 @@ async function boot() {
     return;
   }
   [state.appInfo, state.settings] = await Promise.all([api.appInfo(), api.getSettings()]);
+  if (state.appInfo.settingsRejected) toast(SETTINGS_REJECTED, { timeout: 6000 });
   applyMotion(state.settings.motion);
   document.fonts?.load('600 14px "Pretendard Variable"').catch(() => {});
   api.onDataChanged((change) => onDataChanged(change).catch((err) => console.error(err)));

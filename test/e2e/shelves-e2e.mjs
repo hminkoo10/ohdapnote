@@ -105,6 +105,8 @@ try {
   assert(!(await win.$('.tabs-row .seg-tab[data-tab="review"]')), '보기만 하는 책에 페이지 검토가 있습니다');
   assert(!(await win.$('.share-switch')), '남의 책에 학원 공유 스위치가 있습니다');
   assert(await fails('setBookShared', otherShared, false), '남의 책 공유를 바꿀 수 있습니다');
+  assert(!(await win.$('.doc-head button:has-text("파일 추가")')) && !(await win.$('.doc-head button:has-text("파일 바꾸기")')), '보기만 하는 책에 파일 추가·바꾸기가 있습니다');
+  assert(await fails('importFiles', otherShared, 'problem', [join(FIX, 'book-unit.pdf')], true), '남의 책에 파일을 더할 수 있습니다');
   await win.click('#back-btn');
 
   step('내 책 등록 → 내 책장, 학원 공유로 (books/<id>)');
@@ -118,6 +120,7 @@ try {
   await stubOpen([join(FIX, 'book-unit.pdf')]);
   await win.click('.doc-card[data-role="problem"] .drop-zone');
   await win.waitForSelector('.doc-card[data-role="problem"] .doc-foot');
+  assert(await win.$('.doc-card[data-role="problem"] .doc-head button:has-text("파일 추가")'), '내 책에 파일 추가가 없습니다');
   const mine = (await call('listBooks')).find((b) => b.name === '김선생 문제집');
   assert(mine && mine.mine && mine.shared && mine.canEdit, '내 책 요약: ' + JSON.stringify(mine));
   const id = mine.id;

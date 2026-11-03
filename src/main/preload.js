@@ -56,7 +56,7 @@ contextBridge.exposeInMainWorld('ohdap', {
   },
 
   pickFiles: (title) => ipcRenderer.invoke('files:pick', { title }),
-  importFiles: (bookId, role, paths) => ipcRenderer.invoke('files:import', { bookId, role, paths }),
+  importFiles: (bookId, role, paths, add) => ipcRenderer.invoke('files:import', { bookId, role, paths, add }), // add: 지금 파일 뒤에 더하기
   pathForFile: (file) => webUtils.getPathForFile(file),
   savePdf: (defaultName, data) => ipcRenderer.invoke('files:savePdf', { defaultName, data }),
   saveFile: ({ defaultName, data, filters, title }) => ipcRenderer.invoke('files:saveFile', { defaultName, data, filters, title }),

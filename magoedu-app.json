@@ -3,6 +3,7 @@
   "id": "ohdapnote",
   "version": "0.0.0",
   "exe": "OhdapNote.exe",
+  "dataSigning": true,
   "sync": {
     "include": ["settings.json", "shared/**"],
     "exclude": ["**/*.tmp"]

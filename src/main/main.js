@@ -18,6 +18,7 @@ const log = require('electron-log/main');
 const ai = require('./ai');
 const mathocr = require('./mathocr');
 const cloud = require('./magoedu-cloud');
+const datasign = require('./datasign');
 
 log.initialize();
 log.transports.file.level = 'info';
@@ -44,6 +45,9 @@ function startCloudSession() {
 const session = startCloudSession();
 if (session) app.setPath('userData', session.localDir); // 이 컴퓨터에만 두는 것 (모델, 로그, 화면 캐시)
 const me = session?.user || {}; // { id: 계정 ID, name, role, academy: 학원 이름 }
+// 설정 서명 키 (매니페스트 dataSigning — 예전 통합 클라우드는 주지 않음). 다른 프로그램(Codex 등)에 넘어가지 않게 환경 변수에서 지움
+const dataKey = process.env.MAGOEDU_DATA_KEY || '';
+delete process.env.MAGOEDU_DATA_KEY;
 
 // 작업이 끝났다는 윈도우 알림이 설치한 바로가기(appId)와 같은 앱으로 뜨게
 if (process.platform === 'win32') app.setAppUserModelId('io.github.hminkoo10.ohdapnote');
@@ -232,9 +236,26 @@ const DEFAULT_SETTINGS = {
   motion: 'full', // full: 애니메이션 켜기, reduce: 줄이기
 };
 
+// 내 설정 파일: 통합 클라우드가 서명 키를 주면 서명해서 쓰고, 앱 밖에서 고친 파일(서명이 없거나 틀림)은 적용하지 않고 되돌림
+// (src/main/datasign.js. 마지막으로 확인한 설정은 이 컴퓨터 폴더의 settings.verified.json). 키가 없으면 예전처럼
+let settingsRejectedAtStart = false; // 창이 뜨기 전에 그런 일이 있었음 → app:info 로 알림
+const settingsStore =
+  session &&
+  datasign.signedJsonFile({
+    file: settingsFile(),
+    stateFile: path.join(session.localDir, 'settings.verified.json'),
+    key: dataKey,
+    markOwn,
+    log,
+    onRejected: () => {
+      if (mainWindow) send('data:changed', { books: [], notes: [], settingsRejected: true });
+      else settingsRejectedAtStart = true;
+    },
+  });
+
 /** 내 설정 (개인 공간). 학원·선생님 이름이 비어 있으면 통합 클라우드 계정에서 */
 async function loadSettings() {
-  const s = { ...DEFAULT_SETTINGS, ...(await readJson(settingsFile(), {})) };
+  const s = { ...DEFAULT_SETTINGS, ...settingsStore.read() };
   if (!s.academy) s.academy = me.academy || '';
   if (!s.teacher) s.teacher = me.name || '';
   return s;
@@ -641,9 +662,9 @@ async function importLegacy() {
   }
   const old = await readJson(path.join(src, 'settings.json'), null);
   if (old && typeof old === 'object') {
-    const cur = await readJson(settingsFile(), {});
+    const cur = settingsStore.read();
     const filled = Object.fromEntries(Object.entries(cur).filter(([, v]) => v !== '' && v != null));
-    await writeJsonAtomic(settingsFile(), { ...old, ...filled });
+    settingsStore.write({ ...old, ...filled });
   }
   await fsp.rm(src, { recursive: true, force: true });
   log.info('[legacy] imported', done);
@@ -714,13 +735,14 @@ function registerIpc() {
     user: { id: me.id || '', name: me.name || '', role: me.role || '', academy: me.academy || '' },
     academy: academyMode(), // 학원 선생님끼리 교재·학생 명단을 함께 씀
     manager: isManager(), // 원장: 남의 교재도 고치고, 학원 오답노트를 모두 봄 (남의 오답노트는 보기만)
+    settingsRejected: settingsRejectedAtStart, // 켤 때 앱 밖에서 고친 설정을 적용하지 않았음 (화면에 알림)
   }));
 
   ipcMain.handle('settings:get', async () => ({ ...(await loadSettings()), academyAi: academyAiFlags(await loadAcademyAi()) }));
   ipcMain.handle('settings:set', async (_e, patch) => {
     const next = { ...(await loadSettings()), ...(patch || {}) };
     delete next.academyAi;
-    await writeJsonAtomic(settingsFile(), next);
+    settingsStore.write(next);
     return { ...next, academyAi: academyAiFlags(await loadAcademyAi()) };
   });
 
@@ -988,8 +1010,8 @@ function registerIpc() {
     return result.canceled ? [] : result.filePaths;
   });
 
-  // 선택한 파일(들)을 책 폴더로 복사
-  ipcMain.handle('files:import', async (_e, { bookId, role, paths }) => {
+  // 선택한 파일(들)을 책 폴더로 복사. add 면 그 쪽의 지금 파일은 그대로 두고 더함 (화면에서 지금 파일 뒤에 이어 붙임)
+  ipcMain.handle('files:import', async (_e, { bookId, role, paths, add = false }) => {
     if (!['problem', 'answer'].includes(role)) throw new Error('잘못된 문서 종류');
     if (!Array.isArray(paths) || paths.length === 0) throw new Error('파일이 없습니다.');
     const cur = checkBookWrite(bookId);
@@ -1007,9 +1029,11 @@ function registerIpc() {
     }
 
     // 이전 파일 삭제 (이 컴퓨터에 받지 않은 것은 서버에서)
-    await removeRemoteOnly(bookId, (cur?.docs?.[role]?.files || []).map((f) => f?.name).filter((n) => typeof n === 'string' && n.startsWith(`${role}-`)));
-    for (const name of await fsp.readdir(dir)) {
-      if (name.startsWith(`${role}-`)) await fsp.rm(path.join(dir, name), { force: true });
+    if (!add) {
+      await removeRemoteOnly(bookId, (cur?.docs?.[role]?.files || []).map((f) => f?.name).filter((n) => typeof n === 'string' && n.startsWith(`${role}-`)));
+      for (const name of await fsp.readdir(dir)) {
+        if (name.startsWith(`${role}-`)) await fsp.rm(path.join(dir, name), { force: true });
+      }
     }
 
     const stamp = Date.now().toString(36);
@@ -1208,6 +1232,7 @@ function flushChanges() {
   const out = { books: new Set(), notes: new Set(), students: false, academy: false, settings: false };
   for (const abs of changedPaths) {
     if (abs === path.resolve(settingsFile())) {
+      settingsStore.read(); // 앱 밖에서 고친 것이면 여기서 되돌림 (화면에는 settingsRejected 로 알림)
       out.settings = true;
       continue;
     }
@@ -1228,10 +1253,14 @@ function flushChanges() {
 // ---------------------------------------------------------------------------
 
 if (!session) {
-  // 통합 클라우드에서 켜지 않음 → 안내하고 통합 클라우드를 열어 줌
+  // 통합 클라우드에서 켜지 않음 → 통합 클라우드가 설치되어 있으면 안내 없이 넘겨서 켜 달라고 함.
+  // 없거나 넘기지 못했거나 통합 클라우드가 켰는데 확인이 안 됐으면 안내 (통합 클라우드가 있으면 열어 줌)
   app.whenReady().then(() => {
+    const installed = !!app.getApplicationNameForProtocol('magoedu://launch/ohdapnote');
+    const handOff = cloud.shouldHandOff({ installed });
+    if (handOff && cloud.openCloud('ohdapnote')) return app.exit(0);
     dialog.showMessageBoxSync({ type: 'info', title: '오답노트', message: cloud.reason(), buttons: ['확인'] });
-    cloud.openCloud('ohdapnote');
+    if (installed && !handOff) cloud.openCloud('ohdapnote');
     app.exit(0);
   });
 } else if (!isSmokeTest && !app.requestSingleInstanceLock()) {
@@ -1246,6 +1275,7 @@ if (!session) {
 
   app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
+    settingsStore.read(); // 꺼져 있는 동안 앱 밖에서 고친 설정이면 창을 띄우기 전에 되돌림
     await importLegacy().catch((err) => log.error('[legacy]', err));
     await saveProfile().catch((err) => log.warn('[profile]', err.message));
     registerAppProtocol();

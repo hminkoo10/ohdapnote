@@ -6,7 +6,7 @@ import { buildHwpx, renderStack, cropImage, blockSegs } from './hwpx.js';
 import { geminiTranscribeBatch, canvasToBase64Jpeg } from './gemini.js';
 import { scanTranscribe } from './scanocr.js';
 import { transcribeParts } from './pdfmath.js';
-import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
+import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect, transcriptFiles } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiOptions, aiLabel, aiModelText, jobDialog, findJob, holdSource } from './shared.js';
 import { topbar } from './chrome.js';
 import { spineFor } from './home.js';
@@ -990,9 +990,9 @@ async function saveTranscripts() {
   }
 }
 
-/** 같은 문항·같은 영역·같은 원본 파일이면 같은 열쇠 */
+/** 같은 문항·같은 영역·같은 원본 파일이면 같은 열쇠 (나중에 더한 파일은 넣지 않음 — 더해도 지금 결과를 그대로 씀) */
 function transcriptKey(block) {
-  const raw = JSON.stringify({ files: (block.src?.files || []).map((f) => f.name), rects: block.item.rects, stem: block.stem || null });
+  const raw = JSON.stringify({ files: transcriptFiles(block.src?.files), rects: block.item.rects, stem: block.stem || null });
   let hash = 0x811c9dc5;
   for (let i = 0; i < raw.length; i++) hash = Math.imul(hash ^ raw.charCodeAt(i), 0x01000193);
   return `${block.role}|${block.item.id}|${(hash >>> 0).toString(36)}`;

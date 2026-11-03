@@ -568,6 +568,27 @@ try {
   const oldChips = await win.$$eval('.qtable .chip:not(.missing)', (els) => els.length);
   console.log('    예전 책 문항:', oldChips);
   if (oldChips !== 17) throw new Error(`예전 책 문항 수: ${oldChips}`);
+
+  step('파일 추가: 분석한 책 뒤에 PDF 를 더함 → 지금 파일·문항은 그대로, 새 쪽만 분석해서 더함');
+  await clearToasts();
+  const idsBefore = await win.$$eval('.qtable .chip:not(.missing)', (els) => els.map((e) => e.dataset.id));
+  await stubOpen([join(FIX, 'book-unit.pdf')]);
+  await win.click('.doc-card[data-role="problem"] .doc-head button:has-text("파일 추가")');
+  await waitToast('새 쪽에서', 180000);
+  await win.waitForTimeout(400);
+  const idsAfter = await win.$$eval('.qtable .chip:not(.missing)', (els) => els.map((e) => e.dataset.id));
+  console.log('    파일 추가 뒤 문항:', idsAfter.length);
+  if (idsAfter.length !== oldChips + 24) throw new Error(`파일 추가 뒤 문항 수: ${idsAfter.length}`);
+  const lost = idsBefore.filter((id) => !idsAfter.includes(id));
+  if (lost.length) throw new Error(`파일을 더했더니 예전 문항이 사라짐: ${lost}`);
+  const oldBookDir = join(userData, 'data', 'shared', 'books', oldId);
+  const addedBook = JSON.parse(readFileSync(join(oldBookDir, 'book.json'), 'utf8'));
+  const pf = addedBook.docs.problem.files;
+  if (pf.length !== 2 || pf[0].name !== 'problem-old-000.pdf' || pf[0].added || !pf[1].added) throw new Error('책 파일 목록: ' + JSON.stringify(pf));
+  if (!pf.every((f) => existsSync(join(oldBookDir, f.name)))) throw new Error('파일 추가 뒤 원본 파일이 없음');
+  if (addedBook.docs.problem.items.length !== oldChips + 24) throw new Error('저장된 문항 수: ' + addedBook.docs.problem.items.length);
+  if (!(await win.$eval('.doc-card[data-role="problem"] .doc-file', (e) => e.textContent)).includes('외 1개')) throw new Error('파일 이름 표시');
+  await shot('12-book-files-added');
   console.log('✅ E2E 통과');
 } catch (err) {
   console.error('❌ E2E 실패:', err);

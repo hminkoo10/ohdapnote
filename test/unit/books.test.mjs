@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeDoc, missingNumbers, flaggedPages, selectedItems, noteSelection, setNoteSelection, noteSelectedCount } from '../../src/renderer/js/store.js';
+import { normalizeDoc, missingNumbers, flaggedPages, selectedItems, noteSelection, setNoteSelection, noteSelectedCount, addFiles, transcriptFiles } from '../../src/renderer/js/store.js';
+import { assignIds, sortItems } from '../../src/renderer/js/detect.js';
 import { makeBlocks } from '../../src/renderer/js/exporter.js';
 
 const item = (page, num, y = 0.1, extra = {}) => ({ id: `${page}:${num}`, page, number: String(num), num, col: 0, rects: [{ page, x: 0.1, y, w: 0.3, h: 0.1 }], ...extra });
@@ -69,4 +70,36 @@ test('missingNumbers: 다음 단원(멀리 떨어진 쪽)의 같은 번호 때�
   const doc2 = { items: [item(0, 1, 0.1), item(0, 2, 0.2), item(0, 6, 0.3), item(1, 3), item(1, 7, 0.3)], pageInfo: {} };
   const nums = [...missingNumbers(doc2).values()].flat().map((x) => x.num);
   assert.equal(new Set(nums).size, nums.length);
+});
+
+test('파일 추가: 지금 파일·쪽·문항·쪽 정보·선택·옮긴 결과 열쇠는 그대로, 새 쪽은 맨 뒤', () => {
+  const files = [
+    { name: 'problem-a-000.pdf', originalName: '쎈 1권.pdf', kind: 'pdf' },
+    { name: 'problem-a-001.pdf', originalName: '쎈 2권.pdf', kind: 'pdf' },
+  ];
+  const old = [item(0, 1), item(0, 2, 0.3), item(3, 1)];
+  const doc = { files: files.map((f) => ({ ...f })), originalName: '쎈 1권.pdf 외 1개', range: '1-4', items: old.map((it) => ({ ...it })), pageInfo: { 0: { analyzed: true }, 3: { analyzed: true, ok: true } }, edited: true, signature: { prefix: '' }, analyzedAt: 1 };
+  const before = JSON.parse(JSON.stringify(doc));
+  const book = { docs: { problem: doc } };
+  const note = { selected: { b1: ['0:2', '3:1'] } };
+  const keyBefore = transcriptFiles(doc.files);
+
+  addFiles(doc, { files: [{ name: 'problem-b-000.pdf', originalName: '쎈 3권.pdf', kind: 'pdf' }], originalName: '쎈 3권.pdf' });
+  assert.deepEqual(doc.files.slice(0, 2), before.files); // 지금 파일은 그대로 앞에 (쪽 번호 = 파일 순서대로 이어 붙인 것)
+  assert.deepEqual(doc.files[2], { name: 'problem-b-000.pdf', originalName: '쎈 3권.pdf', kind: 'pdf', added: true });
+  assert.equal(doc.originalName, '쎈 1권.pdf 외 2개');
+  for (const k of ['items', 'pageInfo', 'edited', 'signature', 'analyzedAt', 'range']) assert.deepEqual(doc[k], before[k], k);
+  assert.deepEqual(transcriptFiles(doc.files), keyBefore); // 한글 내보내기에 저장해 둔 결과를 그대로 씀
+
+  // 새 쪽(4~5)만 분석한 결과를 더해도 지금 문항 ID 는 그대로 (ID 는 쪽 안에서만 정해짐)
+  const added = assignIds(sortItems([item(4, 1), item(4, 2, 0.3), item(5, 1)]));
+  doc.items = [...doc.items, ...added];
+  assert.deepEqual(added.map((it) => it.id), ['4:1', '4:2', '5:1']);
+  normalizeDoc(book, 'problem');
+  assert.deepEqual(doc.items.slice(0, 3).map((it) => it.id), old.map((it) => it.id));
+  assert.deepEqual(selectedItems(book, note.selected.b1).map((it) => it.id), ['0:2', '3:1']);
+  // 두 번째로 더해도 첫 파일들은 열쇠에 그대로
+  addFiles(doc, { files: [{ name: 'problem-c-000.png', originalName: 'p.png', kind: 'image' }], originalName: 'p.png' });
+  assert.deepEqual(transcriptFiles(doc.files), keyBefore);
+  assert.equal(doc.originalName, '쎈 1권.pdf 외 3개');
 });

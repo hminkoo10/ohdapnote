@@ -212,6 +212,15 @@ function openCloud(appId) {
   }
 }
 
+/**
+ * 통합 클라우드에서 켜지 않았을 때(check 가 null) 안내 없이 통합 클라우드에 넘겨서 켜 달라고 할지.
+ * installed: 통합 클라우드가 설치되어 있는지 (magoedu:// 주소를 열 수 있음 — Electron 은 app.getApplicationNameForProtocol).
+ * 통합 클라우드가 켰는데 확인이 안 된 것(MAGOEDU_TICKET 이 있음)은 다시 넘기지 않음 (서로 계속 켜지 않게) → 안내
+ */
+function shouldHandOff({ installed, env = process.env } = {}) {
+  return !!installed && !env.MAGOEDU_TICKET;
+}
+
 function parseVersion(v) {
   const n = String(v || '')
     .split(/[^0-9]+/)
@@ -243,4 +252,4 @@ function newerVersionInstalled(appId, currentVersion) {
   }
 }
 
-module.exports = { check, reason, requestFiles, removeFiles, verifyTicket, openCloud, newerVersionInstalled, RESTART_EXIT_CODE, defaultTrustFile };
+module.exports = { check, reason, requestFiles, removeFiles, verifyTicket, openCloud, shouldHandOff, newerVersionInstalled, RESTART_EXIT_CODE, defaultTrustFile };
