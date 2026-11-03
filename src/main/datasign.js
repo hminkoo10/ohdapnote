@@ -11,6 +11,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { invalidJson } = require('./data-validate');
 
 const SIG_ZERO = '0'.repeat(64);
 const SIG_RE = /"sig"\s*:\s*"([0-9a-f]{64})"/g;
@@ -80,6 +81,14 @@ function signedJsonFile({ file, stateFile, key, markOwn, log = console, onReject
   let good = null; // 마지막으로 서명을 확인한 값
   let saved = null; // stateFile 에 쓴 바이트
 
+  const readBytes = (name) => {
+    if (fs.statSync(name).size > 1024 * 1024) {
+      invalidJson(name, log);
+      return Buffer.alloc(0);
+    }
+    return fs.readFileSync(name);
+  };
+
   const saveState = (bytes) => {
     if (saved?.equals(bytes)) return;
     try {
@@ -93,7 +102,7 @@ function signedJsonFile({ file, stateFile, key, markOwn, log = console, onReject
   const known = () => {
     if (good) return good;
     try {
-      const bytes = fs.readFileSync(stateFile);
+      const bytes = readBytes(stateFile);
       const v = parse(bytes);
       return isObj(v) && verify(bytes, key) ? plain(v) : null;
     } catch {
@@ -113,12 +122,15 @@ function signedJsonFile({ file, stateFile, key, markOwn, log = console, onReject
   function read() {
     let bytes;
     try {
-      bytes = fs.readFileSync(file);
+      bytes = readBytes(file);
     } catch {
       return {}; // 아직 없음 → 기본값 (예전과 같음)
     }
     const value = parse(bytes);
-    if (!key) return value === undefined ? {} : plain(value);
+    if (!key) {
+      if (value === undefined) invalidJson(file, log);
+      return value === undefined ? {} : plain(value);
+    }
     if (isObj(value) && verify(bytes, key)) {
       good = plain(value);
       saveState(bytes);

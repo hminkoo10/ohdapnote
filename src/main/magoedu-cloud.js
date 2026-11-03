@@ -35,6 +35,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { isObj, line, key, model, int, url, sanitizeData, cleanJson, invalidJson, relativePath } = require('./data-validate');
 
 const RESTART_EXIT_CODE = 75; // 이 값으로 끝내면 통합 클라우드가 바로 다시 켠다 (새 버전 적용)
 const TICKET_PREFIX = 'MGT1';
@@ -55,16 +56,30 @@ function trustFile(packaged, env = process.env) {
   return defaultTrustFile();
 }
 
-function loadKeys(file) {
+function sanitizeTrust(v) {
+  if (!isObj(v) || !Array.isArray(v.keys)) return { keys: [] };
+  return { keys: v.keys.slice(0, 50).map((k) => (isObj(k) && key(k.kid, 128) && typeof k.x === 'string' && /^[A-Za-z0-9_-]{43}$/.test(k.x) ? { kid: k.kid, x: k.x } : null)).filter(Boolean) };
+}
+
+function readCloudJson(file, sanitize) {
   try {
-    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return (data.keys || []).filter((k) => k && k.kid && k.x);
-  } catch {
-    return [];
+    if (fs.statSync(file).size > 16 * 1024 * 1024) {
+      invalidJson(file);
+      return null;
+    }
+    return cleanJson(JSON.parse(fs.readFileSync(file, 'utf8')), sanitize, file);
+  } catch (err) {
+    if (err.code !== 'ENOENT') invalidJson(file);
+    return null;
   }
 }
 
+function loadKeys(file) {
+  return readCloudJson(file, sanitizeTrust)?.keys || [];
+}
+
 function verifyTicket(ticket, keys, { appId, now = Date.now() } = {}) {
+  if (!Array.isArray(keys)) return null;
   const parts = String(ticket || '').split('.');
   if (parts.length !== 3 || parts[0] !== TICKET_PREFIX) return null;
   let payload;
@@ -73,7 +88,8 @@ function verifyTicket(ticket, keys, { appId, now = Date.now() } = {}) {
   } catch {
     return null;
   }
-  const k = keys.find((x) => x.kid === payload.kid);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const k = keys.find((x) => x && x.kid === payload.kid);
   if (!k) return null;
   let ok = false;
   try {
@@ -83,7 +99,7 @@ function verifyTicket(ticket, keys, { appId, now = Date.now() } = {}) {
     ok = false;
   }
   if (!ok) return null;
-  if (typeof payload.exp !== 'number' || payload.exp * 1000 < now) return null;
+  if (!Number.isFinite(payload.exp) || payload.exp * 1000 < now) return null;
   if (appId && payload.app !== appId) return null;
   return payload;
 }
@@ -169,7 +185,8 @@ function reason() {
  * → { ok, missing: [받지 못한 경로], error? }   (서버에 없거나 인터넷이 끊겼거나 시간이 지남)
  */
 async function requestFiles(session, paths, { timeoutMs = 120000 } = {}) {
-  const want = [...new Set(paths.map((p) => String(p).replace(/\\/g, '/')))];
+  if (!Array.isArray(paths) || paths.length > 10000 || paths.some((p) => !relativePath(p))) return { ok: false, missing: [], error: '잘못된 파일 경로입니다.' };
+  const want = [...new Set(paths.map(relativePath))];
   const need = want.filter((p) => !session.academyDir || !fs.existsSync(path.join(session.academyDir, ...p.split('/'))));
   if (!need.length) return { ok: true, missing: [] };
   if (!session.requestDir) return { ok: false, missing: need, error: '학원 공간을 쓰지 않아요.' };
@@ -181,19 +198,24 @@ async function requestFiles(session, paths, { timeoutMs = 120000 } = {}) {
  * 있는 파일은 그냥 폴더에서 지우면 된다. → { ok, missing: [서버에 남은 경로], error? }
  */
 async function removeFiles(session, paths, { timeoutMs = 120000 } = {}) {
-  const list = [...new Set(paths.map((p) => String(p).replace(/\\/g, '/')))];
+  if (!Array.isArray(paths) || paths.length > 10000 || paths.some((p) => !relativePath(p))) return { ok: false, missing: [], error: '잘못된 파일 경로입니다.' };
+  const list = [...new Set(paths.map(relativePath))];
   if (!list.length || !session.requestDir) return { ok: !list.length, missing: list };
   return ask(session, { remove: list }, timeoutMs);
+}
+
+function sanitizeStudent(v) {
+  return sanitizeData(v);
+}
+
+function sanitizeAcademyInfo(v) {
+  return sanitizeData(v);
 }
 
 /** 학원 학생 명단·학원 AI. 파일이 없거나 읽을 수 없으면 null */
 function academyInfo(session) {
   if (!session.academyInfoFile) return null;
-  try {
-    return JSON.parse(fs.readFileSync(session.academyInfoFile, 'utf8'));
-  } catch {
-    return null;
-  }
+  return readCloudJson(session.academyInfoFile, sanitizeAcademyInfo);
 }
 
 /**
@@ -204,14 +226,16 @@ function academyInfo(session) {
  */
 function academyAi(session, info = academyInfo(session)) {
   const ai = info?.ai;
-  if (!ai?.provider) return null;
-  const out = { provider: ai.provider, model: ai.model || '', model2: ai.model2 || '', rpm: ai.rpm ?? null, source: ai.source || '' };
-  if (ai.relay) {
-    if (!session.server || !session.ticket) return null;
+  if (!isObj(ai) || !['gemini', 'openai', 'anthropic'].includes(ai.provider)) return null;
+  const out = { provider: ai.provider, model: model(ai.model) || '', model2: model(ai.model2) || '', rpm: int(ai.rpm, 1, 10000) ?? null, source: line(ai.source, 32) || '' };
+  if (ai.relay === true) {
+    if (!url(session.server) || !session.ticket) return null;
     return { ...out, baseUrl: `${session.server.replace(/\/+$/, '')}/api/ai/relay/${encodeURIComponent(session.appId)}`, apiKey: session.ticket };
   }
-  if (ai.direct) return { ...out, baseUrl: ai.baseUrl || '', apiKey: '' };
-  return { ...out, baseUrl: ai.baseUrl || '', apiKey: ai.apiKey || '' }; // 키를 그대로 주던 예전 서버
+  const baseUrl = url(ai.baseUrl ?? '');
+  if (baseUrl === undefined) return null;
+  if (ai.direct === true) return { ...out, baseUrl, apiKey: '' };
+  return { ...out, baseUrl, apiKey: line(ai.apiKey, 4096) || '' }; // 키를 그대로 주던 예전 서버
 }
 
 /** 학원 학생 명단·학원 AI 가 바뀔 때마다 cb(info). 그만 볼 때는 돌려준 함수를 부른다 */
@@ -280,6 +304,10 @@ async function op(session, body, { timeoutMs = 30000 } = {}) {
   return { ok, ...rest, ...(ok ? {} : { error: error || '하지 못했어요.', errorCode: errorCode || 'failed' }) };
 }
 
+function sanitizeRequestResult(v) {
+  return sanitizeData(v);
+}
+
 /** requests/<rid>.json 을 쓰면 통합 클라우드가 처리한 뒤 <rid>.done.json { ok, missing, error?, ... } 으로 답한다 */
 async function ask(session, body, timeoutMs) {
   const all = [...(body.paths || []), ...(body.remove || [])];
@@ -294,13 +322,13 @@ async function ask(session, body, timeoutMs) {
     await new Promise((r) => setTimeout(r, 100));
     let answer = null;
     try {
-      answer = JSON.parse(fs.readFileSync(done, 'utf8'));
+      answer = readCloudJson(done, sanitizeRequestResult);
     } catch {
       /* 아직 */
     }
     if (answer) {
       fs.rmSync(done, { force: true });
-      return { ...answer, ok: !!answer.ok, missing: answer.missing || [] };
+      return answer;
     }
     if (Date.now() > end) {
       fs.rmSync(req, { force: true });
@@ -347,6 +375,11 @@ function newer(a, b) {
   return false;
 }
 
+function sanitizeInstalled(v) {
+  if (!isObj(v) || typeof v.version !== 'string') return null;
+  return /^\d{1,6}\.\d{1,6}\.\d{1,6}(?:-[0-9A-Za-z.-]{1,32})?(?:\+[0-9A-Za-z.-]{1,16})?$/.test(v.version) ? { version: v.version } : null;
+}
+
 /** 통합 클라우드가 새 버전을 받아 두었으면 그 버전 (프로그램을 75 로 끝내면 새 버전으로 다시 켜짐) */
 function newerVersionInstalled(appId, currentVersion) {
   const base =
@@ -354,8 +387,8 @@ function newerVersionInstalled(appId, currentVersion) {
       ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), CLOUD_DIR_NAME)
       : path.join(path.dirname(defaultTrustFile()), 'local');
   try {
-    const info = JSON.parse(fs.readFileSync(path.join(base, 'apps', appId, 'installed.json'), 'utf8'));
-    return info.version && newer(info.version, currentVersion) ? info.version : null;
+    const info = readCloudJson(path.join(base, 'apps', appId, 'installed.json'), sanitizeInstalled);
+    return info?.version && newer(info.version, currentVersion) ? info.version : null;
   } catch {
     return null;
   }
@@ -363,6 +396,7 @@ function newerVersionInstalled(appId, currentVersion) {
 
 module.exports = {
   check,
+  sanitizeStudent,
   reason,
   requestFiles,
   removeFiles,
