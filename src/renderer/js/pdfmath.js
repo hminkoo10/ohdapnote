@@ -1305,12 +1305,13 @@ function regionBlocks(layer, rect, place) {
  * @param {{layer:object, rect:{x,y,w,h}, place:{x,y,w,h}}[]} parts
  *   layer: readPageLayer 결과, rect: 쪽에 대한 비율 좌표, place: 쌓은 그림(문항 하나를 세로로 이어 붙인 그림) 안의 그 영역 자리(비율)
  *   그림 블록의 box 는 쌓은 그림에 대한 비율이라 AI 가 옮긴 결과와 같은 방법으로 잘라 쓸 수 있습니다.
- * @param {{explain?:boolean}} opts explain 이면 실패할 때 null 대신 {fail: 이유}
+ * @param {{explain?:boolean, plain?:boolean}} opts explain: 실패 이유, plain: 문제은행의 일반 글꼴 PDF도 허용
  */
-export function transcribeParts(parts, { explain = false } = {}) {
+export function transcribeParts(parts, { explain = false, plain = false } = {}) {
   try {
     // 수식 글꼴(EH…)로 만든 PDF 만 (다른 출판사 PDF 의 수식 글꼴은 아직 모름)
-    if (!parts.length || !parts.every((p) => p.layer.glyphs.some((g) => g.fam.startsWith('EH')))) fail('수식 글꼴(EH…)로 만든 PDF 가 아님');
+    // 문제은행에서는 일반 글꼴의 디지털 PDF도 읽음. 기존 수식 내보내기의 기본 제한은 유지
+    if (!parts.length || !plain && !parts.every((p) => p.layer.glyphs.some((g) => g.fam.startsWith('EH')))) fail('수식 글꼴(EH…)로 만든 PDF 가 아님');
     const blocks = [];
     for (const p of parts) blocks.push(...regionBlocks(p.layer, p.rect, p.place));
     if (!blocks.some((b) => b.type !== 'figure')) fail('읽은 글자가 없음');

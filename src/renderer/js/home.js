@@ -4,6 +4,7 @@ import { h, clear, toast, modal, confirmDialog, promptDialog, formatDate, icon, 
 import { api, state, nav, dropSources, liveBook, stopJobs, errMsg } from './shared.js';
 import { topbar } from './chrome.js';
 import { SUBJECTS, subjectOf, subjectName, contractedSubjects } from './subjects.js';
+import { bankView, rememberBankView } from './bankview.js';
 
 const SPINES = [
   'linear-gradient(180deg, #ffb27d, #f0743e)',
@@ -47,6 +48,7 @@ const rosterNotice = () => h('div.readonly-banner.roster-notice', icon('warn'), 
 /** 탭마다 위쪽 제목·설명 */
 function heroText(key) {
   const { academy, purgeDays } = state.appInfo;
+  if (key === 'bank') return ['문제은행', '교재의 문항을 한곳에 모아 찾고, 골라 담아 시험지를 만들어요. 학원 안에서만 함께 써요.'];
   if (key === 'books') return ['책장', academy ? '내가 만든 책은 내 책장에, 다른 선생님이 학원에 공유한 책은 공유 책장에 있어요. 어느 책이든 학생 오답노트에 쓸 수 있어요.' : '문제집과 답지를 한 번만 올려 두면, 여러 학생 오답노트에서 같이 써요.'];
   if (key === 'students') return ['학생 명단', academy ? `학원 사람 모두가 함께 쓰는 학생 명단이에요. 누구나 추가·고치기·지우기를 할 수 있고, 지운 학생은 ${purgeDays || 30}일 안에 되살릴 수 있어요.` : '학생을 적어 두면 오답노트를 만들 때 골라 쓸 수 있어요.'];
   return ['학생 오답노트', '책장에 등록한 책에서 틀린 문제만 골라 시험지처럼 묶어 드려요.'];
@@ -79,6 +81,7 @@ export async function showHome({ tab } = {}) {
   const focused = document.activeElement;
   const typing = focused?.matches?.('.home-search input') ? [focused.selectionStart, focused.selectionEnd] : null;
   const root = document.getElementById('app');
+  rememberBankView();
   clear(root);
   state.view = 'home';
 
@@ -86,7 +89,7 @@ export async function showHome({ tab } = {}) {
   const segBtn = (key, ic, label, n) =>
     h(`button.seg-tab${homeTab === key ? '.active' : ''}`, { dataset: { tab: key }, onclick: () => switchTab(key) }, icon(ic), h('span', label), h('span.seg-count', String(n)));
   const thumb = h('span.seg-thumb');
-  const tabs = h('nav.seg-tabs', thumb, segBtn('notes', 'notebook', '학생 오답노트', notes.length), segBtn('books', 'library', '책장', books.length), segBtn('students', 'user', '학생 명단', active.length));
+  const tabs = h('nav.seg-tabs', thumb, segBtn('notes', 'notebook', '학생 오답노트', notes.length), segBtn('books', 'library', '책장', books.length), segBtn('bank', 'layers', '문제은행', books.reduce((n, b) => n + (b.problemCount || 0), 0)), segBtn('students', 'user', '학생 명단', active.length));
   const [heroTitle, heroSub] = heroText(homeTab);
 
   root.append(
@@ -130,11 +133,13 @@ export async function showHome({ tab } = {}) {
   }
 
   function renderBody() {
+    rememberBankView();
     clear(body);
     body.classList.remove('swap-in');
     void body.offsetWidth;
     body.classList.add('swap-in');
     if (homeTab === 'notes') body.append(notesView());
+    else if (homeTab === 'bank') body.append(bankView(books));
     else if (homeTab === 'students') body.append(studentsView());
     else body.append(booksGrid());
   }
