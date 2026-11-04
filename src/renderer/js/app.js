@@ -61,6 +61,7 @@ const SETTINGS_REJECTED = '앱 밖에서 바꾼 설정이라 적용하지 않았
 async function onDataChanged(change) {
   if (change.settings) {
     state.settings = await api.getSettings(); // 학원 AI 가 생기거나 바뀌었을 수도 (통합 클라우드에서 원장이 정함)
+    state.appInfo.subjects = (await api.appInfo()).subjects; // 학원이 계약한 과목도 (운영자가 바꿈)
     if (state.view === 'note') renderFormatHint();
   }
   if (change.settingsRejected) toast(SETTINGS_REJECTED, { timeout: 6000 });

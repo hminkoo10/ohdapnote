@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld('ohdap', {
 
   // 책 (문제집 + 답지 + 분석 결과)
   listBooks: () => ipcRenderer.invoke('books:list'),
-  createBook: (name, shared) => ipcRenderer.invoke('books:create', { name, shared }), // shared 를 빼면 학원 공유
+  createBook: (name, shared, subject) => ipcRenderer.invoke('books:create', { name, shared, subject }), // shared 를 빼면 학원 공유, subject: math · english · korean (계약한 과목만)
   getBook: (id) => ipcRenderer.invoke('books:get', id),
   saveBook: (book) => ipcRenderer.invoke('books:save', book),
   saveBookSync: (book) => ipcRenderer.sendSync('books:saveSync', book),

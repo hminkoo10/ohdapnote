@@ -9,9 +9,10 @@ const DAY = 24 * 60 * 60 * 1000;
 
 /**
  * @param {{ dir: string, academyDir: string, members: {id,name,role}[], purgeDays?: number }} opts
- * → { env: 앱에 넘길 환경 변수, as(user): 누구로 켜는지, students(), student(id), edit(id, patch): 다른 곳에서 고친 것처럼, setAi(ai), stop() }
+ *   subjects: 학원이 계약한 과목 (없으면 academy.subjects 를 싣지 않음 — 옛 통합 클라우드처럼)
+ * → { env: 앱에 넘길 환경 변수, as(user): 누구로 켜는지, students(), student(id), edit(id, patch): 다른 곳에서 고친 것처럼, setAi(ai), setSubjects(list), stop() }
  */
-export function fakeCloud({ dir, academyDir, members, purgeDays = 30 }) {
+export function fakeCloud({ dir, academyDir, members, purgeDays = 30, subjects = null }) {
   const requestDir = join(dir, 'requests');
   const infoFile = join(dir, 'academy-info.json');
   mkdirSync(requestDir, { recursive: true });
@@ -24,7 +25,7 @@ export function fakeCloud({ dir, academyDir, members, purgeDays = 30 }) {
   function writeInfo() {
     const info = {
       format: 1,
-      academy: { id: 1, name: '테스트학원' },
+      academy: { id: 1, name: '테스트학원', ...(subjects ? { subjects } : {}) },
       me: { id: me.id, name: me.name, role: me.role },
       members: members.map((m) => ({ ...m, roleLabel: { director: '원장', teacher: '선생님' }[m.role] || m.role })),
       students: [...students.values()],
@@ -121,6 +122,11 @@ export function fakeCloud({ dir, academyDir, members, purgeDays = 30 }) {
     },
     setAi(next) {
       ai = next;
+      writeInfo();
+    },
+    /** 운영자가 학원의 계약 과목을 바꾼 것처럼 */
+    setSubjects(list) {
+      subjects = list;
       writeInfo();
     },
     stop() {

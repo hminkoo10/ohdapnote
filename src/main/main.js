@@ -24,6 +24,7 @@ const datasign = require('./datasign');
 const { isObj, line, model, int, url, codexPath, sanitizeData, relativePath, invalidJson, cleanJson: cleanValue } = require('./data-validate');
 const { sanitizeStudent } = cloud;
 const { mergeNote } = require('./notemerge');
+const subjects = require('./subjects');
 
 log.initialize();
 log.transports.file.level = 'info';
@@ -340,6 +341,12 @@ const reloadAcademyInfo = () => {
   return academyInfo();
 };
 
+/** 학원이 계약한 과목 (통합 클라우드의 academy.subjects, 없으면 수학만) */
+const contractSubjects = () => subjects.contractSubjects(academyInfo()?.academy?.subjects);
+/** 이 교재의 과목을 학원이 계약했는지 — 안 했으면 보기만 (고치기·분석·문제은행·내보내기 막음) */
+const subjectOpen = (book) => contractSubjects().includes(subjects.bookSubject(book));
+const SUBJECT_CLOSED = '학원이 계약하지 않은 과목의 교재라 보기만 할 수 있어요.';
+
 /** 학원 명단의 그 학생 (지운 학생 포함, 없으면 null) */
 const rosterStudent = (sid) => (academyInfo()?.students || []).find((s) => s.id === sid) || null;
 
@@ -563,8 +570,8 @@ function canEdit(obj) {
   return !academyMode() || isManager() || obj?.createdBy?.id === me.id;
 }
 
-/** 책을 고칠 수 있는지: 다른 선생님의 나만 보기 책(members/<그 사람>/)은 그 사람만 고침 — 원장도 보기만 */
-const canEditBook = (book, place) => canEdit(book) && place !== 'others';
+/** 책을 고칠 수 있는지: 다른 선생님의 나만 보기 책(members/<그 사람>/)은 그 사람만 고침 — 원장도 보기만. 계약에서 빠진 과목은 아무도 */
+const canEditBook = (book, place) => canEdit(book) && place !== 'others' && subjectOpen(book);
 
 /** 화면에 넘길 때만 붙이는 값($로 시작)은 저장하지 않음 */
 function stripMeta(obj) {
@@ -581,6 +588,8 @@ function summarizeBook(book, place = 'shared') {
     createdAt: book.createdAt,
     updatedAt: book.updatedAt,
     createdBy: book.createdBy || null,
+    subject: subjects.bookSubject(book),
+    subjectOpen: subjectOpen(book), // 학원이 이 과목을 계약했는지 (아니면 보기만)
     canEdit: canEditBook(book, place),
     shared: academyMode() && place === 'shared', // 학원 공유 (끄면 나만 보기 — 원장은 볼 수 있음)
     mine: !academyMode() || book.createdBy?.id === me.id, // 내 책장 (학원 공간에서)
@@ -962,6 +971,7 @@ function registerIpc() {
     manager: isManager(), // 원장: 남의 교재도 고치고, 선생님들의 학생을 정하지 않은 오답노트도 봄 (보기만)
     roster: academyMode() ? (academyInfo() ? 'cloud' : 'missing') : 'local', // 학생 명단: 통합 클라우드 | 통합 클라우드가 낮은 버전 | 이 계정만
     purgeDays: academyInfo()?.purgeDays || 30, // 지운 학생을 되살릴 수 있는 날 수
+    subjects: contractSubjects(), // 학원이 계약한 과목 (math · english · korean) — 교재 등록은 이 과목만
     settingsRejected: settingsRejectedAtStart, // 켤 때 앱 밖에서 고친 설정을 적용하지 않았음 (화면에 알림)
   }));
 
@@ -981,8 +991,9 @@ function registerIpc() {
     return list;
   });
 
-  // 새 책은 학원 공유가 기본 (shared: false 면 나만 보기)
-  handle('books:create', async (_e, { name, shared = true } = {}) => {
+  // 새 책은 학원 공유가 기본 (shared: false 면 나만 보기). 과목은 학원이 계약한 것만
+  handle('books:create', async (_e, { name, shared = true, subject = 'math' } = {}) => {
+    if (!contractSubjects().includes(subject)) throw new Error('학원이 계약하지 않은 과목이라 교재를 등록할 수 없어요.');
     const id = crypto.randomUUID();
     const now = Date.now();
     const book = {
@@ -990,6 +1001,7 @@ function registerIpc() {
       kind: 'book',
       version: 2,
       name: (name || '').trim() || '새 책',
+      subject,
       createdAt: now,
       updatedAt: now,
       createdBy: createdByMe(),
@@ -1005,13 +1017,14 @@ function registerIpc() {
     const { dir, place } = locateBook(id);
     const book = await readJson(path.join(dir, 'book.json'), null, sanitizeBook);
     if (!book) throw new Error('책을 찾을 수 없습니다.');
-    return { ...book, $canEdit: canEditBook(book, place), $shared: academyMode() && place === 'shared' };
+    return { ...book, $canEdit: canEditBook(book, place), $shared: academyMode() && place === 'shared', $subjectOpen: subjectOpen(book) };
   });
 
   /** 지금 저장된 책을 고칠 수 있는지 (만든 사람은 바뀌지 않음) → 저장된 책 */
   function checkBookWrite(id) {
     const { dir, place } = locateBook(id);
     const cur = readJsonSync(path.join(dir, 'book.json'), null, sanitizeBook);
+    if (cur && !subjectOpen(cur)) throw new Error(SUBJECT_CLOSED);
     if (cur && !canEditBook(cur, place)) throw new Error(place === 'others' ? '나만 보기 책은 만든 선생님만 고칠 수 있어요.' : '만든 사람과 원장만 고칠 수 있어요.');
     return cur;
   }
@@ -1022,6 +1035,7 @@ function registerIpc() {
   handle('books:save', async (_e, book) => {
     if (!book || !isValidId(book.id)) throw new Error('잘못된 책');
     const cur = checkBookWrite(book.id);
+    if (!subjectOpen(book)) throw new Error('학원이 계약하지 않은 과목으로는 바꿀 수 없어요.');
     writeJsonAtomicSync(bookFile(book.id), toSave(book, cur));
     return true;
   });
@@ -1057,6 +1071,7 @@ function registerIpc() {
   handle('books:copy', async (_e, id) => {
     const book = await readJson(bookFile(id), null, sanitizeBook);
     if (!book) throw new Error('책을 찾을 수 없습니다.');
+    if (!subjectOpen(book)) throw new Error('학원이 계약하지 않은 과목의 교재는 복사할 수 없어요.');
     const files = sourceFiles(book);
     const got = await fetchBookFiles(id, files);
     if (!got.ok) throw new Error('교재 파일을 받지 못해 복사할 수 없어요. 인터넷 연결을 확인해 주세요.');
@@ -1088,6 +1103,7 @@ function registerIpc() {
     const book = readJsonSync(path.join(from, 'book.json'), null, sanitizeBook);
     if (!book) throw new Error('책을 찾을 수 없습니다.');
     if (place === 'others' || book.createdBy?.id !== me.id) throw new Error('책을 만든 사람만 공유를 바꿀 수 있어요.');
+    if (!subjectOpen(book)) throw new Error(SUBJECT_CLOSED);
     const to = newBookDir(id, !!shared);
     if (path.resolve(to) === path.resolve(from)) return summarizeBook(book, place);
     // 받지 않은 원본은 옮길 수 없으니 먼저 모두 받음
@@ -1331,7 +1347,9 @@ function registerIpc() {
   handle('books:saveTranscripts', async (_e, { bookId, data } = {}) => {
     const { dir, place } = locateBook(bookId);
     if (!fs.existsSync(dir)) return false; // 그 사이 지워진 책
-    if (canEditBook(readJsonSync(path.join(dir, 'book.json'), null, sanitizeBook), place)) {
+    const cur = readJsonSync(path.join(dir, 'book.json'), null, sanitizeBook);
+    if (!subjectOpen(cur)) return false; // 계약에서 빠진 과목: 보기만
+    if (canEditBook(cur, place)) {
       await writeJsonAtomic(path.join(dir, 'transcripts.json'), data || {});
       return true;
     }
