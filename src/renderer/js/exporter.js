@@ -4,6 +4,7 @@
 
 import { PDFDocument, StandardFonts, rgb, pushGraphicsState, popGraphicsState } from '../vendor/pdf-lib.esm.min.js';
 import { createCanvas } from './docsource.js';
+import { stripHiddenText } from './pdfclip.js';
 
 const A4 = { w: 595.28, h: 841.89 };
 const MARGIN = { top: 46, bottom: 42, left: 38, right: 38 };
@@ -259,6 +260,13 @@ async function buildPdfInner({ blocks, sources = {}, options, title, info, onPro
     }
     if (!pages.length) continue;
     const embedded = await out.embedPages(pages, boxes);
+    for (const page of embedded) {
+      try {
+        await stripHiddenText(out, page);
+      } catch (err) {
+        console.warn('잘린 영역 밖 글자 정리 실패(원본 유지):', err?.message);
+      }
+    }
     usable.forEach((seg, i) => {
       seg.embedded = embedded[i];
     });
