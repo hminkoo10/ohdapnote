@@ -84,6 +84,53 @@ const assert = (ok, msg) => {
   if (!ok) throw new Error(msg);
 };
 const card = (name) => win.locator('.shelf-body .book-card', { hasText: name });
+/** 영어 시험지 모양의 디지털 PDF (지문 [1-3] + 문항 1~6, 보기 (1)~(5)) */
+async function englishPdf() {
+  const { PDFDocument, StandardFonts } = await import('pdf-lib');
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const pages = [
+    [
+      ['b', '[1~3] Read the passage and answer the questions.'],
+      ['t', 'Many people believe that learning a language is only about memorizing words.'],
+      ['t', 'However, researchers have found that listening to real conversations helps more.'],
+      ['t', 'Students who practice speaking every day remember new expressions longer.'],
+      ['', ''],
+      ['b', '1. What is the main idea of the passage?'],
+      ['t', '(1) Words are useless  (2) Practice helps  (3) Reading is hard  (4) Tests matter  (5) None'],
+      ['', ''],
+      ['b', "2. Which word best describes the researchers' finding?"],
+      ['t', '(1) surprising  (2) boring  (3) wrong  (4) old  (5) simple'],
+      ['', ''],
+      ['b', '3. According to the passage, what should students do?'],
+      ['t', '(1) sleep more  (2) speak every day  (3) write essays  (4) watch movies  (5) rest'],
+    ],
+    [
+      ['b', '4. Choose the word that best fits the blank.'],
+      ['t', 'She was so ______ that she could not stop smiling.'],
+      ['t', '(1) happy  (2) angry  (3) tired  (4) hungry  (5) sad'],
+      ['', ''],
+      ['b', '5. Which sentence is grammatically correct?'],
+      ['t', '(1) He go to school.  (2) He goes to school.  (3) He going school.'],
+      ['', ''],
+      ['b', '6. What is the best title for the following text?'],
+      ['t', 'The city opened a new library with thousands of books for children.'],
+      ['t', '(1) A New Library  (2) Old Books  (3) Lost Children  (4) City Hall  (5) Rain'],
+    ],
+  ];
+  for (const lines of pages) {
+    const page = pdf.addPage([595, 842]);
+    let y = 720;
+    for (const [kind, text] of lines) {
+      if (text) page.drawText(text, { x: 60, y, size: 11, font: kind === 'b' ? bold : font });
+      y -= kind ? 22 : 30;
+    }
+  }
+  const file = join(tmp, 'english-exam.pdf');
+  writeFileSync(file, await pdf.save());
+  return file;
+}
 const bookJson = (id) => JSON.parse(readFileSync(join(academy, 'books', id, 'book.json'), 'utf8'));
 
 try {
@@ -132,12 +179,20 @@ try {
   assert(english?.subject === 'english' && english.subjectOpen && english.canEdit, '영어 교재: ' + JSON.stringify(english));
   assert(bookJson(english.id).subject === 'english', 'book.json 에 subject 가 없습니다');
   assert((await win.inputValue('.topbar .subject-select')) === 'english', '책 화면의 과목이 영어가 아닙니다');
+
+  step('영어 교재도 올리고 분석하는 흐름은 수학과 같음');
+  await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: p }); }, [await englishPdf()]);
+  await win.click('.doc-card[data-role="problem"] .drop-zone');
+  await win.waitForSelector('.doc-card[data-role="problem"] .doc-foot .btn-primary', { timeout: 20000 });
+  await win.click('.doc-card[data-role="problem"] .doc-foot .btn-primary');
+  await win.waitForSelector('.doc-card[data-role="problem"] .sum-main', { timeout: 120000 });
+  const found = Number(await win.textContent('.doc-card[data-role="problem"] .sum-main b'));
+  console.log('    영어 문항:', found);
+  assert(found >= 5, `영어 교재에서 찾은 문항이 적습니다: ${found}`); // 인식 정확도는 detect 시험 몫 — 여기서는 흐름만
+  assert(bookJson(english.id).subject === 'english', '분석한 뒤 과목이 바뀌었습니다');
+  await shot('2b-english-analyzed');
   await win.click('#back-btn');
   await win.waitForSelector('.shelf-body .book-card', { timeout: 10000 });
-  // 영어 교재에 문항 하나 (분석한 것처럼) — 아래 오답노트에서 씀. 책 화면을 나간 뒤에 (나갈 때 화면의 책을 저장함)
-  const eb = await call('getBook', english.id);
-  copyFileSync(join(FIX, 'book-unit.pdf'), join(academy, 'books', english.id, 'problem-seed-000.pdf'));
-  await call('saveBook', { ...eb, docs: { problem: doc('problem-seed-000.pdf'), answer: null } });
 
   step('새 오답노트: 국어 교재는 고를 수 없음');
   await win.click('.seg-tab[data-tab="notes"]');
