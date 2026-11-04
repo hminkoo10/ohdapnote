@@ -3,6 +3,7 @@
 import { h, clear, toast, modal, confirmDialog, promptDialog, formatDate, icon, countUp, animateOut } from './ui.js';
 import { api, state, nav, dropSources, liveBook, stopJobs, errMsg } from './shared.js';
 import { topbar } from './chrome.js';
+import { SUBJECTS, subjectOf, subjectName, contractedSubjects } from './subjects.js';
 
 const SPINES = [
   'linear-gradient(180deg, #ffb27d, #f0743e)',
@@ -448,6 +449,8 @@ export async function showHome({ tab } = {}) {
   /** 책 카드들 (withNew: 맨 앞에 새 책 등록) */
   function bookCards(list, withNew) {
     const academy = state.appInfo.academy;
+    // 과목 표시: 학원이 여러 과목을 계약했거나 수학이 아닌 교재가 있을 때만 (수학만 쓰는 학원은 예전 그대로)
+    const showSubject = contractedSubjects(state.appInfo).length > 1 || books.some((b) => subjectOf(b) !== 'math' || b.subjectOpen === false);
     return h(
       'div.card-grid',
       withNew
@@ -461,7 +464,7 @@ export async function showHome({ tab } = {}) {
         : null,
       list.map((b, i) =>
         h(
-          'div.card.book-card',
+          `div.card.book-card${b.subjectOpen === false ? '.subject-closed' : ''}`,
           {
             tabIndex: 0,
             onclick: () => nav.book(b.id),
@@ -469,6 +472,13 @@ export async function showHome({ tab } = {}) {
             style: { '--i': Math.min(i + 1, 14), '--spine': spineFor(b.id) },
           },
           h('div.bc-title', b.name),
+          showSubject
+            ? h(
+                'div.bc-subject',
+                h('span.subject-badge', { dataset: { subject: subjectOf(b) } }, subjectName(subjectOf(b))),
+                b.subjectOpen === false ? h('span.subject-closed-note', { title: '학원이 이 과목을 계약하지 않아서 보기만 할 수 있어요' }, icon('eye'), '계약 없음 · 보기만') : null,
+              )
+            : null,
           // 내 책: 학원 공유인지 / 다른 선생님 책: 누가 만들었는지
           academy && b.mine
             ? h(`div.share-badge${b.shared ? '' : '.private'}`, icon(b.shared ? 'school' : 'user'), b.shared ? '학원 공유' : state.appInfo.manager ? '나만 보기' : '나만 보기 (원장 볼 수 있음)')
@@ -488,8 +498,10 @@ export async function showHome({ tab } = {}) {
             !b.problemAnalyzed && b.problemFile ? h('span.stat.muted', '분석 전') : null,
           ),
           h('div.bc-date', formatDate(b.updatedAt)),
-          // 고칠 수 없는 책(다른 선생님이 만든 책)은 이름 바꾸기·삭제 대신 내 책으로 복사
-          b.canEdit
+          // 고칠 수 없는 책(다른 선생님이 만든 책)은 이름 바꾸기·삭제 대신 내 책으로 복사. 계약 빠진 과목은 둘 다 없음
+          b.subjectOpen === false
+            ? null
+            : b.canEdit
             ? h(
                 'div.card-actions',
                 h('button.btn.btn-ghost.btn-icon', { title: '이름 바꾸기', onclick: (e) => { e.stopPropagation(); renameBook(b); } }, icon('edit')),
@@ -518,10 +530,57 @@ export function placeSegThumb(tabs, from) {
 }
 
 // ---------------------------------------------------------------------------
+/** 새 책: 이름 + 과목 (학원이 계약한 과목만 고를 수 있음) */
 async function createBook() {
-  const name = await promptDialog('책 이름을 적어 주세요. (예: 쎈 수학Ⅰ, 수능특강 미적분)', { title: '새 책 등록', placeholder: '책 이름', ok: '등록' });
-  if (name == null) return;
-  const book = await api.createBook(name);
+  const allowed = contractedSubjects(state.appInfo);
+  if (!allowed.length) {
+    await modal({
+      title: '새 책 등록',
+      body: h('p.modal-text', '학원이 계약한 과목이 없어서 교재를 등록할 수 없어요.\n원장님께 마고에듀 계약 과목을 확인해 달라고 해 주세요.'),
+      buttons: [{ label: '확인', value: null, primary: true }],
+    });
+    return;
+  }
+  const input = h('input.input', { placeholder: '책 이름 (예: 쎈 수학Ⅰ, 수능특강 영어)' });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') input.closest('.modal').querySelector('.btn-primary').click();
+  });
+  let subject = allowed[0];
+  const closed = SUBJECTS.filter((s) => !allowed.includes(s.code)).map((s) => s.name);
+  // 과목이 하나뿐이면 고를 것 없이 보여만 줌
+  const pick =
+    allowed.length === 1
+      ? h('div.subject-pick.one', h('span.subject-badge', { dataset: { subject } }, subjectName(subject)))
+      : h(
+          'div.subject-pick',
+          allowed.map((code) =>
+            h(
+              'label.subject-opt',
+              h('input', { type: 'radio', name: 'new-book-subject', value: code, checked: code === subject, onchange: () => (subject = code) }),
+              h('span.subject-badge', { dataset: { subject: code } }, subjectName(code)),
+            ),
+          ),
+        );
+  const r = await modal({
+    title: '새 책 등록',
+    body: h(
+      'div.form',
+      h('label.field-v', h('span', '책 이름'), input),
+      h('div.field-v', h('span', '과목'), pick, closed.length ? h('p.small.muted', `${closed.join('·')}은(는) 학원 계약에 없어서 고를 수 없어요.`) : null),
+    ),
+    buttons: [
+      { label: '취소', value: null },
+      { label: '등록', primary: true, onClick: () => ({ name: input.value, subject }) },
+    ],
+  });
+  if (!r) return;
+  let book;
+  try {
+    book = await api.createBook(r.name, undefined, r.subject);
+  } catch (err) {
+    toast(`책을 등록하지 못했어요: ${errMsg(err)}`, { type: 'error', timeout: 8000 });
+    return;
+  }
   await nav.book(book.id);
 }
 
@@ -562,7 +621,17 @@ async function copyBook(b, btn) {
 }
 
 /** 새 오답노트: 제목·학생 이름·책 고르기 (student: 학생 화면에서 열면 그 학생을 골라 둠) */
-export async function createNote(books, { student: preset = null } = {}) {
+export async function createNote(allBooks, { student: preset = null } = {}) {
+  // 학원이 계약하지 않은 과목의 교재는 새 오답노트에 쓸 수 없음 (보기만)
+  const books = allBooks.filter((b) => b.subjectOpen !== false);
+  if (!books.length && allBooks.length) {
+    await modal({
+      title: '쓸 수 있는 교재가 없어요',
+      body: h('p.modal-text', '책장에 있는 교재가 모두 학원 계약에 없는 과목이라 오답노트에 쓸 수 없어요.\n계약한 과목의 교재를 등록해 주세요.'),
+      buttons: [{ label: '확인', value: null, primary: true }],
+    });
+    return;
+  }
   if (!books.length) {
     const go = await confirmDialog('오답노트는 책장에 등록한 책에서 문제를 골라 만들어요.\n먼저 책을 등록할까요?', { title: '책이 없어요', ok: '책 등록하기' });
     if (go) {
@@ -575,6 +644,7 @@ export async function createNote(books, { student: preset = null } = {}) {
   const titleInput = h('input.input', { placeholder: '예: 1학기 중간고사 대비 오답', value: '' });
   const student = studentSearch((await api.listStudents().catch(() => [])).filter((st) => !st.deletedAt), { picked: preset });
   const picked = new Set(books.length === 1 ? [books[0].id] : []);
+  const manySubjects = new Set(books.map(subjectOf)).size > 1;
   const list = h(
     'div.book-pick',
     books.map((b) =>
@@ -592,7 +662,7 @@ export async function createNote(books, { student: preset = null } = {}) {
         }),
         h('span.bo-spine'),
         h('span.bo-name', b.name),
-        h('span.bo-meta', b.problemCount ? `${b.problemCount}문항` : '분석 전'),
+        h('span.bo-meta', [manySubjects ? subjectName(subjectOf(b)) : '', b.problemCount ? `${b.problemCount}문항` : '분석 전'].filter(Boolean).join(' · ')),
         h('span.bo-check', icon('check')),
       ),
     ),

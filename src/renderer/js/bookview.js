@@ -8,6 +8,7 @@ import { topbar } from './chrome.js';
 import { createEditor } from './editor.js';
 import { placeSegThumb } from './home.js';
 import { importBookFiles } from './photoimport.js';
+import { subjectOf, subjectName, contractedSubjects } from './subjects.js';
 
 /** 고칠 수 있는 책인지 — 학원 공간에서 남이 만든 책은 절대 저장하지 않음 (통합 클라우드가 되돌리고 충돌 사본을 남김) */
 const canSave = (b) => !!b && b.$canEdit !== false;
@@ -151,8 +152,11 @@ export async function openBook(id, { tab, role, page, itemId } = {}) {
   }
 }
 
-/** 보기만 하는 책: 누가 만들었는지 + 내 책으로 복사 */
+/** 보기만 하는 책: 누가 만들었는지 + 내 책으로 복사 (계약에서 빠진 과목은 그 이유만) */
 function readonlyBanner(b) {
+  if (b.$subjectOpen === false) {
+    return h('div.readonly-banner.subject-closed', icon('eye'), h('span', `${subjectName(subjectOf(b))}은(는) 학원이 계약하지 않은 과목이라 이 교재는 보기만 할 수 있어요. 계약을 바꾸려면 원장님께 말씀해 주세요.`));
+  }
   return h(
     'div.readonly-banner',
     icon('eye'),
@@ -227,7 +231,7 @@ export function bookDataChanged(change) {
 
 async function reloadBook(change) {
   const b = bs.book;
-  if (!b || state.view !== 'book' || !change?.books?.includes(b.id) || !canReload(b)) return;
+  if (!b || state.view !== 'book' || !(change?.books?.includes(b.id) || change?.books?.includes('*')) || !canReload(b)) return;
   let fresh;
   try {
     fresh = await api.getBook(b.id);
@@ -240,7 +244,7 @@ async function reloadBook(change) {
     return;
   }
   // 저장된 내용이 그대로면(원본 파일만 받았거나 옮긴 결과만 바뀜) 다시 그리지 않음
-  if (fresh.updatedAt === b.updatedAt && fresh.$canEdit === b.$canEdit && fresh.$shared === b.$shared) return;
+  if (fresh.updatedAt === b.updatedAt && fresh.$canEdit === b.$canEdit && fresh.$shared === b.$shared && fresh.$subjectOpen === b.$subjectOpen) return;
   fresh.docs ||= { problem: null, answer: null };
   fresh.answerOverrides ||= {};
   const sources = await getSources(fresh);
@@ -271,6 +275,23 @@ function render({ enter = false, tabAnim = null, thumbFrom = null } = {}) {
           markDirty();
         },
   });
+  // 과목: 고칠 수 있는 책은 학원이 계약한 과목 안에서 바꿀 수 있음 (계약 과목이 하나뿐이고 이미 그 과목이면 표시만)
+  const subject = subjectOf(b);
+  const allowed = contractedSubjects(state.appInfo);
+  const subjectEl =
+    ro || (allowed.length === 1 && allowed[0] === subject)
+      ? h('span.subject-badge', { dataset: { subject } }, subjectName(subject))
+      : h(
+          'select.input.input-small.subject-select',
+          {
+            title: '이 교재의 과목',
+            onchange: (e) => {
+              b.subject = e.target.value;
+              markDirty();
+            },
+          },
+          [...new Set([subject, ...allowed])].map((code) => h('option', { value: code, selected: code === subject }, subjectName(code))),
+        );
   // 학원 공간에서는 누가 만든 책인지 (내 책도)
   const creator = state.appInfo?.academy && b.createdBy ? h('span.creator', `생성자: ${b.createdBy.name || '알 수 없음'}`) : null;
   // 학원 공간의 내 책: 학원 공유 켜고 끄기 (끄면 나만 보기 — 원장은 볼 수 있음)
@@ -289,7 +310,7 @@ function render({ enter = false, tabAnim = null, thumbFrom = null } = {}) {
   // 보기만 하는 책은 페이지 검토(고치는 화면) 없이 인식 결과만
   const tabs = h('nav.seg-tabs', h('span.seg-thumb'), tab('result', 'list', '인식 결과', flaggedN ? h('span.seg-count.warn', String(flaggedN)) : null), ro ? null : tab('review', 'scan', '페이지 검토·수정'));
   root.append(
-    topbar(h('div.topbar-crumb', h('button.btn.btn-ghost.btn-round#back-btn', { onclick: () => nav.home({ tab: 'books' }), title: '책장으로' }, icon('back')), h('span.crumb-kind', icon('library'), '책장'), h('span.crumb-sep', '/'), nameInput, creator, share, ro ? null : h('span.save-status', ''))),
+    topbar(h('div.topbar-crumb', h('button.btn.btn-ghost.btn-round#back-btn', { onclick: () => nav.home({ tab: 'books' }), title: '책장으로' }, icon('back')), h('span.crumb-kind', icon('library'), '책장'), h('span.crumb-sep', '/'), nameInput, subjectEl, creator, share, ro ? null : h('span.save-status', ''))),
     h(
       `main.sheet${enter ? '.view-enter' : ''}`,
       ro ? readonlyBanner(b) : null,

@@ -3778,3 +3778,97 @@ main.sheet {
 .restore-btn {
   flex: 0 0 auto;
 }
+
+/* ==========================================================================
+   과목 (수학 · 영어 · 국어) — 새 책 등록, 책 카드, 책 화면, 오답노트의 계약 빠진 교재
+   ========================================================================== */
+.subject-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.subject-badge[data-subject='english'] {
+  background: #eaf0ff;
+  color: #3d55c4;
+}
+.subject-badge[data-subject='korean'] {
+  background: var(--teal-soft);
+  color: var(--teal-ink);
+}
+.subject-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.subject-opt {
+  cursor: pointer;
+}
+.subject-opt input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.subject-opt .subject-badge {
+  height: 38px;
+  padding: 0 18px;
+  font-size: 14px;
+  border: 2px solid transparent;
+  opacity: 0.55;
+  transition: opacity var(--fast, 0.15s), border-color var(--fast, 0.15s);
+}
+.subject-opt input:checked + .subject-badge {
+  opacity: 1;
+  border-color: currentColor;
+}
+.subject-opt input:focus-visible + .subject-badge {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.subject-pick.one .subject-badge {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13.5px;
+}
+.bc-subject {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: -6px;
+}
+.subject-closed-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 650;
+}
+.subject-closed-note .icon {
+  width: 13px;
+  height: 13px;
+}
+.book-card.subject-closed {
+  opacity: 0.62;
+}
+.book-card.subject-closed:hover {
+  opacity: 0.85;
+}
+.book-tab.subject-closed .bt-name {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-4);
+}
+.subject-select {
+  width: auto;
+  flex: 0 0 auto;
+}
+.topbar-crumb > .subject-badge {
+  flex: 0 0 auto;
+}

@@ -11,6 +11,7 @@ import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, rend
 import { topbar } from './chrome.js';
 import { spineFor, studentSearch } from './home.js';
 import { examTeacher } from './exam-teacher.js';
+import { subjectOf, subjectName } from './subjects.js';
 
 // 바뀐 횟수 / 저장할 때의 횟수 — 실시간으로 다시 읽을 때 고치는 중인지 보려고 (makeSaver 는 알려 주지 않음)
 let dirtySeq = 0;
@@ -66,6 +67,9 @@ function prepareNote(note) {
   return note;
 }
 
+/** 학원이 계약하지 않은 과목의 교재: 이 오답노트에서도 보기만 (문항 고르기·내보내기 없음, 고른 것은 그대로 둠) */
+const subjectClosed = (b) => b?.$subjectOpen === false;
+
 /** 처음 보여 줄 책: 읽은 책 먼저 */
 const firstBook = (n) => n.bookIds.find((bid) => ns.books.has(bid)) || n.bookIds[0] || null;
 
@@ -92,7 +96,7 @@ async function loadBooks(ids) {
       matches.delete(bid);
       continue;
     }
-    if (old && old.updatedAt === b.updatedAt && old.$canEdit === b.$canEdit) continue;
+    if (old && old.updatedAt === b.updatedAt && old.$canEdit === b.$canEdit && old.$subjectOpen === b.$subjectOpen) continue;
     books.set(bid, b);
     matches.set(bid, m);
     sources.delete(bid); // 파일을 바꿨을 수 있음 → 볼 때 다시 엶 (같은 파일이면 열어 둔 것을 씀)
@@ -272,8 +276,8 @@ function bookBar() {
     const cnt = b ? noteSelection(n, bid).length : 0;
     bar.append(
       h(
-        `button.book-tab${ns.active === bid ? '.active' : ''}`,
-        { style: { '--spine': spineFor(bid), '--i': i }, onclick: () => switchBook(bid), dataset: { book: bid }, title: b ? null : '지워졌거나 다른 선생님의 나만 보기 교재예요' },
+        `button.book-tab${ns.active === bid ? '.active' : ''}${subjectClosed(b) ? '.subject-closed' : ''}`,
+        { style: { '--spine': spineFor(bid), '--i': i }, onclick: () => switchBook(bid), dataset: { book: bid }, title: !b ? '지워졌거나 다른 선생님의 나만 보기 교재예요' : subjectClosed(b) ? '학원 계약에 없는 과목이라 보기만 해요' : null },
         h('span.bt-spine'),
         h('span.bt-name', b ? b.name : '볼 수 없는 교재'),
         h('span.bt-count', cnt ? String(cnt) : ''),
@@ -302,7 +306,7 @@ async function switchBook(bid) {
 async function addBook() {
   const all = await api.listBooks();
   const n = ns.note;
-  const rest = all.filter((b) => !n.bookIds.includes(b.id));
+  const rest = all.filter((b) => !n.bookIds.includes(b.id) && b.subjectOpen !== false); // 계약 빠진 과목의 교재는 새로 넣지 않음
   if (!rest.length) {
     const go = await confirmDialog(all.length ? '책장에 있는 책을 모두 쓰고 있어요. 새 책을 등록할까요?' : '책장에 등록한 책이 없어요. 새 책을 등록할까요?', { ok: '책장으로' });
     if (go) nav.home({ tab: 'books' });
@@ -362,7 +366,11 @@ function noteBody() {
   view.append(left, right);
   const b = ns.books.get(ns.active);
   const doc = b?.docs?.problem;
-  const ro = ns.readonly; // 보기만: 문항 고르기·빼기 없음 (누르면 미리보기만)
+  const closed = subjectClosed(b);
+  const ro = ns.readonly || closed; // 보기만: 문항 고르기·빼기 없음 (누르면 미리보기만)
+  if (closed) {
+    left.append(h('div.readonly-banner.subject-closed', icon('eye'), h('span', `${subjectName(subjectOf(b))}은(는) 학원이 계약하지 않은 과목이라 이 교재에서는 문항을 고르거나 내보낼 수 없어요. 고른 문항은 그대로 남아 있어요.`)));
+  }
   if (!b) {
     if (ns.active) {
       // 읽지 못한 책: 지워졌거나 다른 선생님의 나만 보기 교재 (학생 오답노트는 학원 사람 누구나 열어서)
@@ -553,7 +561,7 @@ function renderPreviewBox() {
     matches: ns.matches.get(b.id),
     selected,
     onShow: (role, page, id) => nav.book(b.id, { tab: 'review', role, page, itemId: id }),
-    onToggleSelect: ns.readonly ? null : (it) => {
+    onToggleSelect: ns.readonly || subjectClosed(b) ? null : (it) => {
       const set = new Set(noteSelection(n, b.id));
       if (set.has(it.id)) set.delete(it.id);
       else set.add(it.id);
@@ -830,13 +838,13 @@ function renderExamMock() {
   );
 }
 
-/** 모든 책에서 고른 문항(노트의 책 순서 → 책 안에서 읽는 순서) */
+/** 모든 책에서 고른 문항(노트의 책 순서 → 책 안에서 읽는 순서). 계약 빠진 과목의 교재는 내보내지 않음 */
 function allEntries() {
   const n = ns.note;
   const out = [];
   for (const bid of n.bookIds) {
     const b = ns.books.get(bid);
-    if (!b) continue;
+    if (!b || subjectClosed(b)) continue;
     const m = ns.matches.get(bid);
     for (const it of selectedItems(b, noteSelection(n, bid))) {
       const aid = m?.get(it.id);
@@ -861,6 +869,9 @@ function renderExportSummary() {
       num.textContent = String(entries.length);
     }
   }
+  const n = ns.note;
+  const closedCount = n.bookIds.filter((bid) => subjectClosed(ns.books.get(bid))).reduce((sum, bid) => sum + noteSelection(n, bid).length, 0);
+  if (closedCount) el.append(h('p.warn-text.small', icon('warn'), `학원 계약에 없는 과목 교재에서 고른 ${closedCount}문항은 빼고 내보내요`));
   if (!entries.length) {
     el.append(h('p.empty-hint', '왼쪽 표에서 틀린 번호를 골라 주세요.'));
     return;

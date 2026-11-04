@@ -1504,9 +1504,11 @@ function watchData() {
     }
   }
   // 학원 명단·학원 AI: 학생이 지워지거나 되살아나면 그 학생 오답노트를 고칠 수 있는지도 바뀜 → 오답노트도 '*'
+  // 계약 과목이 바뀌면 교재를 고칠 수 있는지도 바뀜 → 책도 '*'
   const stop = cloud.watchAcademyInfo(session, (info) => {
+    const before = contractSubjects().join();
     academyInfoCache = info;
-    send('data:changed', { books: [], notes: ['*'], students: true, settings: true });
+    send('data:changed', { books: contractSubjects().join() === before ? [] : ['*'], notes: ['*'], students: true, settings: true });
   });
   watchers.push({ close: stop });
 }
