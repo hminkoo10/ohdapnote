@@ -214,7 +214,7 @@ export function aiSettingsCard(s) {
         sourceNote,
       )
     : null;
-  const cloudBtn = () => (state.appInfo?.manager ? h('button.link', { onclick: () => api.openCloud() }, '통합 클라우드에서 바꾸기') : null);
+  const cloudBtn = () => (state.appInfo?.manager ? h('button.link', { onclick: () => api.openCloud() }, '통합 클라우드에서 바꾸기') : '');
   const renderSource = () => {
     if (!academy) return;
     clear(sourceNote);
