@@ -1,9 +1,10 @@
 name: CI
 
+# main 과 PR 에서만 (같은 커밋을 브랜치 push 와 PR 로 두 번 돌리지 않게).
+# 통합 클라우드용 묶음(zip) 빌드는 main 에서 Release (Windows) 워크플로가 함.
 on:
   push:
-    branches: ['**']
-    tags-ignore: ['v*']
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -21,38 +22,3 @@ jobs:
         env:
           ONNXRUNTIME_NODE_INSTALL: skip
       - run: npm test
-
-  # 통합 클라우드용 묶음(zip)이 잘 만들어지는지 확인하고, 시험용 묶음을 Artifacts 로 올립니다(릴리스는 하지 않음).
-  # main 은 Release 워크플로가 빌드·배포하므로 여기서는 건너뜀
-  build-windows:
-    runs-on: windows-latest
-    needs: test
-    if: github.ref != 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      # 수식 인식 모델(약 120MB)은 저장소에 없어서 빌드 전에 받아 설치 파일에 넣음 (받은 파일은 캐시에 둠)
-      - uses: actions/cache@v4
-        with:
-          path: build/models
-          key: mathocr-model-${{ hashFiles('src/main/mathocr.js') }}
-          restore-keys: mathocr-model-
-      - run: node scripts/fetch-model.mjs
-      - name: 빌드 + zip 묶기
-        shell: bash
-        run: |
-          npx electron-builder --win dir --x64 --publish never
-          test -f dist/win-unpacked/resources/models/pix2text-mfr-1.5/encoder_model.onnx || { echo "::error::묶음에 수식 인식 모델이 없습니다"; exit 1; }
-          node scripts/write-manifest.mjs
-          v="$(node -p "require('./package.json').version")"
-          (cd dist/win-unpacked && 7z a -tzip -mx=5 "../OhdapNote-$v-win-x64.zip" . > /dev/null)
-          ls -l dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: OhdapNote-zip
-          path: dist/*.zip
-          retention-days: 14
