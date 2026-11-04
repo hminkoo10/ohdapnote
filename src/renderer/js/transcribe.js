@@ -5,6 +5,7 @@ import { geminiTranscribeBatch, canvasToBase64Jpeg } from './gemini.js';
 import { scanTranscribe } from './scanocr.js';
 import { transcribeParts } from './pdfmath.js';
 import { transcriptKey, pickTranscript, trimTranscripts } from './transcript-store.js';
+import { subjectOf } from './subjects.js';
 import { api, state, nav, geminiReady, aiOff, aiOptions, aiLabel, aiModelText, jobDialog, holdSource, restartSaveHooks, restartPendingChecks } from './shared.js';
 
 export { transcriptKey } from './transcript-store.js';
@@ -124,7 +125,11 @@ export async function pdfTranscribe(segs, { plain = false } = {}) {
  */
 export async function exportHwpx(blocks, entries, opts, info, job) {
   const bookOf = new Map(); // 원본(DocSource) → 책 id
-  for (const e of entries) for (const src of [e.src?.problem, e.src?.answer]) if (src) bookOf.set(src, e.bookId);
+  const plainSources = new Set();
+  for (const e of entries) for (const src of [e.src?.problem, e.src?.answer]) if (src) {
+    bookOf.set(src, e.bookId);
+    if (opts.plainPdf && subjectOf(e.bookObj) !== 'math') plainSources.add(src);
+  }
   // buildHwpx 가 글자로 옮기려는 문항 (그릴 영역이 있는 문제·해설)
   const work = blocks.filter((b) => (b.kind === 'problem' || b.kind === 'answer') && b.item && bookOf.has(b.src) && blockSegs(b).length);
   for (const bid of new Set(work.map((b) => bookOf.get(b.src)))) await loadTranscripts(bid);
@@ -132,7 +137,7 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
   const fromPdf = new Map(); // 문항 → PDF 글자로 옮긴 결과
   for (const b of work) {
     if (edited(b)?.blocks?.length) continue;
-    const list = await pdfTranscribe(blockSegs(b), { plain: !!opts.plainPdf });
+    const list = await pdfTranscribe(blockSegs(b), { plain: plainSources.has(b.src) });
     if (list?.length) {
       fromPdf.set(b, list);
       const store = transcripts.get(bookOf.get(b.src));
@@ -157,15 +162,13 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
   const storeOf = (block) => transcripts.get(bookOf.get(block.src));
   const aiKey = (b) => transcriptKey(b);
   const ocrKey = (b) => `${transcriptKey(b)}|local`;
-  // 저장된 결과를 읽는 데에는 AI 설정·수식 모델이 필요하지 않음
-  const aiResult = (b) => storeOf(b)?.items[aiKey(b)];
-  const ocrResult = (b) => storeOf(b)?.items[ocrKey(b)];
-  const pdfResult = (b) => storeOf(b)?.items[`${aiKey(b)}|pdf`];
+  const aiResult = (b) => (useAi ? storeOf(b)?.items[aiKey(b)] : null);
+  const ocrResult = (b) => (useOcr ? storeOf(b)?.items[ocrKey(b)] : null);
   const has = (r) => !!r?.blocks?.length;
   /** 쓸 결과: AI 결과가 있으면 그것, 없으면 OCR 결과 */
-  const resultOf = (b) => (has(aiResult(b)) ? aiResult(b) : has(ocrResult(b)) ? ocrResult(b) : has(pdfResult(b)) ? pdfResult(b) : null);
+  const resultOf = (b) => (has(aiResult(b)) ? aiResult(b) : has(ocrResult(b)) ? ocrResult(b) : null);
   /** AI 에게 보낼 문항인지 ('섞어서'는 OCR 결과가 없거나 미덥지 않을 때만) */
-  const needsAi = (b) => useAi && !has(aiResult(b)) && !has(pdfResult(b)) && !(has(ocrResult(b)) && ocrResult(b).reliable);
+  const needsAi = (b) => useAi && !has(aiResult(b)) && !(has(ocrResult(b)) && ocrResult(b).reliable);
   const missing = scanned.filter((b) => !resultOf(b)).length;
   if (missing && !useAi && !useOcr) noConvertToast(mode, missing);
   let quota = false; // 한도가 차면 나머지는 묻지 않음 (OCR 결과가 있으면 그것, 없으면 그림)
@@ -295,14 +298,13 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
     };
     if (edited(block)?.blocks?.length) return finish(edited(block).blocks);
     if (fromPdf.has(block)) return finish(fromPdf.get(block));
-    const r = storeOf(block) ? resultOf(block) : null;
+    const r = (useAi || useOcr) && storeOf(block) ? resultOf(block) : null;
     return r ? finish(r.blocks) : null;
   };
 
   try {
     if (useAi || useOcr) {
-      for (const bid of new Set(scanned.map((b) => bookOf.get(b.src)))) await loadTranscripts(bid);
-      const pendingOcr = useOcr ? scanned.filter((b) => !resultOf(b)) : [];
+      const pendingOcr = useOcr ? scanned.filter((b) => !has(aiResult(b)) && !has(ocrResult(b))) : [];
       const pendingAi = scanned.filter((b) => !pendingOcr.includes(b) && needsAi(b));
       if (pendingOcr.length || pendingAi.length) {
         ui = transcribeDialog(work, { ocr: pendingOcr.length, ai: pendingAi.length, useAi, useOcr }, abort, {
@@ -316,7 +318,7 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
           else if (fromPdf.has(b)) settle(b, 'ok', 'PDF 글자로 옮김', 'PDF');
           else if (!pendingOcr.includes(b) && !pendingAi.includes(b)) {
             const r = resultOf(b);
-            if (r) settle(b, 'ok', '저장해 둔 결과', r === aiResult(b) ? 'AI' : r === ocrResult(b) ? 'OCR' : 'PDF');
+            if (r) settle(b, 'ok', '저장해 둔 결과', r === aiResult(b) ? 'AI' : 'OCR');
             else settle(b, 'empty', '그림으로', '');
           }
         }

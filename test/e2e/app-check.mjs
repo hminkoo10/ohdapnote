@@ -73,10 +73,10 @@ try {
   step('설정: Gemini 키 + 1순위 model-a / 2순위 model-b');
   await win.click('#settings-btn');
   await win.waitForSelector('.modal .settings');
-  const cards = win.locator('.settings .set-card');
-  await cards.nth(1).locator('input').nth(0).fill('test-key');
-  await cards.nth(1).locator('input').nth(1).fill('model-a');
-  await cards.nth(1).locator('input').nth(2).fill('model-b');
+  const panel = win.locator('.settings .ai-panel:not([hidden])');
+  await panel.locator('input[type="password"]').fill('test-key');
+  await panel.locator('input[list="ai-models-gemini"]').nth(0).fill('model-a');
+  await panel.locator('input[list="ai-models-gemini"]').nth(1).fill('model-b');
   await win.click('.modal-footer .btn-primary');
   await win.waitForTimeout(300);
 

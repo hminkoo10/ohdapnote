@@ -16,6 +16,7 @@ export function blocksToText(blocks) {
 }
 
 export function stemKey(item) {
+  if (item.stemId) return 'id:' + item.stemId;
   return item.stem?.length ? JSON.stringify(item.stem.map((r) => [r.page, r.x, r.y, r.w, r.h])) : '';
 }
 
@@ -44,6 +45,7 @@ const matchesRange = (value, query) => {
   if (!q) return true;
   const range = /^(\d+)\s*[-~]\s*(\d+)$/.exec(q);
   if (range) return +value >= +range[1] && +value <= +range[2];
+  if (/^\d+$/.test(String(value)) && /^\d+$/.test(q)) return +value === +q;
   return String(value) === q;
 };
 

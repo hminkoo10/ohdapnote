@@ -7,7 +7,7 @@ import { blockSegs, renderStack } from './hwpx.js';
 import { scanTranscribe } from './scanocr.js';
 import { geminiTranscribeBatch, canvasToBase64Jpeg } from './gemini.js';
 import { loadTranscripts, saveTranscripts, bestTranscript, transcriptKey, pdfTranscribe, TRANSCRIBE_WIDTH } from './transcribe.js';
-import { subjectOpen } from './subjects.js';
+import { subjectOf, subjectOpen } from './subjects.js';
 
 export async function putBank(book, { item = null, onChange = () => {} } = {}) {
   const old = findJob(`bank:${book.id}`);
@@ -78,7 +78,7 @@ async function runBank(book, { item, useAi, onChange }) {
       if (!bestTranscript(book.id, b)) {
         try {
           const segs = blockSegs(b);
-          const pdf = await pdfTranscribe(segs, { plain: true });
+          const pdf = await pdfTranscribe(segs, { plain: subjectOf(book) !== 'math' });
           check();
           if (pdf?.length) put(b, '|pdf', { blocks: pdf, model: 'pdf' });
           else {
@@ -86,7 +86,7 @@ async function runBank(book, { item, useAi, onChange }) {
             if (!model && !warned) {
               warned = true;
               const next = await modal({ title: '수식 인식 모델이 필요해요',
-                body: h('p', '스캔본은 설정에서 수식 인식 모델을 먼저 받아 주세요. 이미 옮긴 글은 남아요. 디지털 PDF는 모델 없이도 옮길 수 있어요.'),
+                body: h('p', '스캔본이나 일반 글꼴 수학 PDF는 설정에서 수식 인식 모델을 먼저 받아 주세요. 이미 옮긴 글은 남아요. 글자를 안전하게 읽을 수 있는 PDF는 모델 없이도 옮길 수 있어요.'),
                 buttons: [{ label: '설정 열기', value: 'settings' }, { label: useAi ? 'PDF·AI로 계속' : 'PDF만 계속', value: 'continue', primary: true }] });
               if (next !== 'continue') {
                 if (next === 'settings') nav.settings();

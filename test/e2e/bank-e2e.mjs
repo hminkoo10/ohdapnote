@@ -7,6 +7,7 @@ import { join, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
+import { inflateRawSync } from 'node:zlib';
 
 const require = createRequire(import.meta.url);
 const { PDFDocument, StandardFonts } = require('pdf-lib');
@@ -18,12 +19,12 @@ const academy = join(tmp, 'academy');
 const userData = join(tmp, 'local');
 const dataDir = join(tmp, 'data');
 mkdirSync(userData, { recursive: true });
-const ids = { math: 'aaaaaaaa-0000-4000-8000-000000000001', english: 'bbbbbbbb-0000-4000-8000-000000000001', korean: 'cccccccc-0000-4000-8000-000000000001' };
+const ids = { math: 'aaaaaaaa-0000-4000-8000-000000000001', english: 'bbbbbbbb-0000-4000-8000-000000000001', korean: 'cccccccc-0000-4000-8000-000000000001', scan: 'dddddddd-0000-4000-8000-000000000001' };
 const doc = (file, items = []) => ({ files: [{ name: file, originalName: file, kind: 'pdf' }], originalName: file, pageCount: 1, range: '', options: { flow: 'column', numberStyle: 'auto' }, pageOffset: 0, pageOffsetAuto: true, items, pageInfo: {}, analyzedAt: items.length ? Date.now() : null });
-const seed = (subject, name, creator = 'teacher-a') => {
-  const dir = join(academy, 'books', ids[subject]);
+const seed = (subject, name, creator = 'teacher-a', id = ids[subject]) => {
+  const dir = join(academy, 'books', id);
   mkdirSync(dir, { recursive: true });
-  const book = { id: ids[subject], kind: 'book', version: 2, name, subject, createdAt: Date.now(), updatedAt: Date.now(), createdBy: { id: creator, name: creator === 'teacher-a' ? '김선생' : '박선생' }, docs: { problem: null, answer: null }, answerOverrides: {} };
+  const book = { id, kind: 'book', version: 2, name, subject, createdAt: Date.now(), updatedAt: Date.now(), createdBy: { id: creator, name: creator === 'teacher-a' ? '김선생' : '박선생' }, docs: { problem: null, answer: null }, answerOverrides: {} };
   return { dir, book, save: () => writeFileSync(join(dir, 'book.json'), JSON.stringify(book)) };
 };
 const math = seed('math', '수학 연습 교재');
@@ -46,6 +47,10 @@ const korean = seed('korean', '국어 보기 전용 교재');
 writeFileSync(join(korean.dir, 'problem.pdf'), englishBytes);
 korean.book.docs.problem = doc('problem.pdf', [{ ...english.book.docs.problem.items[0], id: 'korean-1', stem: null }]);
 korean.save();
+const scan = seed('math', '스캔본 교재', 'teacher-a', ids.scan);
+copyFileSync(join(ROOT, 'test/fixtures/generated/book-unit-scan.pdf'), join(scan.dir, 'problem.pdf'));
+scan.book.docs.problem = doc('problem.pdf', [{ id: 'scan-1', page: 0, number: '1', num: 1, rects: [{ page: 0, x: 0, y: 0, w: 1, h: 1 }] }]);
+scan.save();
 const cloud = fakeCloud({ dir: join(tmp, 'cloud'), academyDir: academy, subjects: ['math', 'english'], members: [{ id: 'teacher-a', name: '김선생', role: 'teacher' }, { id: 'teacher-b', name: '박선생', role: 'teacher' }] });
 let app;
 let win;
@@ -62,6 +67,42 @@ const closeFinished = async () => {
   await win.waitForSelector('.modal-overlay', { state: 'detached' });
 };
 const clearToasts = () => win.$$eval('.toast', (els) => els.forEach((el) => el.remove()));
+const hwpxSection = (bytes) => {
+  const buf = Buffer.from(bytes);
+  const end = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  let p = buf.readUInt32LE(end + 16);
+  for (let k = 0; k < buf.readUInt16LE(end + 10); k++) {
+    const len = buf.readUInt16LE(p + 28);
+    const at = buf.readUInt32LE(p + 42);
+    if (buf.toString('utf8', p + 46, p + 46 + len) === 'Contents/section0.xml') {
+      const start = at + 30 + buf.readUInt16LE(at + 26) + buf.readUInt16LE(at + 28);
+      const data = buf.subarray(start, start + buf.readUInt32LE(p + 20));
+      return (buf.readUInt16LE(p + 10) === 8 ? inflateRawSync(data) : data).toString('utf8');
+    }
+    p += 46 + len + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  throw new Error('HWPX 본문 없음');
+};
+const expectMissingModel = async (id) => {
+  assert.equal((await call('mathocrStatus')).installed, false, '모델 없는 환경');
+  await win.click(`.bank-book[data-book="${id}"] button`);
+  await win.waitForSelector('.modal .bank-ai');
+  assert.equal(await win.isChecked('.bank-ai input'), false);
+  await win.click('.modal .btn-primary:has-text("넣기 시작")');
+  const warning = win.locator('.modal', { has: win.locator('h3', { hasText: '수식 인식 모델이 필요해요' }) });
+  await warning.waitFor({ timeout: 30000 });
+  assert.match(await warning.innerText(), /설정.*모델/);
+  await warning.getByRole('button', { name: '설정 열기', exact: true }).click();
+  await win.waitForSelector('.settings-modal');
+  await win.waitForFunction(async (bookId) => !(await import('./js/shared.js')).findJob(`bank:${bookId}`), id);
+  const saved = await call('getTranscripts', id);
+  assert.equal(Object.keys(saved?.items || {}).length, 0, '변환·저장하지 않고 멈춤');
+  await win.locator('.settings-modal').getByRole('button', { name: '취소', exact: true }).click();
+  await win.waitForSelector('.settings-modal', { state: 'detached' });
+  await closeFinished();
+  assert.equal(await win.locator(`.bank-book[data-book="${id}"] .bank-complete`).count(), 0);
+  await clearToasts();
+};
 const put = async (id) => {
   await win.click(`.bank-book[data-book="${id}"] button`);
   await win.waitForSelector('.modal .bank-ai');
@@ -110,15 +151,16 @@ try {
   await win.getByRole('button', { name: '도움말', exact: true }).click();
   assert.ok(await win.$('.bank-intro'));
 
-  step('교재를 PDF 글자로 넣기 (모델·AI 없이) → 다 넣었어요');
-  await put(ids.math);
+  step('일반 글꼴 수학 PDF는 OCR 모델 필요 → 설정 열기 → 넣기 멈춤');
+  await expectMissingModel(ids.math);
+  step('스캔본 교재 넣기: 모델 안내 → 설정 열기 → 저장 없이 멈춤');
+  await expectMissingModel(ids.scan);
+  step('영어 교재를 PDF 글자로 넣기 (모델·AI 없이) → 다 넣었어요');
   await put(ids.english);
-  const transcripts = JSON.parse(readFileSync(join(math.dir, 'transcripts.json'), 'utf8'));
-  assert.ok(Object.keys(transcripts.items).length >= 24);
-  assert.ok(Object.keys(transcripts.items).every((k) => k.endsWith('|pdf')), 'PDF 경로만 사용');
   assert.equal(existsSync(join(english.dir, 'transcripts.json')), false, '남의 책은 공유 폴더에 저장하지 않음');
   const ownTranscripts = join(academy, 'members', 'teacher-a', 'transcripts', `${ids.english}.json`);
   assert.equal(Object.keys(JSON.parse(readFileSync(ownTranscripts, 'utf8')).items).length, 3, '영어 지문 하나·문항 둘');
+  assert.ok(Object.keys(JSON.parse(readFileSync(ownTranscripts, 'utf8')).items).every((k) => k.endsWith('|pdf')), 'PDF 경로만 사용');
 
   step('지문 글로 검색 → 세트 전체 담기, 번호 범위로 검색');
   await win.fill('[data-bank-focus="text"]', 'QUIETGARDEN');
@@ -190,7 +232,90 @@ try {
   assert.equal(sharedResult.text, 1);
   assert.equal(edit[0], `${sharedResult.key}|edit`);
 
-  step('이미 옮긴 PDF·OCR·AI는 모델 없이 오답노트에서도 그대로 재사용');
+  step('일반 글꼴 PDF 내보내기: 은행의 비수학만 글자, 수학·오답노트는 원래대로');
+  const pdfModes = await win.evaluate(async (id) => {
+    const { getSources } = await import('./js/shared.js');
+    const { exportHwpx, loadTranscripts, saveTranscripts } = await import('./js/transcribe.js');
+    const b = await window.ohdap.getBook(id);
+    const src = await getSources(b);
+    const store = await loadTranscripts(id);
+    const before = { ...store.items };
+    const out = [];
+    // 앞의 영어 변환으로 |pdf가 있어도 수학·오답노트에서 우회 사용하지 않음.
+    try {
+      for (const subject of ['english', 'korean', 'math', undefined]) {
+        for (const plainPdf of [true, false]) {
+          const e = { bookId: id, bookObj: { ...b, subject }, src: { problem: src.problem, answer: src.problem } };
+          const blocks = ['problem', 'answer'].map((kind) => ({ kind, role: kind, item: b.docs.problem.items[0], src: src.problem, stem: null }));
+          const bytes = await exportHwpx(blocks, [e], { convert: 'ocr', plainPdf }, { title: '과목별 PDF' }, { key: 'hwpx:pdf-mode', sig: `${subject}:${plainPdf}` });
+          out.push(bytes.stats.text);
+        }
+      }
+      return out;
+    } finally {
+      store.items = before;
+      store.dirty = true;
+      await saveTranscripts();
+    }
+  }, ids.english);
+  assert.deepEqual(pdfModes, [2, 0, 2, 0, 0, 0, 0, 0]);
+
+  step('오답노트 캐시: AI 켜기·키·OCR 모델·옮기기 방식의 원래 조건 유지');
+  const cases = [
+    { convert: 'ai', enabled: false, key: true, ocr: true, expected: null },
+    { convert: 'ai', enabled: true, key: false, ocr: true, expected: null },
+    { convert: 'ocr', enabled: true, key: true, ocr: false, expected: null },
+    { convert: 'mix', enabled: false, key: true, ocr: false, expected: null },
+    { convert: 'ocr', enabled: true, key: true, ocr: true, expected: 'OCR' },
+    { convert: 'ai', enabled: true, key: true, ocr: true, expected: 'AI' },
+    { convert: 'mix', enabled: true, key: true, ocr: true, expected: 'AI' },
+    { convert: 'mix', enabled: false, key: true, ocr: true, expected: 'OCR' },
+  ];
+  await app.evaluate(({ ipcMain }) => {
+    globalThis.bankOcrStatus = ipcMain._invokeHandlers.get('mathocr:status');
+    ipcMain.removeHandler('mathocr:status');
+    ipcMain.handle('mathocr:status', () => ({ installed: globalThis.bankOcrInstalled }));
+  });
+  try {
+    for (const c of cases) {
+      await app.evaluate((_, installed) => { globalThis.bankOcrInstalled = installed; }, c.ocr);
+      const bytes = await win.evaluate(async ([id, c]) => {
+        const { getSources, state } = await import('./js/shared.js');
+        const { exportHwpx, loadTranscripts, transcriptKey } = await import('./js/transcribe.js');
+        const { makeBlocks } = await import('./js/exporter.js');
+        const b = await window.ohdap.getBook(id);
+        const src = await getSources(b);
+        const e = { bookId: id, bookObj: b, problem: b.docs.problem.items[0], src };
+        const blocks = makeBlocks('problems', [e], {}, () => 'p.1');
+        const store = await loadTranscripts(id);
+        const key = transcriptKey(blocks[0]);
+        const before = { items: { ...store.items }, settings: state.settings, getMathLayer: src.problem.getMathLayer };
+        src.problem.getMathLayer = async () => null;
+        state.settings = { ...state.settings, aiSource: 'personal', aiProvider: 'gemini', aiEnabled: c.enabled, geminiApiKey: c.key ? 'test-key' : '' };
+        delete store.items[`${key}|edit`];
+        for (const [suffix, name] of [['', 'AI'], ['|local', 'OCR'], ['|pdf', 'PDF']]) {
+          store.items[key + suffix] = { blocks: [{ type: 'para', text: `${name}-CACHED-CONTENT` }], reliable: true, at: Date.now() };
+        }
+        try {
+          return Array.from(await exportHwpx(blocks, [e], { convert: c.convert }, { title: '캐시 조건' }, { key: 'hwpx:cache-mode', sig: JSON.stringify(c) }));
+        } finally {
+          src.problem.getMathLayer = before.getMathLayer;
+          state.settings = before.settings;
+          store.items = before.items;
+        }
+      }, [ids.math, c]);
+      const xml = hwpxSection(bytes);
+      for (const name of ['AI', 'OCR', 'PDF']) assert.equal(xml.includes(`${name}-CACHED-CONTENT`), c.expected === name, JSON.stringify(c));
+      if (!c.expected) assert.match(xml, /<hp:pic /, '쓸 결과가 없으면 그림');
+    }
+  } finally {
+    await app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('mathocr:status');
+      ipcMain.handle('mathocr:status', globalThis.bankOcrStatus);
+    });
+  }
+
+  step('저장된 PDF·OCR·AI도 쓸 수 없으면 그림으로, 고친 글 우선 시험은 별도로 유지');
   const reused = await win.evaluate(async (id) => {
     const { getSources } = await import('./js/shared.js');
     const { exportHwpx, loadTranscripts, transcriptKey } = await import('./js/transcribe.js');
@@ -217,7 +342,7 @@ try {
       return out;
     } finally { src.problem.getMathLayer = original; store.items = before; }
   }, ids.math);
-  assert.deepEqual(reused, [1, 1, 1]);
+  assert.deepEqual(reused, [0, 0, 0]);
 
   step('실시간 다시 그려도 찾는 말·입력 위치·미리보기·바구니 유지');
   await win.focus('[data-bank-focus="text"]');

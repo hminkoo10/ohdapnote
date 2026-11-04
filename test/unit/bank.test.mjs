@@ -53,6 +53,34 @@ test('목록: 읽는 순서·말머리 문항·해설 짝·계약 빠진 과목�
   assert.equal(override[1].answer.number, '1');
 });
 
+test('stemId: 영역이 달라도 같은 지문, 다른 쪽의 여러 조각을 함께 내보냄', async () => {
+  const pieces = [rect(0, 0.05), rect(1, 0.05)];
+  const a = item(1, 1, { stemId: '3:1~3', stem: pieces });
+  const b = item(2, 1, { stemId: '3:1~3', stem: pieces.map((r) => ({ ...r, h: r.h + 0.001 })) });
+  assert.equal(stemKey(a), 'id:3:1~3');
+  assert.equal(stemKey(a), stemKey(b));
+  assert.equal(passageItem(a).id, passageItem(b).id);
+  assert.notEqual(stemKey(a), stemKey({ ...a, stemId: '3:4~6' }));
+  const grouped = { ...book, docs: { problem: { items: [b, a] } } };
+  const targets = bankTargets(grouped);
+  assert.equal(targets.length, 3);
+  assert.deepEqual(targets[0].item.rects, pieces);
+  const src = { pages: Array(2).fill({ w: 595, h: 842, kind: 'pdf' }) };
+  const list = bankEntries([grouped]).map((e) => ({ ...e, src: { problem: src } }));
+  assert.ok(list.every((e) => e.stemKey === 'id:3:1~3'));
+  const blocks = makeBankBlocks('problems', list, {}, label);
+  assert.equal(blocks.filter((b) => b.passage).length, 1);
+  assert.equal(blocks[0].item.id, targets[0].item.id);
+  assert.deepEqual(blockSegs(blocks[0]).map((s) => s.rect), pieces);
+  const seen = [];
+  const bytes = await buildHwpx({ blocks, transcribe: async (block, segs) => {
+    if (block.passage) seen.push(segs.map((s) => s.rect.page));
+    return { blocks: [{ type: 'para', text: '여러 쪽 지문과 문항' }] };
+  } });
+  assert.deepEqual(seen, [[0, 1]]);
+  assert.equal(bytes.stats.text, 3);
+});
+
 test('찾기: 과목·책·인쇄된 쪽·쪽 범위', () => {
   assert.equal(filterBank(entries, { subject: 'english' }).length, 1);
   assert.equal(filterBank(entries, { bookId: 'a' }).length, 3);
@@ -75,6 +103,15 @@ test('글자로 찾기: 공백·대소문자 무시, 공통 지문의 글로도 
   assert.equal(filterBank(entries, { text: 'READ\nTHE PASSAGE' }, textOf).length, 2);
   assert.equal(filterBank(entries, { text: '빈 칸', number: '3' }, textOf)[0].item, prefix);
   assert.equal(filterBank(entries, { text: '삼각함수' }, textOf).length, 0);
+});
+
+test('번호 찾기: 앞의 0은 숫자끼리만 무시하고 범위·말머리도 유지', () => {
+  const list = ['0153', '153', '0154', '153a'].map((number) => ({ ...entries[0], item: { ...first, number } }));
+  for (const number of ['153', '0153', '유제 153번']) {
+    assert.deepEqual(filterBank(list, { number }).map((e) => e.item.number), ['0153', '153']);
+  }
+  assert.equal(filterBank(list, { number: '153-154' }).length, 3);
+  assert.deepEqual(filterBank(list, { number: '153a' }).map((e) => e.item.number), ['153a']);
 });
 
 test('담은 순서: 처음 담은 책 순서 → 책 안 읽는 순서, 없어진 문항·중복 제외', () => {
