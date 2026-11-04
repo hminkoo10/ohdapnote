@@ -2,11 +2,12 @@
 
 import { h, clear, toast, confirmDialog, debounce, formatDate, icon, animateOut } from './ui.js';
 import { analyzeDocument, parsePageRange, reanalyzeSinglePage, replacePageItems } from './analyze.js';
-import { ROLES, ROLE_NAME, newDoc, addFiles, pageLabel, bookPage, computeMatches, normalizeDoc, findItem, flaggedPages, missingNumbers, missingCount } from './store.js';
+import { ROLES, ROLE_NAME, pageLabel, bookPage, computeMatches, normalizeDoc, findItem, flaggedPages, missingNumbers, missingCount } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSource, getSources, dropSources, clearPreviewCache, renderPreview, renderQTable, runGeminiPages, geminiReady, aiOff, jobs, findJob, startJob, holdBook, holdSource, liveBook, errMsg, restartSaveHooks, restartPendingChecks, setRestartBusy } from './shared.js';
 import { topbar } from './chrome.js';
 import { createEditor } from './editor.js';
 import { placeSegThumb } from './home.js';
+import { importBookFiles } from './photoimport.js';
 
 /** 고칠 수 있는 책인지 — 학원 공간에서 남이 만든 책은 절대 저장하지 않음 (통합 클라우드가 되돌리고 충돌 사본을 남김) */
 const canSave = (b) => !!b && b.$canEdit !== false;
@@ -509,13 +510,13 @@ async function importFiles(role, paths, { add = false } = {}) {
   if (pdfs.length > 1 && !(await confirmDialog(`PDF ${pdfs.length}개를 이름 순서대로 이어 붙여 하나의 ${ROLE_NAME[role]}(으)로 씁니다. 계속할까요?`))) return;
   try {
     const removed = (old?.items || []).map((it) => it.id);
-    const imported = await api.importFiles(b.id, role, paths);
-    dropSources(b.id, role);
-    b.docs[role] = newDoc(role, imported);
-    b.answerOverrides = {};
-    if (role === 'problem' && removed.length) noteRenames({}, removed);
     await saver.flush();
-    bs.sources[role] = await getSource(b, role);
+    await importBookFiles(b, role, paths);
+    dropSources(b.id, role);
+    if (role === 'problem' && removed.length) noteRenamesFor(b, {}, removed);
+    const src = await getSource(b, role);
+    if (!onBook(b)) return;
+    bs.sources[role] = src;
     rematch();
     bs.role = role;
     render();
@@ -531,15 +532,15 @@ async function importFiles(role, paths, { add = false } = {}) {
  */
 async function addMoreFiles(role, paths) {
   const b = bs.book;
-  const doc = b.docs[role];
+  let doc = b.docs[role];
   const pdfs = paths.filter((x) => /\.pdf$/i.test(x));
   if (pdfs.length > 1 && !(await confirmDialog(`PDF ${pdfs.length}개를 이름 순서대로 지금 ${ROLE_NAME[role]} 뒤에 이어 붙입니다. 계속할까요?`))) return;
   try {
     const before = doc.files.length;
-    const imported = await api.importFiles(b.id, role, paths, true);
-    dropSources(b.id, role);
-    addFiles(doc, imported);
     await saver.flush();
+    await importBookFiles(b, role, paths, true);
+    dropSources(b.id, role);
+    doc = b.docs[role];
     const src = await getSource(b, role);
     if (!onBook(b)) return; // 그 사이 다른 화면으로 감 (파일은 더해 두었음)
     bs.sources[role] = src;

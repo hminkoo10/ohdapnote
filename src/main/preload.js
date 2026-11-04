@@ -70,6 +70,9 @@ contextBridge.exposeInMainWorld('ohdap', {
 
   pickFiles: (title) => ipcRenderer.invoke('files:pick', { title }),
   importFiles: (bookId, role, paths, add) => ipcRenderer.invoke('files:import', { bookId, role, paths, add }), // add: 지금 파일 뒤에 더하기
+  savePhotoPages: (photo) => ipcRenderer.invoke('files:photo', photo),
+  commitFileImport: (token, book) => ipcRenderer.invoke('files:commit', { token, book }),
+  discardFileImport: (token) => ipcRenderer.invoke('files:discard', token),
   pathForFile: (file) => webUtils.getPathForFile(file),
   savePdf: (defaultName, data) => ipcRenderer.invoke('files:savePdf', { defaultName, data }),
   saveFile: ({ defaultName, data, filters, title }) => ipcRenderer.invoke('files:saveFile', { defaultName, data, filters, title }),

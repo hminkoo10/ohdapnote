@@ -38,7 +38,7 @@ export function createCanvas(width, height) {
 }
 
 /**
- * @param {{name:string, kind:'pdf'|'image'}[]} files
+ * @param {{name:string, kind:'pdf'|'image', width?:number, height?:number}[]} files
  * @param {(name:string)=>string} urlFor  저장된 파일 이름 → URL
  */
 export async function openDocSource(files, urlFor) {
@@ -55,6 +55,9 @@ export class DocSource {
     this.pages = [];
     this._pdfDocs = new Map();
     this._images = new Map();
+    this._imageLoads = new Map();
+    this._imageUsers = new Map();
+    this._closed = false;
     this._pageCache = new Map();
     this._mathLayers = new Map();
     this._tasks = [];
@@ -82,23 +85,55 @@ export class DocSource {
           page.cleanup();
         }
       } else {
-        const bitmap = await this._loadImage(fi);
+        // 저장된 크기가 있으면 열 때 그림을 읽지 않는다.
+        const validSize = Number.isInteger(f.width) && Number.isInteger(f.height) && f.width > 0 && f.height > 0 && f.width*f.height <= 100000000;
+        const size = validSize ? f : await this._withImage(fi, (image) => ({ width: image.width, height: image.height }));
         f.pageCount = 1;
-        const w = IMAGE_VIRTUAL_WIDTH;
-        const h = (IMAGE_VIRTUAL_WIDTH * bitmap.height) / bitmap.width;
-        this.pages.push({ fileIndex: fi, pageIndex: 0, kind: 'image', w, h, rotate: 0, pxW: bitmap.width, pxH: bitmap.height });
+        const w = IMAGE_VIRTUAL_WIDTH, h = w*size.height/size.width;
+        this.pages.push({ fileIndex: fi, pageIndex: 0, kind: 'image', w, h, rotate: 0, pxW: size.width, pxH: size.height });
       }
     }
   }
 
   async _loadImage(fileIndex) {
-    if (this._images.has(fileIndex)) return this._images.get(fileIndex);
-    const f = this.files[fileIndex];
-    const res = await fetch(this.urlFor(f.name));
-    if (!res.ok) throw new Error('이미지를 읽을 수 없습니다.');
-    const bitmap = await createImageBitmap(await res.blob());
-    this._images.set(fileIndex, bitmap);
-    return bitmap;
+    if (this._closed) throw new Error('닫힌 교재입니다.');
+    if (this._images.has(fileIndex)) {
+      const bitmap = this._images.get(fileIndex);
+      this._images.delete(fileIndex);
+      this._images.set(fileIndex, bitmap);
+      return bitmap;
+    }
+    if (!this._imageLoads.has(fileIndex)) {
+      const load = (async () => {
+        const res = await fetch(this.urlFor(this.files[fileIndex].name));
+        if (!res.ok) throw new Error('이미지를 읽을 수 없습니다.');
+        const bitmap = await createImageBitmap(await res.blob());
+        if (this._closed) { bitmap.close(); throw new Error('닫힌 교재입니다.'); }
+        this._images.set(fileIndex, bitmap);
+        return bitmap;
+      })();
+      this._imageLoads.set(fileIndex, load);
+    }
+    try { return await this._imageLoads.get(fileIndex); }
+    finally { this._imageLoads.delete(fileIndex); }
+  }
+
+  async _withImage(fi, use) {
+    this._imageUsers.set(fi, (this._imageUsers.get(fi) || 0)+1);
+    try { return use(await this._loadImage(fi)); }
+    finally {
+      const n = this._imageUsers.get(fi)-1;
+      if (n) this._imageUsers.set(fi, n); else this._imageUsers.delete(fi);
+      // 최근 두 장, 최대 32MiB. 그리는 중인 그림은 닫지 않는다.
+      let bytes = [...this._images.values()].reduce((sum, b) => sum+b.width*b.height*4, 0);
+      for (const [key, b] of this._images) {
+        if (this._images.size <= 2 && bytes <= 32*1024*1024) break;
+        if (this._imageUsers.has(key)) continue;
+        bytes -= b.width*b.height*4;
+        b.close();
+        this._images.delete(key);
+      }
+    }
   }
 
   async getPdfPage(i) {
@@ -148,10 +183,11 @@ export class DocSource {
         annotationMode: pdfjsLib.AnnotationMode.ENABLE,
       }).promise;
     } else {
-      const bitmap = await this._loadImage(p.fileIndex);
-      const k = bitmap.width / fullW; // 화면 px → 이미지 px
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(bitmap, offX * k, offY * k, canvas.width * k, canvas.height * k, 0, 0, canvas.width, canvas.height);
+      await this._withImage(p.fileIndex, (bitmap) => {
+        const k = bitmap.width / fullW; // 화면 px → 이미지 px
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(bitmap, offX * k, offY * k, canvas.width * k, canvas.height * k, 0, 0, canvas.width, canvas.height);
+      });
     }
     return canvas;
   }
@@ -287,6 +323,8 @@ export class DocSource {
   }
 
   async destroy() {
+    this._closed = true;
+    await Promise.allSettled(this._imageLoads.values());
     for (const page of this._pageCache.values()) page.cleanup();
     this._pageCache.clear();
     this._mathLayers.clear();

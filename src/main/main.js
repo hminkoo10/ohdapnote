@@ -19,6 +19,7 @@ const ai = require('./ai');
 const mathocr = require('./mathocr');
 const cloud = require('./magoedu-cloud');
 const { createUpdateMonitor } = require('./update-restart');
+const { createPhotoImports } = require('./photo-import');
 const datasign = require('./datasign');
 const { isObj, line, model, int, url, codexPath, sanitizeData, relativePath, invalidJson, cleanJson: cleanValue } = require('./data-validate');
 const { sanitizeStudent } = cloud;
@@ -488,9 +489,10 @@ async function copyBookFiles(from, to) {
 // ---------------------------------------------------------------------------
 
 let mainWindow = null;
+let photoImports;
 const updateMonitor = createUpdateMonitor({
   app, ipcMain, cloud, session, isSmokeTest,
-  isBusy: () => fetching.size > 0 || changedPaths.size > 0,
+  isBusy: () => fetching.size > 0 || changedPaths.size > 0 || photoImports?.size > 0,
 });
 
 function createWindow() {
@@ -1014,11 +1016,13 @@ function registerIpc() {
     return cur;
   }
   const toSave = (book, cur) => ({ ...stripMeta(book), createdBy: cur?.createdBy || book.createdBy || createdByMe() });
+  photoImports = createPhotoImports({ readBook: checkBookWrite, dirFor: bookDir, markOwn, removeRemoteOnly, log,
+    saveBook: (book, cur) => writeJsonAtomicSync(bookFile(book.id), toSave(book, cur)) });
 
   handle('books:save', async (_e, book) => {
     if (!book || !isValidId(book.id)) throw new Error('잘못된 책');
     const cur = checkBookWrite(book.id);
-    await writeJsonAtomic(bookFile(book.id), toSave(book, cur));
+    writeJsonAtomicSync(bookFile(book.id), toSave(book, cur));
     return true;
   });
 
@@ -1290,47 +1294,13 @@ function registerIpc() {
     return result.canceled ? [] : result.filePaths;
   });
 
-  // 선택한 파일(들)을 책 폴더로 복사. add 면 그 쪽의 지금 파일은 그대로 두고 더함 (화면에서 지금 파일 뒤에 이어 붙임)
+  // 사진은 보정한 쪽까지 저장한 뒤 목록을 한 번에 바꾼다 (begin → photo → commit, 취소는 discard). 예전 파일은 commit 뒤에 정리.
   handle('files:import', async (_e, { bookId, role, paths, add = false }) => {
-    if (!['problem', 'answer'].includes(role)) throw new Error('잘못된 문서 종류');
-    if (!Array.isArray(paths) || paths.length === 0) throw new Error('파일이 없습니다.');
-    const cur = checkBookWrite(bookId);
-    const dir = bookDir(bookId);
-    await fsp.mkdir(dir, { recursive: true });
-
-    // 이미지 여러 장은 파일 이름 순(숫자 자연 정렬)으로 정렬
-    const collator = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' });
-    const sorted = [...paths].sort((a, b) => collator.compare(path.basename(a), path.basename(b)));
-    for (const p of sorted) {
-      const ext = path.extname(p).toLowerCase();
-      if (!PDF_EXT.has(ext) && !IMAGE_EXT.has(ext)) {
-        throw new Error(`지원하지 않는 파일 형식입니다: ${path.basename(p)}`);
-      }
-    }
-
-    // 이전 파일 삭제 (이 컴퓨터에 받지 않은 것은 서버에서)
-    if (!add) {
-      await removeRemoteOnly(bookId, (cur?.docs?.[role]?.files || []).map((f) => f?.name).filter((n) => typeof n === 'string' && n.startsWith(`${role}-`)));
-      for (const name of await fsp.readdir(dir)) {
-        if (name.startsWith(`${role}-`)) await fsp.rm(path.join(dir, name), { force: true });
-      }
-    }
-
-    const stamp = Date.now().toString(36);
-    const files = [];
-    let index = 0;
-    for (const p of sorted) {
-      const ext = path.extname(p).toLowerCase();
-      const stored = `${role}-${stamp}-${String(index).padStart(3, '0')}${ext}`;
-      markOwn(path.join(dir, stored));
-      await fsp.copyFile(p, path.join(dir, stored));
-      files.push({ name: stored, originalName: path.basename(p), kind: PDF_EXT.has(ext) ? 'pdf' : 'image' });
-      index += 1;
-    }
-    const originalName =
-      sorted.length === 1 ? path.basename(sorted[0]) : `${path.basename(sorted[0])} 외 ${sorted.length - 1}개`;
-    return { files, originalName };
+    return photoImports.begin(bookId, role, paths, add);
   });
+  handle('files:photo', (_e, photo) => photoImports.photo(photo));
+  handle('files:commit', (_e, { token, book }) => photoImports.commit(token, book));
+  handle('files:discard', (_e, token) => photoImports.discard(token));
 
   handle('files:savePdf', async (_e, { defaultName, data }) => {
     const result = await dialog.showSaveDialog(mainWindow, {
