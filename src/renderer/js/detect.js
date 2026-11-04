@@ -31,9 +31,9 @@ function besideRight(a, b) {
   return sameRow(a, b) && b.x0 - (a.x1 ?? a.x0) > 2 * Math.max(hOf(a), hOf(b));
 }
 
-/** 읽는 순서: 단 → 위에서 아래 (같은 줄이면 왼쪽에서 오른쪽) */
+/** 읽는 순서: 구역 → 단 → 위에서 아래 (같은 줄이면 왼쪽에서 오른쪽) */
 export function byReadingOrder(a, b) {
-  return a.col - b.col || (sameRow(a, b) ? a.x0 - b.x0 : a.y0 - b.y0);
+  return (a.zone ?? 0) - (b.zone ?? 0) || a.col - b.col || (sameRow(a, b) ? a.x0 - b.x0 : a.y0 - b.y0);
 }
 
 const mode = (arr) => {
@@ -1238,11 +1238,11 @@ export function zoneOf(L, y) {
  * @param {Map<number, object[]>} anchors
  * @param {Map<number, object>} layouts  페이지별 analyzeLayout 결과
  * @param {Map<number, object>} grids    페이지별 잉크 격자
- * @param {{flow?:'column'|'continue', source?:Map<number,string>, cutters?:Map, stopPages?:Set<number>}} opts
- *    flow = 'continue' 이면 문항(해설)이 다음 단/페이지로 이어질 수 있음
+ * @param {{flow?:'column'|'continue', passages?:boolean, source?:Map<number,string>, cutters?:Map, stopPages?:Set<number>}} opts
+ *    flow = 'continue' 또는 지문 모드이면 문항·지문이 다음 단/페이지로 이어질 수 있음
  */
 export function computeItems(order, anchors, layouts, grids, opts = {}) {
-  const flow = opts.flow || 'column';
+  const canContinue = opts.flow === 'continue' || !!opts.passages;
   const items = [];
   const stems = [];
   let open = null;
@@ -1302,14 +1302,14 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
         };
 
         // 단 맨 위가 단원 제목·정답 상자 같은 새 묶음의 시작이면 앞 해설은 여기까지
-        if (open && flow === 'continue') {
+        if (open && canContinue) {
           const startsNew = (opts.cutters?.get(pageIdx) || []).some(
             (k) => k.kind !== 'span' && k.x1 > col.x0 + 0.005 && k.x0 < col.x1 - 0.005 && k.y0 >= top - 0.02 && k.y0 <= top + 0.006,
           );
           if (startsNew) open = null;
         }
-        // 단 위쪽: 이전 문항이 이어지는 부분
-        if (open && flow === 'continue') {
+        // 단 위쪽: 이전 문항 또는 지문이 이어지는 부분
+        if (open && canContinue) {
           const nominal = inCol.length ? cutOf(inCol[0]) : bottom;
           const segBottom = cutBetween(top, nominal);
           if (segBottom - top > 0.01) {
@@ -1318,12 +1318,19 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
           }
           if (segBottom < nominal - 1e-6) open = null; // 제목에서 끊김
         }
+        if (opts.passages && (inCol.length || rangesHere.length)) open = null;
+        let trailingStem = null;
         for (const rg of rangesHere) {
           const nextA = inCol.find((a) => a.y0 > rg.y1);
           const y0 = rg.y0 - 0.006;
-          const y1 = nextA ? cutOf(nextA) : bottom;
+          const nominal = nextA ? cutOf(nextA) : bottom;
+          const y1 = opts.passages ? cutBetween(y0, nominal) : nominal;
           const r = trimRect(grid, { x: x0, y: y0, w: x1 - x0, h: Math.max(0.01, y1 - y0) });
-          if (r) stems.push({ a: rg.a, b: rg.b, y: rg.y0, page: pageIdx, z, c, rect: { page: pageIdx, ...r } });
+          if (r) {
+            const stem = { a: rg.a, b: rg.b, y: rg.y0, page: pageIdx, z, c, rects: [{ page: pageIdx, ...r }] };
+            stems.push(stem);
+            if (opts.passages && !nextA && y1 >= bottom - 1e-6) trailingStem = stem;
+          }
         }
         for (let ri = 0; ri < rows.length; ri++) {
           const row = rows[ri];
@@ -1354,7 +1361,9 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
             if (y1 < nominal - 1e-6) open = null; // 제목에서 끊겼으면 더 잇지 않음
           }
         }
-        if (flow !== 'continue') open = null;
+        // 단 끝에 남은 지문은 앞 문항 대신 이어감 (열린 문항·지문은 하나만 유지)
+        if (trailingStem) open = trailingStem;
+        if (!canContinue) open = null;
       }
     });
   }
@@ -1373,8 +1382,9 @@ function attachStems(items, stems) {
     let st = null;
     for (const s of sortedStems) if (key(s.page, s.z, s.c, s.y) < k && it.num >= s.a && it.num <= s.b) st = s;
     if (st) {
-      it.stem = [st.rect];
+      it.stem = [...st.rects];
       it.stemLabel = `${st.a}~${st.b}`;
+      it.stemId = `${st.rects[0].page}:${st.a}~${st.b}`;
     }
   }
 }

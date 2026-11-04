@@ -621,6 +621,7 @@ async function analyzeRole(role, { only = null } = {}) {
     const res = await analyzeDocument(src, {
       pages,
       role,
+      subject: b.subject,
       flow: doc.options.flow,
       numberStyle: doc.options.numberStyle,
       ocrLang: state.settings.ocrLang,
@@ -889,7 +890,7 @@ async function deepPage(role, page) {
   setRestartBusy('deep-page', true);
   try {
     const before = (doc.items || []).filter((it) => it.page === page);
-    const { items, page: info, meta } = await reanalyzeSinglePage(src, doc, page, { ocrLang: state.settings.ocrLang, deep: true, role });
+    const { items, page: info, meta } = await reanalyzeSinglePage(src, doc, page, { ocrLang: state.settings.ocrLang, deep: true, role, subject: b.subject });
     close();
     const sameAsBefore = items.length === before.length && items.every((it, k) => it.num === before[k]?.num);
     if (items.length < before.length) {

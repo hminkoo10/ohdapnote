@@ -216,9 +216,10 @@ npm start
 | --- | --- |
 | `npm start` | 개발 모드로 실행 — 통합 클라우드 없이 `%APPDATA%\OhdapNote\data` 를 씀 (학원 공간을 흉내 내려면 `MAGOEDU_ACADEMY_DIR`·`MAGOEDU_USER_ID`·`MAGOEDU_ROLE` 등을 직접) |
 | `npm test` | 단위 테스트 (번호 인식·매칭·빠른 선택 등) |
-| `npm run test:fixtures` | 테스트용 문제집/답지 생성 — 단순형 + 시중 교재형(쎈·수능특강 편집 구조 재현), 스캔본·사진 (Playwright Chromium, Python Pillow·numpy, poppler 필요) |
+| `npm run test:fixtures` | 테스트용 문제집/답지 생성 — 단순형 + 시중 교재형(쎈·수능특강 편집 구조 재현) + 국어·영어 시험지·교재(지문 세트), 스캔본·사진 (Playwright Chromium, Python Pillow·numpy, poppler 또는 PyMuPDF 필요) |
 | `npm run test:detect` | 단순형 문서로 인식 정확도 확인 (브라우저에서 실제 엔진 실행) |
 | `npm run test:books` | 시중 교재형으로 번호 인식·해설 짝·**쪽을 넘어가는 해설**을 자동 채점 (해설 끝에 숨긴 표식으로 확인) |
+| `npm run test:passages` | 국어·영어 시험지·교재(디지털·스캔본)로 **지문과 거기 딸린 문항 묶기**를 채점 — 번호·세트·지문 영역·문항 영역이 모두 맞은 문항 비율 (지문·문항 글에 숨긴 표식으로 확인). 한 가지만: `node test/e2e/passage-test.mjs korean-exam` |
 | `npm run test:scan` | 가지고 있는 실제 문제집·답지 PDF(스캔본 포함)로 번호 인식 확인 — 빠진 번호·순서 어긋남·확인 필요 쪽을 보여 줌. 책 목록은 `test/e2e/local-books.json`(git 에 안 올라감, `local-books.example.json` 참고), 한 권만: `node test/e2e/scan-check.mjs <PDF> [problem\|answer] [쪽 범위]` |
 | `npm run test:e2e` | Electron 앱을 띄워 예전 데이터 옮기기→책 등록·분석→검토 편집→오답노트→시험지 PDF·한글(HWPX), 확인할 쪽·AI(가짜 응답, 묶음·동시 요청) 흐름, 다른 AI(Claude·OpenAI 호환, 내 컴퓨터의 가짜 서버), 뒤에서 도는 작업 확인 (리눅스는 `xvfb-run -a npm run test:e2e`) |
 | `node test/e2e/hwpx-sample.mjs` | 한글(HWPX) 견본 `test/e2e/out/sample.hwpx` 만들기 (미리 적어 둔 글자·수식 + 그림 한 장) — 한글에서 열어 확인용 |

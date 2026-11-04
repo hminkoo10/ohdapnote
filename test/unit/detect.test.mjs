@@ -6,6 +6,7 @@ import {
   buildLines,
   extractCandidates,
   selectAnchors,
+  byReadingOrder,
   computeItems,
   guessPageOffset,
   mergeFigureColumns,
@@ -108,6 +109,99 @@ test('computeItems: 번호 사이를 문항 영역으로, 다음 단으로 이�
   assert.ok(items[1].rects[1].y + items[1].rects[1].h <= 0.6);
   const colItems = computeItems([0], anchors, new Map([[0, layout]]), new Map([[0, grid]]), { flow: 'column' });
   assert.equal(colItems[1].rects.length, 1);
+});
+
+// 공통 지문은 왼쪽 단 중간에서 시작하고, 문항은 오른쪽 단에 놓임
+function passageFixture() {
+  const w = 100;
+  const h = 140;
+  const data = new Uint8Array(w * h);
+  for (let y = 15; y < 125; y += 3) {
+    for (let x = 10; x < 45; x++) data[y * w + x] = 1;
+    for (let x = 55; x < 90; x++) data[y * w + x] = 1;
+  }
+  const grid = { w, h, data };
+  const layout = analyzeLayout(grid);
+  const anchors = new Map([[0, [1, 2, 3].map((num) => ({
+    num, digits: String(num), col: 1, x0: 0.55, x1: 0.57, y0: 0.2 + num * 0.2, h: 0.015, conf: 100,
+  }))]]);
+  const range = { a: 1, b: 3, col: 0, x0: 0.1, x1: 0.4, y0: 0.4, y1: 0.42 };
+  return {
+    anchors,
+    layouts: new Map([[0, layout]]),
+    grids: new Map([[0, grid]]),
+    ranges: new Map([[0, [range]]]),
+    cutters: new Map([[0, [{ ...range, y0: range.y0 - 0.006 }]]]),
+  };
+}
+
+test('computeItems: 지문 모드에서 다음 단 지문까지 모든 문항에 같은 지문 ID로 붙임', () => {
+  const f = passageFixture();
+  const items = computeItems([0], f.anchors, f.layouts, f.grids, { ...f, passages: true });
+  assert.equal(items.length, 3);
+  for (const it of items) {
+    assert.equal(it.stem.length, 2);
+    assert.equal(it.stemLabel, '1~3');
+    assert.equal(it.stemId, '0:1~3');
+    assert.ok(it.stem[0].x < 0.5 && it.stem[1].x > 0.5);
+    assert.ok(it.stem[1].y + it.stem[1].h <= items[0].rects[0].y);
+    assert.deepEqual(it.stem, items[0].stem);
+  }
+  assert.notEqual(items[0].stem, items[1].stem);
+});
+
+test('computeItems: 지문 모드가 아니면 공통 지문은 기존처럼 첫 단 한 조각만 붙임', () => {
+  const f = passageFixture();
+  const items = computeItems([0], f.anchors, f.layouts, f.grids, f);
+  for (const it of items) {
+    assert.equal(it.stem.length, 1);
+    assert.equal(it.stemLabel, '1~3');
+  }
+});
+
+test('computeItems: 지문 모드의 문제집 문항도 다음 단으로 이어짐', () => {
+  const f = passageFixture();
+  f.anchors.get(0)[0] = { ...f.anchors.get(0)[0], col: 0, x0: 0.1, x1: 0.12, y0: 0.7 };
+  const opts = { flow: 'column' };
+  const items = computeItems([0], f.anchors, f.layouts, f.grids, { ...opts, passages: true });
+  assert.equal(items[0].rects.length, 2);
+  assert.ok(items[0].rects[1].x > 0.5);
+  const math = computeItems([0], f.anchors, f.layouts, f.grids, opts);
+  assert.equal(math[0].rects.length, 1);
+});
+
+test('computeItems: 열린 지문이 다음 쪽 첫 번호 앞까지 이어짐', () => {
+  const f = passageFixture();
+  const range = f.ranges.get(0)[0];
+  Object.assign(range, { col: 1, x0: 0.55, x1: 0.9 });
+  f.cutters.set(0, [{ ...range, y0: range.y0 - 0.006 }]);
+  f.layouts.set(1, f.layouts.get(0));
+  f.grids.set(1, f.grids.get(0));
+  f.anchors.set(1, f.anchors.get(0).map((a) => ({ ...a, col: 0, x0: 0.1, x1: 0.12 })));
+  f.anchors.set(0, []);
+  const items = computeItems([0, 1], f.anchors, f.layouts, f.grids, { ...f, passages: true });
+  for (const it of items) {
+    assert.deepEqual(it.stem.map((r) => r.page), [0, 1]);
+    assert.equal(it.stemId, '0:1~3');
+  }
+});
+
+test('byReadingOrder: 띠 위 오른쪽 단을 띠 아래 왼쪽 단보다 먼저 읽음', () => {
+  const candidates = [
+    { num: 7, zone: 1, col: 0, x0: 0.1, y0: 0.6, h: 0.015 },
+    { num: 6, zone: 0, col: 1, x0: 0.55, y0: 0.3, h: 0.015 },
+    { num: 5, zone: 0, col: 1, x0: 0.55, y0: 0.15, h: 0.015 },
+  ];
+  assert.deepEqual(candidates.sort(byReadingOrder).map((a) => a.num), [5, 6, 7]);
+});
+
+test('byReadingOrder: 구역이 없으면 기존 단·줄·가로 순서 유지', () => {
+  const candidates = [
+    { num: 3, col: 1, x0: 0.55, y0: 0.15, h: 0.015 },
+    { num: 2, col: 0, x0: 0.3, y0: 0.6, h: 0.015 },
+    { num: 1, col: 0, x0: 0.1, y0: 0.6, h: 0.015 },
+  ];
+  assert.deepEqual(candidates.sort(byReadingOrder).map((a) => a.num), [1, 2, 3]);
 });
 
 test('trimRect: 여백 잘라내기', () => {

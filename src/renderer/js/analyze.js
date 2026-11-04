@@ -175,16 +175,20 @@ async function ocrTokens(src, page, { width, mode }, ocrLang) {
   // 1단으로 보이면 가운데쯤(둘째 단 시작일 수 있는 곳)도 읽어 봄
   if (L.columns.length === 1 && L.columns[0].x1 - L.columns[0].x0 > 0.55) {
     const c = L.columns[0];
-    strips.push([c.x0 + (c.x1 - c.x0) * 0.4, c.x0 + (c.x1 - c.x0) * 0.66]);
+    strips.push([c.x0 + (c.x1 - c.x0) * 0.4, c.x0 + (c.x1 - c.x0) * 0.66, true]);
   }
   const parts = await Promise.all(
-    strips.map(async ([sx0, sx1]) => {
+    strips.map(async ([sx0, sx1, mid]) => {
       const sw = Math.round((sx1 - sx0) * W);
       const sh = Math.round((y1 - y0) * H);
       if (sw < 10 || sh < 10) return [];
       const strip = createCanvas(sw, sh);
       strip.getContext('2d').drawImage(hi, Math.round(sx0 * W), Math.round(y0 * H), sw, sh, 0, 0, sw, sh);
-      return toTokens(await recognizeWords(strip, { lang: ocrLang, psm: '4' }), sx0, y0);
+      let words = await recognizeWords(strip, { lang: ocrLang, psm: '4' });
+      // 가운데 띠는 글줄 한가운데를 자르므로, 왼쪽 잘린 경계에 붙은 글자는 반쪽 글자("를"의 오른쪽 → "3")라서 뺌
+      // (진짜 둘째 단 번호는 단 사이 빈칸 뒤에 있어 경계에 붙지 않음)
+      if (mid) words = words.filter((w) => w.x0 / W > 0.004);
+      return toTokens(words, sx0, y0);
     }),
   );
   return parts.flat();
@@ -617,6 +621,7 @@ async function findNumbersInRegions(src, page, regions, ref, sig) {
       y1: b.y1,
       h: bh,
       col: b.col,
+      zone: zoneOf(layout, b.y0),
       relX: b.x0 - col.x0,
       hRatio: page.bodyH ? bh / page.bodyH : sig.hRatio,
       conf: Math.max(60, conf),
@@ -686,6 +691,12 @@ function shareSplitHints(results) {
   }
 }
 
+/** 단원 띠로 나뉜 구역을 먼저 읽도록 번호 후보를 정렬 */
+function sortCandidatesByZone(page) {
+  for (const c of page.candidates) c.zone = zoneOf(page.layout, c.y0);
+  page.candidates.sort(byReadingOrder);
+}
+
 /**
  * 문서 전체 분석
  * @param {import('./docsource.js').DocSource} src
@@ -693,6 +704,7 @@ function shareSplitHints(results) {
  *   pages: number[]               분석할 쪽(0부터)
  *   role: 'problem'|'answer'
  *   flow: 'column'|'continue'
+ *   subject: 'math'|'english'|'korean' (기본값: 'math')
  *   numberStyle: 'auto'|...
  *   ocrLang
  *   onProgress({phase, done, total, message})
@@ -700,6 +712,7 @@ function shareSplitHints(results) {
  */
 export async function analyzeDocument(src, opts) {
   const { role = 'problem', flow = 'column', numberStyle = 'auto', ocrLang, onProgress, signal } = opts;
+  const passages = opts.subject === 'english' || opts.subject === 'korean';
   let { pages } = opts;
   let results = [];
   let splitHint = null; // 번호 위치로 추정한 단 위치(같은 책 다음 쪽에도 적용)
@@ -756,6 +769,7 @@ export async function analyzeDocument(src, opts) {
     }
   };
   markTables();
+  for (const r of results) sortCandidatesByZone(r);
   let { anchors, signature, signatures } = selectAnchors(results, { numberStyle });
 
   // 3) 번호가 건너뛴 OCR 쪽은 해상도를 바꿔 한 번 더 읽어 후보를 보탬
@@ -763,6 +777,7 @@ export async function analyzeDocument(src, opts) {
   if (reread.length) {
     await ocrPages(src, reread, { passes: OCR_RETRY, ocrLang, role, signal, onProgress, label: '빠진 번호 다시 읽는 중' });
     markTables();
+    for (const r of reread) sortCandidatesByZone(r);
     ({ anchors, signature, signatures } = selectAnchors(results, { numberStyle }));
   }
   // 4) 그래도 빠진 번호는 번호 자리를 하나씩 잘라 숫자만 읽음
@@ -782,7 +797,7 @@ export async function analyzeDocument(src, opts) {
   if (answersFrom >= 0) flags.set(answersFrom, ['여기부터는 정답과 풀이 같아서 뺌 (문제 쪽까지만 범위를 정하면 사라짐)']);
   const cutters = buildCutters(results, anchors, signature);
   const ranges = new Map(results.filter((r) => r.ranges?.length).map((r) => [r.index, r.ranges]));
-  let items = computeItems(pages, anchors, layouts, grids, { flow, source: sourceMap, cutters, stopPages: tablePages, ranges });
+  let items = computeItems(pages, anchors, layouts, grids, { flow, passages, source: sourceMap, cutters, stopPages: tablePages, ranges });
   // 앞 쪽 해설이 통째로 이어지는 쪽(긴 해설의 가운데 쪽)은 번호가 없는 게 맞음
   if (flow === 'continue') {
     const continued = new Set(items.flatMap((it) => it.rects.filter((r) => r.page !== it.page).map((r) => r.page)));
@@ -951,7 +966,7 @@ export function replacePageItems(items, pageIdx, newItems) {
  *  - 글자가 있어도 OCR 을 함께, 더 높은 해상도·넓은 띠·두 가지 방식으로 읽고
  *  - 앞 쪽 마지막 번호 ~ 뒤 쪽 첫 번호 사이에 들어갈 번호를 모양과 상관없이 가장 길게 이어지게 고름
  */
-export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true, role = 'problem' } = {}) {
+export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true, role = 'problem', subject } = {}) {
   const page = await analyzePage(src, idx, { ocrLang, deep, role });
   const sorted = sortItems((doc.items || []).filter((it) => !it.prefix));
   const prev = sorted.filter((it) => it.page < idx);
@@ -960,6 +975,7 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
   const nextFirst = next.length ? next[0].num : null;
   if (looksLikeAnswerTable(page.candidates, { strict: role !== 'answer' })) page.candidates = [];
   const signatures = doc.signatures || (doc.signature ? [doc.signature] : null);
+  sortCandidatesByZone(page);
   const { anchors: sel } = selectAnchors([page], { numberStyle: doc.options?.numberStyle, signatures, prevLast });
   let chain = sel.get(idx) || [];
   if (deep) {
@@ -979,6 +995,7 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
   const anchors = new Map([[idx, chain]]);
   const newItems = computeItems([idx], anchors, new Map([[idx, page.layout]]), new Map([[idx, page.grid]]), {
     flow: doc.options?.flow || 'column',
+    passages: subject === 'english' || subject === 'korean',
     source: new Map([[idx, page.source]]),
     cutters: buildCutters([page], anchors, doc.signature),
     ranges: new Map([[idx, page.ranges || []]]),
