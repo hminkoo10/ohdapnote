@@ -159,7 +159,7 @@ test('업데이트 재시작 화면·IPC', { timeout: 60000 }, async (t) => {
         await nav.note(note.id);
       }, source);
       await win.click('.export-btn[data-mode="problems"]');
-      await win.click('.gem-modal .modal-footer .btn:has-text("백그라운드에서 계속")');
+      await win.click('.gem-modal .modal-footer .btn:has-text("다른 일 하면서 기다리기")');
       await win.waitForSelector('.toast:has-text("한글 문서가 준비됐어요")', { timeout: 15000 });
       assert.equal(await win.evaluate(async () => (await import('./js/shared.js')).restartGuard.getState().pendingSaves), true);
       await win.click('#update-notice button');

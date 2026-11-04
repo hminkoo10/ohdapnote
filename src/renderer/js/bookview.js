@@ -459,7 +459,7 @@ function docCard(role, i) {
         'button.btn.btn-small.btn-primary.bg-btn',
         { onclick: () => nav.home({ tab: 'books' }), title: '분석은 계속하고 책장으로 나가요. 다른 책이나 오답노트를 보는 동안 위쪽 막대에서 진행 상황을 볼 수 있어요.' },
         icon('collapse'),
-        '백그라운드에서 계속',
+        '다른 일 하면서 기다리기',
       ),
     );
   } else {
@@ -519,9 +519,9 @@ async function importFiles(role, paths, { add = false } = {}) {
     rematch();
     bs.role = role;
     render();
-    toast(`${ROLE_NAME[role]}을(를) 올렸어요. [${ROLE_NAME[role]} 분석]을 눌러 주세요.`, { type: 'success' });
+    toast(`${role === 'problem' ? '문제집을' : '답지를'} 올렸어요. [${ROLE_NAME[role]} 분석]을 눌러 주세요.`, { type: 'success' });
   } catch (err) {
-    toast(err.message, { type: 'error', timeout: 8000 });
+    toast(errMsg(err), { type: 'error', timeout: 8000 });
   }
 }
 
@@ -557,7 +557,7 @@ async function addMoreFiles(role, paths) {
     if (doc.analyzedAt && pages.length) await analyzeRole(role, { only: pages });
     else toast(`${ROLE_NAME[role]}에 ${pages.length}쪽을 더했어요.${doc.analyzedAt ? '' : ` [${ROLE_NAME[role]} 분석]을 눌러 주세요.`}`, { type: 'success' });
   } catch (err) {
-    toast(err.message, { type: 'error', timeout: 8000 });
+    toast(errMsg(err), { type: 'error', timeout: 8000 });
   }
 }
 
@@ -836,7 +836,7 @@ function checkPanel(role, doc, pages, missing) {
               'div.cp-actions',
               h('button.btn.btn-small.btn-ghost', { onclick: () => switchTab('review', { role, page: p }), title: '페이지 검토에서 직접 보고 고치기' }, icon('eye'), '검토'),
               h('button.btn.btn-small.btn-ghost', { onclick: () => deepPage(role, p), title: '이 쪽만 더 꼼꼼하게(고해상도 OCR + 앞뒤 번호에 맞춰) 다시 찾기' }, icon('search'), '꼼꼼히 다시 찾기'),
-              h('button.btn.btn-small.btn-ghost', { onclick: () => sendToGemini(role, [p]), title: 'AI로 이 쪽 인식', hidden: aiOff() }, icon('sparkle')),
+              h('button.btn.btn-small.btn-ghost', { onclick: () => sendToGemini(role, [p]), title: 'AI로 이 쪽 인식', hidden: aiOff() }, icon('sparkle'), 'AI'),
               h('button.btn.btn-small.btn-ok', { onclick: () => dismissPages(role, [p]), title: '이대로 괜찮아요' }, icon('check'), '문제없음'),
             ),
       );

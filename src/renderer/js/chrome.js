@@ -1,7 +1,7 @@
 // 위쪽 막대, 뒤에서 도는 작업 표시, 설정 창 (업데이트는 통합 클라우드가 맡음)
 
 import { h, toast, modal, icon } from './ui.js';
-import { api, state, nav, jobs, jobListeners, findJob, setRestartBusy } from './shared.js';
+import { api, state, nav, jobs, jobListeners, findJob, setRestartBusy, errMsg } from './shared.js';
 import { aiSettingsCard } from './aisettings.js';
 
 const fmtMB = (b) => (b ? `${(b / 1048576).toFixed(1)}MB` : '');
@@ -16,6 +16,7 @@ export function topbar(left, right = null) {
       'div.topbar-right',
       right,
       jobBadge,
+      h('button.btn.btn-ghost#help-btn', { onclick: () => openHelp(), title: '사용 설명서를 브라우저에서 열어요' }, icon('help'), h('span', '도움말')),
       h('button.btn.btn-ghost#settings-btn', { onclick: () => openSettings(), title: '설정' }, icon('gear'), h('span', '설정')),
     ),
   );
@@ -164,7 +165,7 @@ export async function openSettings() {
     h('section.set-card',
       h('h4', icon('gear'), '프로그램'),
       h('label.field', h('span', '애니메이션'), motionSelect),
-      h('div.field', h('span', '통합 클라우드 계정'), h('div.field-row', h('span', accountText()), h('button.btn.btn-small', { onclick: () => api.openCloud() }, '통합 클라우드 열기'))),
+      h('div.field', h('span', '통합 클라우드 계정'), h('div.field-row', h('span', accountText()), h('button.btn.btn-small', { onclick: () => api.openCloud() }, '통합 클라우드 열기'), h('button.btn.btn-small', { onclick: () => openHelp('settings'), title: '사용 설명서를 브라우저에서 열어요' }, icon('help'), '사용 설명서'))),
       h('p.small.muted', '업데이트는 통합 클라우드가 받아 둬요. 오답노트를 다시 켜면 새 버전으로 바뀌어요.'),
       h('div.credit', h('span', `오답노트 ${state.appInfo.version}`), h('span.dot'), h('span', `개발 ${state.appInfo.developer || '구현민'}`)),
     ),
@@ -187,6 +188,7 @@ export async function openSettings() {
             teacher: teacherInput.value.trim(),
             motion: motionSelect.value,
           });
+          toast('설정을 저장했어요', { type: 'success' });
           return true;
         },
       },
@@ -194,4 +196,21 @@ export async function openSettings() {
   });
   applyMotion(state.settings.motion);
   if (r) nav.refresh?.();
+}
+
+function currentHelpSection() {
+  if (state.view === 'home') {
+    // homeTab 은 home.js 내부 값이므로, 누르는 순간의 활성 탭을 읽음.
+    const tab = document.querySelector('.home .seg-tabs .seg-tab.active')?.dataset.tab;
+    return { notes: 'note', books: 'book', students: 'students' }[tab] || '';
+  }
+  return state.view === 'book' || state.view === 'note' ? state.view : '';
+}
+
+async function openHelp(section = currentHelpSection()) {
+  try {
+    await api.openHelp(section);
+  } catch (err) {
+    toast(`사용 설명서를 열지 못했어요: ${errMsg(err)}`, { type: 'error' });
+  }
 }

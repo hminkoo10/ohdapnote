@@ -51,7 +51,7 @@ export function clear(el) {
 // 토스트
 // ---------------------------------------------------------------------------
 let toastRoot = null;
-export function toast(message, { type = 'info', timeout = 3500, actions = [] } = {}) {
+export function toast(message, { type = 'info', actions = [], timeout = actions.length ? 10000 : 3500 } = {}) {
   if (!toastRoot) {
     toastRoot = h('div.toasts');
     document.body.append(toastRoot);

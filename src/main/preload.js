@@ -98,4 +98,5 @@ contextBridge.exposeInMainWorld('ohdap', {
     ipcRenderer.on('mathocr:progress', listener);
     return () => ipcRenderer.removeListener('mathocr:progress', listener);
   },
+  openHelp: (section) => ipcRenderer.invoke('app:openHelp', section),
 });

@@ -1,5 +1,5 @@
 // 뒤에서 도는 작업 E2E
-//  스캔본 분석 → [백그라운드에서 계속] → 다른 책·오답노트로 가도 그 화면엔 쓰지 않음 → 위쪽 막대로 다시 열기
+//  스캔본 분석 → [다른 일 하면서 기다리기] → 다른 책·오답노트로 가도 그 화면엔 쓰지 않음 → 위쪽 막대로 다시 열기
 //  → 그 사이 책 이름 고치기 → 끝나면 토스트 [책 열기] + 윈도우 알림(흉내) + 그 책에만 저장
 //  → Gemini 창 숨기기·다시 열기·같은 작업은 하나만 → 끄기 전에 물어보기
 // Gemini 는 실제로 부르지 않고 메인 프로세스의 IPC 처리기를 바꿔 끼워서 흉내냅니다.
@@ -69,7 +69,7 @@ try {
   const scanId = list.find((b) => b.name === '스캔 문제집').id;
   const otherId = list.find((b) => b.name === '다른 책').id;
 
-  step('분석 시작 → [백그라운드에서 계속] → 책장, 위쪽 막대에 진행 상황');
+  step('분석 시작 → [다른 일 하면서 기다리기] → 책장, 위쪽 막대에 진행 상황');
   const t0 = Date.now();
   await win.click('.doc-card[data-role="problem"] .doc-foot .btn-primary');
   await win.waitForSelector('.doc-card[data-role="problem"] .doc-foot.busy');
@@ -145,7 +145,7 @@ try {
   await win.click('.tabs-row .seg-tab[data-tab="review"]');
   await win.waitForSelector('.editor-toolbar');
   await win.waitForTimeout(500);
-  const bgBtn = '.gem-modal .modal-footer .btn:has-text("백그라운드에서 계속")';
+  const bgBtn = '.gem-modal .modal-footer .btn:has-text("다른 일 하면서 기다리기")';
   await win.click('.editor-toolbar .btn >> text="AI"');
   await win.waitForSelector(bgBtn);
   await win.click(bgBtn);

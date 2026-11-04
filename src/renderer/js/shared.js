@@ -70,7 +70,7 @@ export function makeSaver(saveFn) {
     },
     failed: (err) => {
       failed = true;
-      toast(`저장하지 못했어요: ${err.message}`, { type: 'error' });
+      toast(`저장하지 못했어요: ${errMsg(err)}`, { type: 'error' });
     },
   });
   restartGuard.savers.add(saver);
@@ -105,7 +105,7 @@ export async function getSource(book, role) {
     book.docs[role].pageCount = src.numPages;
     return src;
   } catch (err) {
-    toast(`${book.name}의 ${ROLE_NAME[role]} 파일을 열지 못했어요: ${err.message}`, { type: 'error', timeout: 8000 });
+    toast('책 파일을 받지 못했어요. 인터넷 연결을 확인하고 다시 열어 주세요.', { type: 'error', timeout: 8000 });
     return null;
   }
 }
@@ -561,7 +561,7 @@ export function jobDialog({ title, jobTitle = title, body, width = 480, classNam
         ? [{ label: '닫기', value: 'close', primary: true }]
         : [
             { label: '취소', value: 'cancel' },
-            { label: '백그라운드에서 계속', value: 'background', primary: true },
+            { label: '다른 일 하면서 기다리기', value: 'background', primary: true },
           ],
       onClose: (value) => {
         dialog = null;

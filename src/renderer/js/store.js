@@ -42,7 +42,7 @@ export function bookPage(doc, pageIndex) {
 }
 
 export function pageLabel(doc, pageIndex) {
-  return `p.${bookPage(doc, pageIndex)}`;
+  return `${bookPage(doc, pageIndex)}쪽`;
 }
 
 export function itemsByPage(doc) {

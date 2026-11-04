@@ -20,11 +20,12 @@ function loadMain({ key = '', academy = false, cloudOverrides = {} } = {}) {
   const dir = mkdtempSync(path.join(root, 'main-'));
   const session = { dataDir: dir, localDir: path.join(dir, 'local'), academyDir: academy ? path.join(dir, 'academy') : '', user: { id: 'dev', name: '선생님', academy: '학원', role: 'director' } };
   const handlers = new Map();
+  const opened = [];
   const logs = [];
   const log = { initialize() {}, transports: { file: {} }, info: (s) => logs.push(s), warn: (s) => logs.push(s), error: (s) => logs.push(s) };
   const app = { isPackaged: false, getPath: () => dir, setPath() {}, setAppUserModelId() {}, requestSingleInstanceLock: () => true, on() {}, whenReady: () => ({ then() {} }) };
   const req = (name) => {
-    if (name === 'electron') return { app, protocol: { registerSchemesAsPrivileged() {} }, ipcMain: { handle: (k, fn) => handlers.set(k, fn), on: (k, fn) => handlers.set(k, fn) } };
+    if (name === 'electron') return { app, shell: { openExternal: async (url) => { opened.push(url); } }, protocol: { registerSchemesAsPrivileged() {} }, ipcMain: { handle: (k, fn) => handlers.set(k, fn), on: (k, fn) => handlers.set(k, fn) } };
     if (name === 'electron-log/main') return log;
     if (name === './magoedu-cloud') return { ...localRequire(name), ...cloudOverrides, check: () => session };
     if (name === './ai' || name === './mathocr') return {};
@@ -34,7 +35,7 @@ function loadMain({ key = '', academy = false, cloudOverrides = {} } = {}) {
   const source = readFileSync(mainFile, 'utf8');
   const exposed = 'sanitizeSettings, sanitizeBook, sanitizeNote, sanitizeProfile, sanitizeRenames, sanitizeTranscripts, sanitizeLegacyProject, readJson, readJsonSync, loadSettings, listBooks, listAllNotes, listStudents, memberNames, saveProfile, loadRenames, mergedTranscripts, importLegacy, registerIpc, DEFAULT_SETTINGS';
   new Function('require', 'module', '__dirname', 'process', `${source}\nmodule.exports = { ${exposed} };`)(req, mod, path.dirname(mainFile), { ...process, env: { ...process.env, MAGOEDU_DATA_KEY: key } });
-  return { ...mod.exports, session, dir, logs, handlers };
+  return { ...mod.exports, session, dir, logs, handlers, opened };
 }
 
 function loadCloud(env = process.env) {
@@ -523,4 +524,48 @@ test('legacy 짝 정보·신규 source·큰 시각 보존, 재검증은 동일',
     const value = fn(input);
     assert.deepEqual(fn(value), value, fn.name);
   }
+});
+
+test('도움말 IPC: 세션 서버·http·하위 경로·끝 슬래시와 앵커', async () => {
+  const m = loadMain();
+  m.registerIpc();
+  const open = m.handlers.get('app:openHelp');
+  for (const [server, base] of [
+    ['https://school.example///', 'https://school.example'],
+    ['http://192.168.0.10:8080/', 'http://192.168.0.10:8080'],
+    ['https://school.example/cloud/', 'https://school.example/cloud'],
+  ]) {
+    m.session.server = server;
+    for (const section of ['', 'book', 'students', 'note', 'export', 'settings', 'part-2']) {
+      await open(null, section);
+      assert.equal(m.opened.at(-1), `${base}/help/ohdapnote.html${section ? '#' + section : ''}`);
+    }
+  }
+});
+
+test('도움말 IPC: 비어 있거나 이상한 서버는 기본 서버', async () => {
+  const m = loadMain();
+  m.registerIpc();
+  for (const server of [undefined, '', null, 123, {}, 'not a url', 'http://', 'https:example.com', 'file:///C:/x', 'javascript:alert(1)', 'https://user:pass@example.com', 'https://example.com/?x=1', 'https://example.com/#x', 'https://example.com\\x', 'https://example.com\n']) {
+    m.session.server = server;
+    await m.handlers.get('app:openHelp')(null);
+    assert.equal(m.opened.at(-1), 'https://mago.milky.kr/help/ohdapnote.html');
+  }
+});
+
+test('도움말 IPC: 문자열 아닌 값·앵커 밖 문자는 외부 열기 거부', async () => {
+  const m = loadMain();
+  m.registerIpc();
+  for (const section of [null, 1, {}, [], '#book', 'Book', '책', 'book/name', 'book?x=1', 'book_name', 'book\n', 'book\r', ' book']) {
+    assert.equal(await m.handlers.get('app:openHelp')(null, section), false);
+  }
+  assert.deepEqual(m.opened, []);
+});
+
+test('일반 외부 링크 IPC: 기존 https 제한 유지', async () => {
+  const m = loadMain();
+  m.registerIpc();
+  assert.equal(await m.handlers.get('shell:openExternal')(null, 'http://school.example'), false);
+  await m.handlers.get('shell:openExternal')(null, 'https://school.example');
+  assert.deepEqual(m.opened, ['https://school.example']);
 });

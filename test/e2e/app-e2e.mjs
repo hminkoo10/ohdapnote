@@ -231,8 +231,8 @@ try {
     await stubSave(out);
     await win.click('.export-btn[data-mode="problems"]');
     if (background) {
-      // 옮기는 창에서 [백그라운드에서 계속] → 위쪽 막대에 보이고, 끝나면 저장 창 대신 [저장하기] 알림
-      await win.click('.gem-modal .modal-footer .btn >> text=백그라운드에서 계속');
+      // 옮기는 창에서 [다른 일 하면서 기다리기] → 위쪽 막대에 보이고, 끝나면 저장 창 대신 [저장하기] 알림
+      await win.click('.gem-modal .modal-footer .btn >> text=다른 일 하면서 기다리기');
       await win.waitForSelector('.job-chip', { timeout: 5000 });
       await waitToast('한글 문서가 준비됐어요', 120000);
       if (existsSync(out)) throw new Error('뒤에서 끝났는데 저장 창을 바로 띄웠습니다');
@@ -282,7 +282,7 @@ try {
   step('한글: 뒤에서 옮기는 중에 문항 하나를 빼고 다시 → 고친 내용으로 새로 / [취소] 뒤 다시 → 새로');
   await app.evaluate(() => (globalThis.gemDelay = 8000)); // 이 사이에 옮긴 결과가 저장되지 않게
   await win.click('.export-btn[data-mode="problems"]');
-  await win.click('.gem-modal .modal-footer .btn >> text=백그라운드에서 계속');
+  await win.click('.gem-modal .modal-footer .btn >> text=다른 일 하면서 기다리기');
   await win.waitForSelector('.job-chip', { timeout: 5000 });
   const dropId = await win.getAttribute('.qtable .chip.on >> nth=0', 'data-id');
   await win.click(`.qtable .chip[data-id="${dropId}"]`);

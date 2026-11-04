@@ -216,7 +216,7 @@ function studentSettings() {
       h('span.sw'),
       '학생에게 답지 보여 주기',
     ),
-    h('span.small.muted#answers-for-student-hint', '켜면 학생이 받는 PDF에 답지(해설)도 들어가요.'),
+    h('span.small.muted#answers-for-student-hint', "켜면 학생이 통합 클라우드 웹의 '내 오답노트'에서 받는 PDF에 답지(해설)도 들어가요."),
   );
 }
 

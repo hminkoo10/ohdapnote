@@ -1462,6 +1462,16 @@ function registerIpc() {
       if (requestId) mathocrRequests.delete(requestId);
     }
   });
+
+  // 사용 설명서는 통합 클라우드 서버에서 열기 (학원 안의 http 서버도 허용).
+  handle('app:openHelp', (_e, section = '') => {
+    if (typeof section !== 'string' || /[^a-z0-9-]/.test(section)) return false;
+    const checked = url(session?.server);
+    const server = checked && /^https?:\/\/[^\\?#]+$/i.test(checked)
+      ? checked.replace(/\/+$/, '')
+      : 'https://mago.milky.kr';
+    return shell.openExternal(`${server}/help/ohdapnote.html${section ? '#' + section : ''}`);
+  });
 }
 
 // ---------------------------------------------------------------------------
