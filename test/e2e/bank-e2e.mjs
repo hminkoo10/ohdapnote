@@ -392,7 +392,7 @@ try {
   await win.waitForSelector(`.bank-book[data-book="${ids.english}"] button:has-text("이어서 넣기")`);
   await win.click(`.bank-book[data-book="${ids.english}"] button`);
   await win.click('.modal .btn-primary:has-text("넣기 시작")');
-  await win.click('.modal .btn-primary:has-text("백그라운드에서 계속")');
+  await win.click('.modal .btn-primary:has-text("다른 일 하면서 기다리기")');
   await win.waitForFunction(() => window.bankJob()?.done === 2);
   await win.click(`.bank-book[data-book="${ids.english}"] button:has-text("진행 보기")`);
   await win.getByRole('button', { name: '취소', exact: true }).click();

@@ -358,7 +358,7 @@ function noConvertToast(mode, n) {
 
 /**
  * 옮기는 동안 보이는 창 (문항별 상태 · 어떤 방법으로 옮겼는지(PDF/OCR/AI), 진행 막대).
- * [취소]하면 바로 요청·인식을 끊고, [백그라운드에서 계속]이면 창만 닫고 계속
+ * [취소]하면 바로 요청·인식을 끊고, [다른 일 하면서 기다리기]이면 창만 닫고 계속
  */
 function transcribeDialog(work, { ocr, ai: aiCount, useAi, useOcr }, abort, { key, sig, jobTitle }) {
   const rows = new Map();
