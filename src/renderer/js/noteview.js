@@ -10,6 +10,7 @@ import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, set
 import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiOptions, aiLabel, aiModelText, jobDialog, findJob, holdSource, restartGuard, restartSaveHooks, restartPendingChecks } from './shared.js';
 import { topbar } from './chrome.js';
 import { spineFor, studentSearch } from './home.js';
+import { examTeacher } from './exam-teacher.js';
 
 // 바뀐 횟수 / 저장할 때의 횟수 — 실시간으로 다시 읽을 때 고치는 중인지 보려고 (makeSaver 는 알려 주지 않음)
 let dirtySeq = 0;
@@ -39,6 +40,8 @@ const ns = {
   active: null, // 지금 보고 있는 책 id
   focus: null,
   onlySelected: false,
+  teacherMembers: [],
+  teacherStudents: [],
 };
 
 window.addEventListener('beforeunload', () => {
@@ -117,7 +120,7 @@ export async function openNote(id) {
     ns.note = null;
   });
   // 책 읽기 (지워진 책은 '지워진 책'으로 남기고 문항은 빼고 보여 줌)
-  await loadBooks(note.bookIds);
+  await Promise.all([loadBooks(note.bookIds), loadExamTeachers(note)]);
   // 책에서 사라진 문항은 선택에서 정리 (보기만 하는 오답노트는 그대로)
   for (const [bid, b] of ns.books) {
     const ids = new Set((b.docs.problem?.items || []).map((it) => it.id));
@@ -226,6 +229,7 @@ async function changeStudent() {
   const search = studentSearch(students, { picked: cur });
   if (!cur) search.input.value = n.student || '';
   const shared = state.appInfo.roster === 'cloud';
+  ns.teacherStudents = shared ? students : [];
   const r = await modal({
     title: '학생 바꾸기',
     body: h(
@@ -571,6 +575,15 @@ const today = () => {
   return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}.`;
 };
 
+async function loadExamTeachers(note) {
+  const [members, students] = state.appInfo.roster === 'cloud'
+    ? await Promise.all([api.listMembers().catch(() => []), api.listStudents().catch(() => [])])
+    : [[], []];
+  if (ns.note !== note) return;
+  ns.teacherMembers = members.filter((m) => typeof m.name === 'string' && m.name.trim());
+  ns.teacherStudents = students;
+}
+
 function examInfo() {
   const n = ns.note;
   const s = state.settings;
@@ -578,7 +591,7 @@ function examInfo() {
     title: n.title,
     student: n.student || '',
     academy: n.academy ?? s.academy ?? '',
-    teacher: n.teacher ?? s.teacher ?? '',
+    teacher: examTeacher(n, { ...state.appInfo, students: ns.teacherStudents, settings: s }),
     date: n.examDate || today(),
   };
 }
@@ -587,9 +600,51 @@ function syncExamFields() {
   const info = examInfo();
   for (const [k, v] of Object.entries(info)) {
     const el = document.querySelector(`.exam-field [data-key="${k}"]`);
-    if (el && document.activeElement !== el) el.value = v;
+    if (!el || el.closest('.exam-field').contains(document.activeElement)) continue;
+    if (k === 'teacher' && el.value !== v) el.closest('.exam-field').replaceWith(examTeacherField());
+    else el.value = v;
   }
   renderExamMock();
+}
+
+function examTeacherField() {
+  const n = ns.note;
+  const members = ns.teacherMembers;
+  const name = examInfo().teacher;
+  const input = h('input.input.input-small', {
+    value: name, placeholder: '선생님 이름을 써 주세요', dataset: { key: 'teacher' },
+    'aria-label': members.length ? '직접 쓸 선생님 이름' : '선생님', readOnly: ns.readonly,
+    oninput: () => {
+      n.teacher = input.value.trim();
+      markDirty();
+      renderExamMock();
+    },
+  });
+  let select = null;
+  if (members.length) {
+    select = h('select.input.input-small', {
+      'aria-label': '선생님', disabled: ns.readonly,
+      onchange: () => {
+        input.hidden = select.value !== '';
+        if (!input.hidden) {
+          input.focus();
+          return;
+        }
+        n.teacher = input.value = members[Number(select.value)].name;
+        markDirty();
+        renderExamMock();
+      },
+    },
+    members.map((m, i) => h('option', { value: String(i) }, `${m.name}${m.roleLabel ? ` · ${m.roleLabel}` : ''}${m.id === state.appInfo.user?.id ? ' (나)' : ''}`)),
+    h('option', { value: '' }, '직접 쓰기…'));
+    const index = members.findIndex((m) => m.name === name);
+    select.value = index < 0 ? '' : String(index);
+    input.hidden = index >= 0;
+  }
+  return h('div.exam-field.exam-teacher',
+    h('span.ef-label', icon('user'), '선생님'), select, input,
+    members.length ? h('span.small.muted', '목록에 없으면 직접 써 주세요.') : null,
+  );
 }
 
 function exportPanel() {
@@ -644,14 +699,14 @@ function exportPanel() {
     h(
       'details.exam-box',
       { open: true },
-      h('summary', icon('school'), '시험지 머리', h('span.small.muted', '학원·선생님 기본값은 설정에서')),
+      h('summary', icon('school'), '시험지 머리', h('span.small.muted', '이 시험지에 쓸 이름을 정해요')),
       h('div.exam-mock'),
       h(
         'div.exam-fields',
         field('title', '제목', 'notebook', '오답노트 제목'),
         field('student', '학생', 'user', '학생 이름'),
         field('academy', '학원', 'school', state.settings.academy || '학원 이름'),
-        field('teacher', '선생님', 'user', state.settings.teacher || '선생님 이름'),
+        examTeacherField(),
         field('date', '날짜', 'calendar', today()),
       ),
     ),
@@ -744,6 +799,7 @@ function setFormatHint(el) {
 
 /** 내보내기 안내 다시 쓰기 (설정에서 AI·수식 인식 모델이 바뀌었을 때도) */
 export function renderFormatHint() {
+  if (ns.note && state.view === 'note') syncExamFields();
   const el = document.querySelector('.export-hint');
   if (!el) return;
   setFormatHint(el);
@@ -995,6 +1051,13 @@ export function noteDataChanged(change) {
 async function applyChange(change) {
   const n = ns.note;
   if (!n || state.view !== 'note' || !change) return;
+  if (change.students) {
+    await loadExamTeachers(n);
+    if (ns.note !== n) return;
+    const field = document.querySelector('.exam-teacher');
+    if (field && !field.contains(document.activeElement)) field.replaceWith(examTeacherField());
+    syncExamFields();
+  }
   const hit = (list, id) => Array.isArray(list) && (list.includes(id) || list.includes('*'));
   const bookIds = n.bookIds.filter((bid) => hit(change.books, bid));
   const noteHit = hit(change.notes, n.id);
