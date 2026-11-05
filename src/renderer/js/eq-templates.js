@@ -72,6 +72,13 @@ export function moveSlot(script, start, end = start, backward = false) {
   const next = current < 0
     ? backward ? slots.findLast((slot) => slot.end < start) : slots.find((slot) => slot.start > end)
     : slots[current + (backward ? -1 : 1)];
+  if (!backward && !next) {
+    const tree = parseEq(script);
+    const font = tree.type === 'sequence' ? tree.children.findLast((node) => node.type === 'style')?.font : null;
+    const suffix = ['bold', 'rmbold'].includes(font) ? `${/\s$/.test(script) ? '' : ' '}rm `
+      : current >= 0 && slots[current].end === script.length && !/\s$/.test(script) ? ' ' : '';
+    if (suffix) return { script: script + suffix, start: script.length + suffix.length, end: script.length + suffix.length };
+  }
   return next || { start: backward ? 0 : script.length, end: backward ? 0 : script.length };
 }
 

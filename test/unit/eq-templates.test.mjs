@@ -41,7 +41,8 @@ test('Tab·역방향 이동은 채운 칸과 중첩 칸, 마지막 탈출을 지
   assert.deepEqual(moveSlot(text, slots[1].start, slots[1].end, true), slots[0]);
   assert.deepEqual(moveSlot(text, slots[2].start, slots[2].end), { start: text.length, end: text.length });
   assert.deepEqual(moveSlot(text, text.length, text.length, true), slots[2]);
-  assert.deepEqual(moveSlot('bold {x}', 6, 7), { start: 8, end: 8 });
+  assert.deepEqual(moveSlot('bold {x}', 6, 7), { script: 'bold {x} rm ', start: 12, end: 12 });
+  assert.deepEqual(moveSlot('x^a', 3), { script: 'x^a ', start: 4, end: 4 });
   assert.deepEqual(moveSlot('', 0), { start: 0, end: 0 });
 });
 

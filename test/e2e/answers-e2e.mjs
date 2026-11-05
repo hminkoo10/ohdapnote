@@ -188,6 +188,7 @@ try {
   assert.match(await win.locator('.answer-equation-modal .warn-text').innerText(), /확인/);
   await shot('equation');
   await win.keyboard.press('Escape');
+  await win.getByRole('button', { name: '버리기', exact: true }).click();
   await win.waitForSelector('.answer-equation-modal', { state: 'detached' });
   assert.equal(await win.locator('.answer-editor-modal').count(), 1, '수식 창 취소가 본문 창을 닫지 않음');
   console.log('▶ 답지 짝 지정·인식 글 불러오기·덮어쓰기 확인·그림 변환');

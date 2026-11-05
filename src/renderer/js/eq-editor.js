@@ -11,7 +11,8 @@ const button = (name, key, onclick, attrs = {}) => h('button.btn.btn-small', { t
 
 /** 본문은 확정할 때만 바꿉니다. 미리보기와 고르기 목록은 이 창의 초안만 다룹니다. */
 export async function openEquationEditor({ eq = '', display = false, returnScope = '' } = {}) {
-  const script = h('textarea.input.answer-equation-script', { rows: 4, maxlength: MAX_LENGTH, value: eq, spellcheck: false, 'aria-label': '한글 수식 스크립트' });
+  const script = h('textarea.input.answer-equation-script', { rows: 4, maxlength: MAX_LENGTH, spellcheck: false, 'aria-label': '한글 수식 스크립트' });
+  script.value = eq;
   const preview = h('div.answer-equation-preview', { tabindex: '0', 'aria-label': '바로 보이는 수식' });
   const warning = h('p.small.warn-text', { role: 'status' });
   const centered = h('input', { type: 'checkbox', checked: display });
@@ -35,7 +36,15 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
     const base = replace && replacement ? replacement : { source: script.value, start: script.selectionStart, end: script.selectionEnd };
     return apply(insertTemplate(base.source, base.start, base.end, template));
   };
-  const move = (backward) => { const slot = moveSlot(script.value, script.selectionStart, script.selectionEnd, backward); focus(slot.start, slot.end); };
+  const type = (text) => {
+    const start = script.selectionStart;
+    apply({ script: script.value.slice(0, start) + text + script.value.slice(script.selectionEnd), start: start + text.length, end: start + text.length });
+  };
+  const move = (backward) => {
+    const slot = moveSlot(script.value, script.selectionStart, script.selectionEnd, backward);
+    if (slot.script !== undefined) apply(slot);
+    else focus(slot.start, slot.end);
+  };
   const showPanel = (name, content) => {
     panel.replaceChildren(h('div.eq-picker-heading', h('strong', name), button('목록 닫기', 'Esc', () => { closePanel(); focus(); })), content);
     panel.hidden = false;
@@ -166,7 +175,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
     button('기호·문자표', '', pickSymbols), button('명령어', '\\', commandPanel), button('자주 쓰는 수식', '', macros), button('글자·파일', '', formatPanel), button('단축키', 'F1', help));
   const zoom = h('select.input', { 'aria-label': '수식 보기 확대', onchange: () => { preview.style.fontSize = `${32 * +zoom.value}px`; } },
     [['1', '100%'], ['1.25', '125%'], ['1.5', '150%'], ['2', '200%']].map(([value, name]) => h('option', { value }, name)));
-  const extra = h('div.eq-extra-tools', button('이전 칸', 'Shift+Tab', () => move(true)), button('다음 칸', 'Tab', () => move(false)), button('줄 바꿈', 'Enter', () => { put('#'); closePanel(); }), h('label', '보기 확대 ', zoom));
+  const extra = h('div.eq-extra-tools', button('이전 칸', 'Shift+Tab', () => move(true)), button('다음 칸', 'Tab', () => move(false)), button('줄 바꿈', 'Enter', () => { type('#'); closePanel(); }), h('label', '보기 확대 ', zoom));
   script.addEventListener('input', () => { closePanel(); if (!composing) paint(); });
   script.addEventListener('compositionstart', () => { composing = true; });
   script.addEventListener('compositionend', () => { composing = false; paint(); });
@@ -190,7 +199,10 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
       if (event.key === 'Escape' && event.shiftKey) { dialog.close({ eq: cleanScript(script.value), display: centered.checked }); return true; }
       if (event.key === 'Escape' && !panel.hidden) { closePanel(); focus(); return true; }
       if (event.key === 'Tab' && event.target === script) { move(event.shiftKey); return true; }
-      if (event.key === 'Enter' && event.target === script) { put('#'); closePanel(); return true; }
+      if (event.target === script && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && ['Digit6', 'Minus'].includes(event.code)) {
+        type(event.code === 'Digit6' ? '^' : '_'); closePanel(); return true;
+      }
+      if (event.key === 'Enter' && event.target === script) { type('#'); closePanel(); return true; }
       if (event.key === '\\' && event.target === preview) { commandPanel(); return true; }
       return false;
     },

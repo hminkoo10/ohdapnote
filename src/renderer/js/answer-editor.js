@@ -227,7 +227,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
     if (!editable || composing || e.isComposing) return;
     if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.code === 'KeyN') { e.preventDefault(); chord = Date.now(); return; }
     if (!e.altKey && !e.metaKey && e.code === 'KeyM' && Date.now() - chord < 1500) { e.preventDefault(); chord = 0; equation().catch(fail); return; }
-    chord = 0;
+    if (e.key !== 'Control') chord = 0;
     if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === 'KeyP') {
       const range = window.getSelection()?.rangeCount ? window.getSelection().getRangeAt(0) : null;
       const selected = e.target.closest?.('[data-eq]') || (range && range.startContainer === range.endContainer && range.endOffset === range.startOffset + 1 ? range.startContainer.childNodes[range.startOffset] : null);
