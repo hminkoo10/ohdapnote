@@ -378,6 +378,8 @@ try {
     await win.fill('.settings .set-adv .ai-only:not([hidden]) input', fakeUrl);
     await shot('9-settings-claude');
     await win.click('.modal-footer .btn-primary');
+    await waitToast('설정을 저장했어요', 10000);
+    await clearToasts();
     await win.waitForSelector('.export-hint:has-text("모두 AI(Claude)로")', { timeout: 10000 });
     const out = join(OUT, 'app-export-claude.hwpx');
     rmSync(out, { force: true });
@@ -418,7 +420,8 @@ try {
   await shot('9-settings');
   await win.fill('.settings .set-card >> nth=0 >> input >> nth=0', '기본학원');
   await win.click('.modal-footer .btn-primary');
-  await win.waitForTimeout(400);
+  await waitToast('설정을 저장했어요', 10000);
+  await clearToasts();
   const saved = await win.evaluate(() => window.ohdap.getSettings());
   if (saved.academy !== '기본학원' || !('geminiModel2' in saved)) throw new Error('설정 저장 실패: ' + JSON.stringify(saved));
 
