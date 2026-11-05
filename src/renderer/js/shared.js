@@ -264,8 +264,11 @@ export async function renderPreview(box, o) {
     ),
     h('div.preview-scroll', probImg),
   );
-  if (ansDoc) {
-    const options = sortItems(ansDoc.items || []).filter((a) => a.num === item.num);
+  {
+    const { answerEditorButton, showAnswerPreview } = await import('./answer-editor.js');
+    if (token !== previewToken) return;
+    const written = h('div.answer-preview');
+    const options = sortItems(ansDoc?.items || []).filter((a) => a.num === item.num);
     const overrides = book.answerOverrides || {};
     const has = Object.prototype.hasOwnProperty.call(overrides, item.id);
     const sel = o.onOverride
@@ -283,13 +286,16 @@ export async function renderPreview(box, o) {
         h('span.tag.teal', '해설'),
         h('strong', ans ? `답지 ${pageLabel(ansDoc, ans.page)} ${itemName(ans)}` : '짝을 못 찾음'),
         h('span.push'),
+        answerEditorButton({ book, item, sources, answerItem: ans, onChange: () => renderPreview(box, o) }),
         sel,
         ans && o.onShow ? h('button.btn.btn-small.btn-ghost', { title: '답지에서 보기', onclick: () => o.onShow('answer', ans.page, ans.id) }, icon('eye')) : null,
       ),
       ans
         ? h('div.preview-scroll', ansImg)
         : h('p.muted.small.pad', '답지에서 같은 번호를 찾지 못했어요. 목록에서 직접 고르거나, 책 화면의 페이지 검토에서 답지 영역을 그려 주세요.'),
+      written,
     );
+    showAnswerPreview(written, book.id, item.id).catch((err) => console.warn('해설 미리보기', err));
   }
   const [pu, au] = await Promise.all([
     itemImage(sources.problem, item, width, { stem: item.stem }),

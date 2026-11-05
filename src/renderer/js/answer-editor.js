@@ -1,0 +1,302 @@
+import { h, modal, toast, confirmDialog } from './ui.js';
+import { api, getSources, itemImage, restartSaveHooks, restartPendingChecks, leaveHooks } from './shared.js';
+import { loadTranscripts, bestTranscript, pdfTranscribe, TRANSCRIBE_WIDTH } from './transcribe.js';
+import { blockSegs, renderStack, cropImage } from './hwpx.js';
+import { computeMatches, findItem } from './store.js';
+import { eqToMathML, parseEq } from './hwpeqview.js';
+import { blocksToModel, modelToBlocks, createAnswerHistory, importAnswerBlocks, recognizedAnswer, answerContent } from './answer-model.js';
+import { createSaveQueue } from './save-queue.js';
+
+const fail = (err) => toast(err.message || String(err), { type: 'error', timeout: 9000 });
+const writable = (book) => book.$canEdit !== false && book.$subjectOpen !== false;
+
+export function answerEditorButton(options) {
+  const { book, item } = options;
+  const button = h('button.btn.btn-small.answer-open', { onclick: () => openAnswerEditor(options).catch(fail) }, writable(book) ? '정답·해설 쓰기' : '정답·해설 보기');
+  api.getAnswers(book.id).then((data) => {
+    if (writable(book) && answerContent(data.items[item.id])) button.textContent = '정답·해설 고치기';
+  }).catch(fail);
+  return button;
+}
+
+function mathNode(eq, display = false) {
+  const node = h(display ? 'div.answer-math.answer-display' : 'span.answer-math', { contenteditable: 'false', draggable: true, tabindex: '0', dataset: { eq, ...(display ? { block: 'math' } : {}) }, title: '누르면 수식을 고쳐요' });
+  node.innerHTML = eqToMathML(eq, { display });
+  return node;
+}
+
+export function renderAnswerDocument(root, blocks, images = new Map()) {
+  root.replaceChildren();
+  for (const b of blocksToModel(blocks)) {
+    if (b.type === 'math') root.append(mathNode(b.eq, true));
+    else if (b.type === 'figure') {
+      root.append(h('div.answer-figure', { contenteditable: 'false', draggable: true, tabindex: '0', dataset: { block: 'figure', file: b.file, w: b.w, h: b.h } }, h('img', { src: images.get(b.file) || '', alt: '해설 그림' })));
+    } else {
+      const p = h('p', { dataset: { original: JSON.stringify(b.original) } });
+      for (const run of b.runs) p.append(run.eq !== undefined ? mathNode(run.eq) : document.createTextNode(run.text));
+      if (!p.textContent && !p.querySelector('[data-eq]')) p.append(h('br'));
+      root.append(p);
+    }
+  }
+  if (!root.childNodes.length) root.append(h('p', h('br')));
+}
+
+export function readAnswerDocument(root) {
+  const model = [];
+  let runs = [];
+  let original;
+  const flush = (empty = false) => {
+    if (runs.length || empty) model.push({ type: 'para', runs, original });
+    runs = []; original = undefined;
+  };
+  const addText = (text) => {
+    if (!text) return;
+    if (runs.at(-1)?.text !== undefined) runs.at(-1).text += text;
+    else runs.push({ text });
+  };
+  const walk = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) { addText(node.nodeValue); return; }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    if (node.dataset.block === 'figure') {
+      flush(); model.push({ type: 'figure', file: node.dataset.file, w: +node.dataset.w, h: +node.dataset.h }); return;
+    }
+    if (node.dataset.eq !== undefined) {
+      if (node.dataset.block === 'math') { flush(); model.push({ type: 'math', eq: node.dataset.eq }); }
+      else runs.push({ eq: node.dataset.eq });
+      return;
+    }
+    const para = /^(P|DIV)$/.test(node.tagName);
+    if (para) { flush(); try { original = JSON.parse(node.dataset.original); } catch { /* 새 문단 */ } }
+    if (node.tagName === 'BR' && node.parentNode.childNodes.length > 1) addText('\n');
+    else for (const child of node.childNodes) walk(child);
+    if (para) flush(true);
+  };
+  for (const child of root.childNodes) walk(child);
+  flush();
+  return modelToBlocks(model);
+}
+
+async function loadImages(bookId, blocks, images) {
+  for (const b of blocks) if (b.type === 'figure' && !images.has(b.file)) images.set(b.file, await api.getAnswerImage(bookId, b.file));
+}
+
+export async function showAnswerPreview(root, bookId, itemId) {
+  const entry = (await api.getAnswers(bookId)).items[itemId];
+  const blocks = answerContent(entry);
+  if (!blocks) return;
+  const images = new Map();
+  await loadImages(bookId, blocks, images);
+  if (!root.isConnected) return;
+  if (entry.answer) root.append(h('strong', `정답 ${entry.answer}`));
+  const doc = h('div.answer-document.answer-readonly');
+  renderAnswerDocument(doc, blocks, images);
+  root.append(doc);
+}
+
+export async function openAnswerEditor({ book, item, sources, answerItem, onChange }) {
+  book = await api.getBook(book.id);
+  let editable = writable(book);
+  let saved = (await api.getAnswers(book.id)).items[item.id] || { answer: '', blocks: [] };
+  let draft = { answer: saved.answer, blocks: saved.blocks };
+  let history = createAnswerHistory(draft);
+  const images = new Map();
+  await loadImages(book.id, draft.blocks, images);
+  sources ||= await getSources(book);
+  answerItem ||= findItem(book.docs.answer, computeMatches(book).get(item.id));
+  const status = h('span.answer-status', { role: 'status' }, editable ? '저장됨' : '보기만');
+  const answer = h('input.input.answer-input', { value: draft.answer, maxlength: 200, placeholder: '예: ③, 12, x=2', 'aria-label': '정답', readOnly: !editable });
+  const editor = h('div.answer-document', { contenteditable: editable ? 'true' : 'false', role: 'textbox', 'aria-label': '해설', 'aria-multiline': 'true', spellcheck: false, dataset: { placeholder: '여기에 해설을 써 주세요. 그림도 붙여 넣을 수 있어요.' } });
+  const undo = h('button.btn.btn-small', { onclick: () => travel(false) }, '되돌리기');
+  const redo = h('button.btn.btn-small', { onclick: () => travel(true) }, '다시 하기');
+  let selection = null;
+  let closed = false;
+  let failed = false;
+  let composing = false;
+  const uploads = new Set();
+  const updateStatus = () => {
+    status.textContent = !editable ? '보기만' : failed ? '저장 못함 · 다시 시도해 주세요' : saver.pending || saver.saving || uploads.size ? '저장 중…' : '저장됨';
+    undo.disabled = !editable || !history.canUndo;
+    redo.disabled = !editable || !history.canRedo;
+  };
+  const saver = createSaveQueue(async () => {
+    const sent = structuredClone(draft);
+    saved = await api.saveAnswer(book.id, item.id, sent);
+    failed = false;
+  }, { delay: 800, changed: updateStatus, failed: (err) => { failed = true; fail(err); } });
+  saver.set({});
+  const draw = () => { answer.value = draft.answer; renderAnswerDocument(editor, draft.blocks, images); updateStatus(); };
+  const capture = (kind = '') => {
+    if (!editable || composing) return;
+    draft = { answer: answer.value, blocks: readAnswerDocument(editor) };
+    if (history.push(draft, kind)) saver.dirty();
+    updateStatus();
+  };
+  function travel(forward) {
+    if (!editable) return;
+    capture();
+    draft = forward ? history.redo() : history.undo();
+    draw(); saver.dirty(); selection = null;
+  }
+  const rememberSelection = () => {
+    const sel = window.getSelection();
+    if (sel.rangeCount && editor.contains(sel.getRangeAt(0).commonAncestorContainer)) selection = sel.getRangeAt(0).cloneRange();
+  };
+  const restoreSelection = () => {
+    editor.focus();
+    const range = selection && editor.contains(selection.commonAncestorContainer) ? selection : document.createRange();
+    if (range !== selection) { range.selectNodeContents(editor.lastElementChild || editor); range.collapse(false); }
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    return range;
+  };
+  const insert = (node, block = false) => {
+    const range = restoreSelection();
+    range.deleteContents();
+    if (block) {
+      let p = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+      while (p.parentElement !== editor && p !== editor) p = p.parentElement;
+      if (p !== editor && /^(P|DIV)$/.test(p.tagName) && !p.dataset.block) {
+        const tail = range.cloneRange(); tail.setEnd(p, p.childNodes.length);
+        const after = h('p', tail.extractContents());
+        p.after(node, after);
+        if (!after.childNodes.length) after.append(h('br'));
+        range.selectNodeContents(after); range.collapse(true);
+      } else { editor.append(node, h('p', h('br'))); range.selectNodeContents(editor.lastElementChild); range.collapse(true); }
+    } else { range.insertNode(node); range.setStartAfter(node); range.collapse(true); }
+    window.getSelection().removeAllRanges(); window.getSelection().addRange(range);
+    selection = range.cloneRange(); capture();
+  };
+  async function equation(node) {
+    if (!editable) return;
+    rememberSelection(); history.boundary();
+    const script = h('textarea.input.answer-equation-script', { rows: 4, maxlength: 8000, value: node?.dataset.eq || '', 'aria-label': '한글 수식 스크립트' });
+    const preview = h('div.answer-equation-preview');
+    const warning = h('p.small.warn-text');
+    const centered = h('input', { type: 'checkbox', checked: node?.dataset.block === 'math' });
+    const paint = () => { preview.innerHTML = eqToMathML(script.value, { display: true }); warning.textContent = parseEq(script.value).errors.some((e) => e.severity !== 'warning') ? '괄호나 빈칸을 확인해 주세요. 지금 모양으로도 넣을 수 있어요.' : ''; };
+    script.addEventListener('input', paint);
+    const templates = [['분수', '{} over {}'], ['근호', 'sqrt {}'], ['위 첨자', '{}^{}'], ['아래 첨자', '{}_{}'], ['α', 'alpha'], ['β', 'beta'], ['π', 'pi'], ['괄호', 'LEFT ( {} RIGHT )']];
+    const tools = h('div.answer-toolbar', templates.map(([label, value]) => h('button.btn.btn-small', { onclick: () => { script.setRangeText(value, script.selectionStart, script.selectionEnd, 'end'); script.focus(); paint(); } }, label)));
+    paint();
+    const eq = await modal({ title: '수식 넣기', width: 560, className: 'answer-equation-modal', body: h('div', h('label', '바로 보이는 수식'), preview, warning, tools, h('label', '한글 수식 스크립트'), script, h('label.check', centered, '가운데 수식으로 넣기')), buttons: [{ label: '취소', value: null }, { label: '넣기', primary: true, onClick: () => script.value }] });
+    if (eq === null || eq === undefined) return;
+    const next = mathNode(eq, centered.checked);
+    if (node?.isConnected && (node.dataset.block === 'math') === centered.checked) { node.replaceWith(next); capture(); }
+    else {
+      if (node?.isConnected) { const r = document.createRange(); r.selectNode(node); selection = r; }
+      insert(next, centered.checked);
+    }
+  }
+  const putImage = async (file) => {
+    if (file.size > 8 * 1024 * 1024) throw new Error('그림은 8MB 이하로 넣어 주세요.');
+    const name = await api.putAnswerImage(book.id, new Uint8Array(await file.arrayBuffer()));
+    const url = await api.getAnswerImage(book.id, name);
+    images.set(name, url);
+    const img = new Image(); img.src = url; await img.decode();
+    return { type: 'figure', file: name, w: img.naturalWidth, h: img.naturalHeight };
+  };
+  const runUpload = (fn) => {
+    const task = Promise.resolve().then(fn).catch(fail).finally(() => { uploads.delete(task); updateStatus(); });
+    uploads.add(task); updateStatus(); return task;
+  };
+  const insertImages = (files) => runUpload(async () => {
+    for (const file of files) {
+      const block = await putImage(file);
+      const temp = h('div'); renderAnswerDocument(temp, [block], images);
+      insert(temp.firstElementChild, true);
+    }
+  });
+  const recognized = async () => {
+    if (!answerItem) return;
+    if ((draft.answer || answerContent(draft)) && !await confirmDialog('지금 쓴 정답·해설을 답지 인식 결과로 바꿀까요?', { ok: '바꾸기' })) return;
+    await runUpload(async () => {
+      await loadTranscripts(book.id, { reload: true });
+      const block = { kind: 'answer', role: 'answer', item: answerItem, src: sources.answer };
+      const segs = blockSegs(block);
+      const found = bestTranscript(book.id, block)?.entry.blocks || await pdfTranscribe(segs, { plain: book.subject !== 'math' });
+      if (!found?.length) throw new Error('아직 읽어 둔 답지 글이 없어요. 답지 그림을 보며 직접 써 주세요.');
+      const blocks = importAnswerBlocks(found);
+      let canvas;
+      for (let i = 0; i < blocks.length; i++) if (blocks[i].type === 'figure' && !blocks[i].file) {
+        canvas ||= await renderStack(segs, TRANSCRIBE_WIDTH);
+        const crop = await cropImage(canvas, blocks[i].box);
+        const blob = new Blob([crop.bytes], { type: 'image/png' });
+        blocks[i] = await putImage(blob);
+      }
+      await loadImages(book.id, blocks, images);
+      draft = { answer: recognizedAnswer(blocks), blocks };
+      history.push(draft); draw(); saver.dirty();
+    });
+  };
+  let chord = 0;
+  const keys = (e) => {
+    if (!editable || e.isComposing) return;
+    if (e.ctrlKey && e.code === 'KeyN') { e.preventDefault(); chord = Date.now(); return; }
+    if (e.code === 'KeyM' && Date.now() - chord < 1500) { e.preventDefault(); chord = 0; equation().catch(fail); return; }
+    if (e.ctrlKey && ['KeyZ', 'KeyY'].includes(e.code)) { e.preventDefault(); travel(e.code === 'KeyY' || e.shiftKey); }
+    if (e.target.matches?.('[data-eq], [data-block="figure"]') && ['Backspace', 'Delete'].includes(e.key)) { e.preventDefault(); e.target.remove(); capture(); }
+  };
+  editor.addEventListener('keydown', keys); answer.addEventListener('keydown', keys);
+  editor.addEventListener('input', () => capture('text'));
+  editor.addEventListener('compositionstart', () => { composing = true; });
+  editor.addEventListener('compositionend', () => { composing = false; capture('text'); });
+  editor.addEventListener('beforeinput', (e) => { if (['historyUndo', 'historyRedo'].includes(e.inputType)) { e.preventDefault(); travel(e.inputType === 'historyRedo'); } });
+  editor.addEventListener('click', (e) => { const node = e.target.closest('[data-eq]'); if (node) equation(node).catch(fail); });
+  editor.addEventListener('paste', (e) => {
+    if (!editable) return;
+    e.preventDefault(); rememberSelection(); history.boundary();
+    const files = [...e.clipboardData.files].filter((f) => /^image\/(png|jpeg)$/.test(f.type));
+    if (files.length) insertImages(files);
+    else { restoreSelection(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')); capture(); }
+  });
+  let dragged;
+  editor.addEventListener('dragstart', (e) => { dragged = e.target.closest('[data-eq], [data-block="figure"]'); if (dragged) { e.dataTransfer.setData('text/plain', ''); e.dataTransfer.effectAllowed = 'move'; } });
+  editor.addEventListener('dragover', (e) => { if (editable) e.preventDefault(); });
+  editor.addEventListener('drop', (e) => {
+    if (!editable) return;
+    e.preventDefault(); selection = document.caretRangeFromPoint(e.clientX, e.clientY);
+    if (dragged && editor.contains(dragged)) { const node = dragged; dragged = null; if (node.contains(selection?.startContainer)) return; node.remove(); insert(node, !!node.dataset.block); }
+    else insertImages([...e.dataTransfer.files].filter((f) => /^image\/(png|jpeg)$/.test(f.type)));
+  });
+  answer.addEventListener('input', () => capture('answer'));
+  document.addEventListener('selectionchange', rememberSelection);
+  const flush = async () => { await Promise.all([...uploads]); capture(); return saver.flushPending(); };
+  const pending = () => saver.pending || saver.saving || uploads.size > 0;
+  const unload = (e) => {
+    if (!editable) return;
+    composing = false; capture();
+    if (uploads.size || saver.pending && !api.saveAnswerSync(book.id, item.id, draft)) { e.preventDefault(); e.returnValue = ''; }
+  };
+  restartSaveHooks.add(flush); restartPendingChecks.add(pending); leaveHooks.add(flush);
+  window.addEventListener('beforeunload', unload);
+  const stop = api.onDataChanged(async (change) => {
+    if (closed || !change.books?.some((id) => id === book.id || id === '*')) return;
+    try {
+      const freshBook = await api.getBook(book.id);
+      editable = writable(freshBook); editor.contentEditable = String(editable); answer.readOnly = !editable;
+      toolbar.querySelectorAll('button').forEach((b) => { b.disabled = !editable; });
+      const remote = (await api.getAnswers(book.id)).items[item.id] || { answer: '', blocks: [] };
+      if (!pending() && JSON.stringify(remote) !== JSON.stringify(saved)) {
+        await loadImages(book.id, remote.blocks, images);
+        saved = remote; draft = { answer: remote.answer, blocks: remote.blocks }; history = createAnswerHistory(draft); draw();
+      }
+      updateStatus();
+    } catch (err) { fail(err); }
+  });
+  const toolbar = h('div.answer-toolbar', h('button.btn.btn-small', { disabled: !editable, onmousedown: (e) => { e.preventDefault(); rememberSelection(); }, onclick: () => equation().catch(fail) }, '수식'), undo, redo,
+    answerItem ? h('button.btn.btn-small', { disabled: !editable, onclick: () => recognized().catch(fail) }, '답지 인식 결과 불러오기') : null);
+  const reference = h('aside.answer-reference', h('h4', '답지 그림'), h('p.small.muted', answerItem ? '그림을 보며 고쳐 주세요.' : '답지 파일이 없어도 정답·해설을 쓸 수 있어요.'));
+  if (answerItem) itemImage(sources.answer, answerItem, 700).then((url) => { if (url) reference.append(h('img', { src: url, alt: '짝 해설 원본' })); }).catch(fail);
+  draw();
+  await modal({ title: `정답·해설 · ${item.number || item.num || ''}번`, width: 980, className: 'answer-editor-modal',
+    body: h('div', h('p.small.muted', editable ? '글은 그냥 쓰고, 수식은 [수식] 단추를 눌러 넣어요. 저장은 저절로 돼요.' : '만든 사람과 원장만 고칠 수 있어요. 지금은 보기만 해요.'),
+      h('div.answer-heading', h('label', '정답', answer), editable ? h('div.answer-choices', [...'①②③④⑤'].map((v) => h('button.btn.btn-small', { onclick: () => { if (editable) { answer.value = v; capture(); } } }, v))) : null, status),
+      h('div.answer-layout', h('section.answer-writing', toolbar, editor), reference)),
+    beforeClose: flush,
+    onClose: () => {
+      closed = true; stop(); saver.cancel();
+      document.removeEventListener('selectionchange', rememberSelection); window.removeEventListener('beforeunload', unload);
+      restartSaveHooks.delete(flush); restartPendingChecks.delete(pending); leaveHooks.delete(flush);
+      onChange?.();
+    }, buttons: [{ label: '닫기', value: true }],
+  });
+}

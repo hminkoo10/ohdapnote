@@ -7,6 +7,7 @@ import { buildPdf, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS, CONVERT_MODE
 import { bankEntries, filterBank, orderPicked, makeBankBlocks, bankTargets, passageItem, blocksToText, choiceMark } from './bank.js';
 import { loadTranscripts, bestTranscript, setEditedTranscript, clearEditedTranscript, exportHwpx } from './transcribe.js';
 import { putBank } from './bank-transcribe.js';
+import { answerEditorButton, showAnswerPreview } from './answer-editor.js';
 
 const readLocal = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
@@ -239,6 +240,9 @@ function renderBank(root, summaries, books, entries, failed) {
       else preview.append(h('p.small.muted', '짝이 되는 해설이 없어요.'));
       if (e.stemKey) preview.append(transcriptPanel(e, passageItem(e.item), src.problem));
       preview.append(transcriptPanel(e, e.item, src.problem));
+      const written = h('div.answer-preview');
+      preview.append(written);
+      showAnswerPreview(written, e.bookId, e.item.id).catch(fail);
       bs.previewScroll = top;
       preview.scrollTop = top;
     } catch (err) {
@@ -252,7 +256,8 @@ function renderBank(root, summaries, books, entries, failed) {
     const panel = h('div.bank-transcript', { dataset: { passage: String(!!item.passage) } },
       h('div.bank-heading', h('h4', item.passage ? `${itemName(item)} · 옮긴 글` : '옮긴 글'),
         r ? h('span.tag.soft', pathName[r.path]) : null,
-        open(e) ? h('button.btn.btn-small', { onclick: () => attempt(() => editTranscript(e, block)) }, '글 고치기') : null));
+        open(e) ? h('button.btn.btn-small', { onclick: () => attempt(() => editTranscript(e, block)) }, '글 고치기') : null,
+        !item.passage ? answerEditorButton({ book: e.bookObj, item: e.item, answerItem: e.answer, onChange: changed }) : null));
     if (r) panel.append(...r.entry.blocks.map((b) => b.type === 'para' ? h('p.bank-para', b.text)
       : b.type === 'math' ? h('div.bank-math', b.latex)
         : b.type === 'choices' ? h('div.bank-choices', b.items.map((v, i) => h('p', `${choiceMark(i)} ${v}`))) : h('p.muted', '[그림]')));
