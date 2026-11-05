@@ -201,7 +201,7 @@ try {
   await win.waitForSelector('.share-switch');
   assert(!(await win.isChecked('.share-switch input')), '다시 열었을 때 스위치가 켜져 있습니다');
   await win.click('.share-switch');
-  await waitToast('학원에 공유했어요');
+  await waitToast('학원 선생님 모두에게 공유했어요');
   await clearToasts();
   assert(!(await win.$('.modal')), '켤 때 확인 창이 떴습니다');
   assert(existsSync(join(sharedDir(id), 'book.json')) && existsSync(join(sharedDir(id), problemFile)), 'books/<id> 로 돌아오지 않았습니다');

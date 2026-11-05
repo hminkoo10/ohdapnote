@@ -23,7 +23,7 @@ test('도움말 버튼: 설정 바로 앞, 탭 전환·책·오답노트·다른
   assert.notEqual(helpIndex, -1);
   assert.ok(right.children[helpIndex + 1].tag.endsWith('#settings-btn'));
   const button = right.children[helpIndex];
-  assert.equal(button.attrs.title, '사용 설명서를 브라우저에서 열어요');
+  assert.equal(button.attrs.title, '브라우저에서 열어요');
   assert.ok(button.children.some((el) => el.tag === 'span' && el.children.includes('도움말')));
   for (const [view, tab, section] of [
     ['home', 'notes', 'note'], ['home', 'books', 'book'], ['home', 'students', 'students'],

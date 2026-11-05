@@ -142,7 +142,7 @@ try {
   const t0 = Date.now();
   await win.click('.gem-modal .modal-footer .btn');
   await win.waitForSelector('.gem-modal', { state: 'detached', timeout: 3000 });
-  await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('멈췄습니다')), null, { timeout: 3000 });
+  await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('멈췄어요')), null, { timeout: 3000 });
   const ms = Date.now() - t0;
   const aborted = await app.evaluate(() => globalThis.__aborted);
   console.log(`    취소까지 ${ms}ms, 메인에서 요청 끊음: ${aborted}회`);

@@ -171,7 +171,7 @@ function render({ enter = false } = {}) {
     icon('user'),
     h('span.student-name', studentLabel(n)),
   );
-  const why = n.$why === 'deleted' ? '지운 학생의 오답노트예요 · 학생을 되살리면 다시 고칠 수 있어요. 지금은 보기와 내보내기만 할 수 있어요' : `${n.$ownerName || '다른'} 선생님의 오답노트 · 보기와 내보내기만 할 수 있어요`;
+  const why = n.$why === 'deleted' ? '지운 학생의 노트예요. 복구 전에는 보기·내보내기만 가능해요' : `${n.$ownerName || '다른'} 선생님의 오답노트 · 보기와 내보내기만 할 수 있어요`;
   root.append(
     topbar(
       h(
@@ -219,7 +219,7 @@ function studentSettings() {
       h('span.sw'),
       '학생에게 답지 보여 주기',
     ),
-    h('span.small.muted#answers-for-student-hint', "켜면 학생이 통합 클라우드 웹의 '내 오답노트'에서 받는 PDF에 답지(해설)도 들어가요."),
+    h('span.small.muted#answers-for-student-hint', "학생이 받는 PDF에 답지·해설도 포함해요."),
   );
 }
 
@@ -238,7 +238,7 @@ async function changeStudent() {
     body: h(
       'div.form',
       search.field,
-      shared ? h('p.small.muted', '명단의 학생을 고르면 그 학생의 오답노트가 돼요. 학원 사람 누구나 이어서 고칠 수 있어요. 명단에 없는 이름을 적으면 학생 미지정 오답노트가 되고 나만 고칠 수 있어요.') : null,
+      shared ? h('p.small.muted', '명단 학생의 노트는 학원 공용, 직접 적은 이름의 노트는 나만 고쳐요.') : null,
     ),
     width: 460,
     onClose: () => search.close(),
@@ -347,7 +347,7 @@ async function removeBook(bid) {
   const n = ns.note;
   const b = ns.books.get(bid);
   const cnt = noteSelection(n, bid).length;
-  if (!(await confirmDialog(`"${b?.name || '볼 수 없는 교재'}"에서 고른 ${cnt}문항과 책을 이 오답노트에서 뺄까요? 책장의 원본은 남습니다.`, { ok: '빼기', danger: true }))) return;
+  if (!(await confirmDialog(`"${b?.name || '볼 수 없는 교재'}"와 고른 ${cnt}문항을 빼요. 책장의 원본은 남아요.`, { ok: '빼기', danger: true }))) return;
   n.bookIds = n.bookIds.filter((x) => x !== bid);
   delete n.selected[bid];
   if (ns.active === bid) ns.active = n.bookIds[0] || null;
@@ -368,7 +368,7 @@ function noteBody() {
   const closed = subjectClosed(b);
   const ro = ns.readonly || closed; // 보기만: 문항 고르기·빼기 없음 (누르면 미리보기만)
   if (closed) {
-    left.append(h('div.readonly-banner.subject-closed', icon('eye'), h('span', `${subjectName(subjectOf(b))}은(는) 학원이 계약하지 않은 과목이라 이 교재에서는 문항을 고르거나 내보낼 수 없어요. 고른 문항은 그대로 남아 있어요.`)));
+    left.append(h('div.readonly-banner.subject-closed', icon('eye'), h('span', `${subjectName(subjectOf(b))} 계약 없음: 선택·내보내기는 안 돼요. 고른 문항은 남아요.`)));
   }
   if (!b) {
     if (ns.active) {
@@ -378,12 +378,12 @@ function noteBody() {
           'div.empty-state',
           h('div.empty-art', icon('eye')),
           h('h3', '볼 수 없는 교재예요'),
-          h('p.muted', '책장에서 지워졌거나 다른 선생님의 나만 보기 교재라서, 이 책에서 고른 문항은 보이지 않고 내보내기에서도 빠져요.'),
+          h('p.muted', '삭제·비공개 교재의 문항은 보이지 않고 내보내기에서도 빠져요.'),
           ro ? null : h('button.btn', { onclick: () => removeBook(ns.active) }, icon('x'), '이 오답노트에서 빼기'),
         ),
       );
     } else if (ro) left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '아직 책이 없어요')));
-    else left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '책을 추가해 주세요'), h('p.muted', '위의 [책 추가]를 눌러 책장에 등록한 책을 고르세요.')));
+    else left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '책을 추가해 주세요'), h('p.muted', '')));
     setTimeout(renderExportSummary, 0);
     return view;
   }
@@ -393,7 +393,7 @@ function noteBody() {
         'div.empty-state',
         h('div.empty-art', icon('scan')),
         h('h3', doc ? '이 책은 아직 분석 전이에요' : '이 책에는 문제집 파일이 없어요'),
-        h('p.muted', '책 화면에서 문제집(과 답지)을 올리고 분석하면 여기서 번호를 고를 수 있어요.'),
+        h('p.muted', '책 화면에서 파일을 넣고 분석해요.'),
         h('button.btn.btn-primary', { onclick: () => nav.book(b.id) }, icon('arrowRight'), '책 화면으로'),
       ),
     );
@@ -650,7 +650,7 @@ function examTeacherField() {
   }
   return h('div.exam-field.exam-teacher',
     h('span.ef-label', icon('user'), '선생님'), select, input,
-    members.length ? h('span.small.muted', '목록에 없으면 직접 써 주세요.') : null,
+    members.length ? h('span.small.muted', '목록에 없으면 직접 적어요.') : null,
   );
 }
 
@@ -706,7 +706,7 @@ function exportPanel() {
     h(
       'details.exam-box',
       { open: true },
-      h('summary', icon('school'), '시험지 머리', h('span.small.muted', '제목·학생·학원·선생님 확인')),
+      h('summary', icon('school'), '시험지 머리', h('span.small.muted', '')),
       h('div.exam-mock'),
       h(
         'div.exam-fields',
@@ -749,8 +749,8 @@ function exportPanel() {
     ),
     h(
       'div.export-buttons',
-      exportBtn('problems', '문제지', '고른 문제만', '고른 문제만', false),
-      exportBtn('answers', '해설지', '고른 문제의 해설만', needAns || '고른 문제의 해설만', !anyAnswers),
+      exportBtn('problems', '문제지', '', '', false),
+      exportBtn('answers', '해설지', '', needAns, !anyAnswers),
       exportBtn('both-inline', '문제 + 해설', '문제마다 바로 뒤에', needAns || '문제마다 바로 뒤에 그 문제의 해설', !anyAnswers),
       exportBtn('both-end', '문제 + 해설', '해설은 맨 뒤에', needAns || '문제를 모두 싣고, 해설은 맨 뒤에 모아서', !anyAnswers),
     ),
@@ -783,25 +783,25 @@ function setFormatHint(el) {
   el.hidden = o?.format !== 'hwpx';
   const mode = CONVERT_MODES[o?.convert] ? o.convert : 'mix';
   const ai = geminiReady();
-  const noAi = aiOff() ? '설정에서 정밀 인식이 꺼져 있어' : '정밀 인식을 설정하지 않아';
+  const noAi = aiOff() ? '정밀 인식이 꺼져' : '서비스 키가 없어';
   const noModel = ocrInstalled === false;
   const now =
     mode === 'ai'
       ? ai
         ? ''
-        : ` — 지금은 ${noAi} 그림으로 들어가요`
+        : `${noAi} 스캔본은 그림으로 넣어요`
       : mode === 'ocr'
         ? noModel
-          ? '. 지금은 모델이 없어 그림으로 들어가요 (설정에서 받기)'
+          ? '수식 인식 파일이 없어 스캔본은 그림으로 넣어요 (설정에서 받기)'
           : ''
         : noModel && !ai
-          ? ` — 지금은 수식 인식 모델이 없고 ${noAi} 그림으로 들어가요`
+          ? '인식 설정이 없어 스캔본은 그림으로 넣어요'
           : noModel
-            ? ` — 수식 인식 모델이 없어 지금은 모두 정밀 인식으로`
+            ? '수식 인식 파일이 없어 모두 정밀 인식해요'
             : !ai
-              ? ` — ${noAi} 지금은 이 컴퓨터에서만`
+              ? `${noAi} 이 컴퓨터에서만 읽어요`
               : '';
-  el.textContent = `디지털 PDF(EBS 교재 등)는 PDF 글자 그대로 옮겨요. 스캔본은 ${CONVERT_MODES[mode].hint}${now}.`;
+  el.textContent = `${now || CONVERT_MODES[mode].hint}.`;
 }
 
 /** 내보내기 안내 다시 쓰기 (설정에서 AI·수식 인식 모델이 바뀌었을 때도) */
@@ -872,7 +872,7 @@ function renderExportSummary() {
   const closedCount = n.bookIds.filter((bid) => subjectClosed(ns.books.get(bid))).reduce((sum, bid) => sum + noteSelection(n, bid).length, 0);
   if (closedCount) el.append(h('p.warn-text.small', icon('warn'), `학원 계약에 없는 과목 교재에서 고른 ${closedCount}문항은 빼고 내보내요`));
   if (!entries.length) {
-    el.append(h('p.empty-hint', '1. 왼쪽에서 문항 선택 → 2. 파일·배치 선택 → 3. 아래 저장 단추 선택'));
+    el.append(h('p.empty-hint', '왼쪽 표에서 틀린 번호를 골라 주세요.'));
     return;
   }
   const noAns = entries.filter((e) => e.bookObj.docs.answer?.items?.length && !e.answer && !answerContent(e.bookObj.$answers?.items[e.problem.id])).length;
@@ -908,7 +908,7 @@ function renderExportSummary() {
                 const n = ns.note;
                 setNoteSelection(n, e.bookId, noteSelection(n, e.bookId).filter((x) => x !== e.problem.id));
                 markDirty();
-                toast('선택에서 뺐습니다.', { actions: [{ label: '되돌리기', onClick: () => {
+                toast('선택에서 뺐어요.', { actions: [{ label: '되돌리기', onClick: () => {
                   if (ns.note !== n || ns.readonly || !n.bookIds.includes(e.bookId) || !ns.books.get(e.bookId)?.docs.problem?.items.some((it) => it.id === e.problem.id)) return;
                   const ids = noteSelection(n, e.bookId);
                   if (!ids.includes(e.problem.id)) setNoteSelection(n, e.bookId, [...ids, e.problem.id]);

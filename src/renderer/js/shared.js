@@ -105,7 +105,7 @@ export async function getSource(book, role) {
     book.docs[role].pageCount = src.numPages;
     return src;
   } catch (err) {
-    toast('책 파일을 받지 못했어요. 인터넷 연결을 확인하고 다시 열어 주세요.', { type: 'error', timeout: 8000 });
+    toast('인터넷 연결을 확인하고 책을 다시 열어요.', { type: 'error', timeout: 8000 });
     return null;
   }
 }
@@ -292,7 +292,7 @@ export async function renderPreview(box, o) {
       ),
       ans
         ? h('div.preview-scroll', ansImg)
-        : h('p.muted.small.pad', '답지에서 같은 번호를 찾지 못했어요. 목록에서 직접 고르거나, 책 화면의 페이지 검토에서 답지 영역을 그려 주세요.'),
+        : h('p.muted.small.pad', '해설 짝이 없어요. 목록에서 고르거나 페이지 검토에서 영역을 그려요.'),
       written,
     );
     showAnswerPreview(written, book.id, item.id).catch((err) => console.warn('해설 미리보기', err));
@@ -733,7 +733,7 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
   const bar = h('div.progress-bar');
   const body = h(
     'div.gem-run',
-    h('p.small.muted', `고른 쪽을 외부 인식 서비스로 보내 문항 위치를 다시 찾습니다. 한 쪽에 몇 초~수십 초 걸리며, 기존 문항은 정밀 인식 결과로 바뀝니다.`),
+    h('p.small.muted', `외부 서비스로 보내요. 쪽당 몇 초~수십 초 걸리고, 기존 문항이 바뀌어요.`),
     h('div.progress', bar),
     status,
     list,
@@ -805,7 +805,7 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
     if (err?.name !== 'AbortError') failure = err;
     else {
       aborted = true;
-      toast(`정밀 인식을 멈췄습니다.${changed ? ` (${changed}쪽은 바뀌었어요)` : ''}`);
+      toast(`정밀 인식을 멈췄어요.${changed ? ` (${changed}쪽은 바뀌었어요)` : ''}`);
     }
   }
   try {

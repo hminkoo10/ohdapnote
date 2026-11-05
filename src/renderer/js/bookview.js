@@ -135,7 +135,7 @@ export async function openBook(id, { tab, role, page, itemId } = {}) {
   state.view = 'book';
   leaveHooks.add(async () => {
     const job = analysisJob(book);
-    if (job && !job.cancelled) toast(`${ROLE_NAME[job.role]} 분석은 뒤에서 계속해요. 위쪽 막대에서 진행 상황을 볼 수 있어요.`);
+    if (job && !job.cancelled) toast(`${ROLE_NAME[job.role]} 분석 중이에요. 진행은 위쪽 막대에 보여요.`);
     saver.cancel();
     await saver.flush();
     flushRenamesSoon.cancel();
@@ -155,7 +155,7 @@ export async function openBook(id, { tab, role, page, itemId } = {}) {
 /** 보기만 하는 책: 누가 만들었는지 + 내 책으로 복사 (계약에서 빠진 과목은 그 이유만) */
 function readonlyBanner(b) {
   if (b.$subjectOpen === false) {
-    return h('div.readonly-banner.subject-closed', icon('eye'), h('span', `${subjectName(subjectOf(b))}은(는) 학원이 계약하지 않은 과목이라 이 교재는 보기만 할 수 있어요. 계약을 바꾸려면 원장님께 말씀해 주세요.`));
+    return h('div.readonly-banner.subject-closed', icon('eye'), h('span', `${subjectName(subjectOf(b))} 계약 없음: 보기만 가능해요. 계약은 원장님께 확인해요.`));
   }
   return h(
     'div.readonly-banner',
@@ -187,7 +187,7 @@ async function toggleShared(b, input) {
   const on = input.checked;
   input.checked = !on; // 바뀌기 전까지는 그대로
   if (bookBusy(b)) {
-    toast('이 책에서 하는 작업(분석 등)이 끝난 뒤에 바꿔 주세요.');
+    toast('이 책의 작업이 끝난 뒤 바꿔요.');
     return;
   }
   const msg = '학원 공유를 끄면 이 책은 나만 보기가 돼요 (원장은 볼 수 있어요).\n다른 선생님 책장에서 사라지고, 이 책을 쓰는 학생 오답노트를 다른 선생님이 열면 ‘볼 수 없는 교재’로 보여요 (고른 문항은 그대로 남아요).\n다시 켜면 그대로 돌아와요.';
@@ -201,7 +201,7 @@ async function toggleShared(b, input) {
     await flushRenames();
     const s = await api.setBookShared(b.id, on);
     b.$shared = s.shared;
-    toast(s.shared ? '학원에 공유했어요. 학원 선생님 모두가 이 책을 쓸 수 있어요.' : '나만 보기로 바꿨어요.', { type: 'success' });
+    toast(s.shared ? '학원 선생님 모두에게 공유했어요.' : '나만 보기로 바꿨어요.', { type: 'success' });
   } catch (err) {
     toast(`공유를 바꾸지 못했어요: ${errMsg(err)}`, { type: 'error', timeout: 8000 });
   }
@@ -310,12 +310,12 @@ function render({ enter = false, tabAnim = null, thumbFrom = null } = {}) {
   // 보기만 하는 책은 페이지 검토(고치는 화면) 없이 인식 결과만
   const tabs = h('nav.seg-tabs', h('span.seg-thumb'), tab('result', 'list', '인식 결과', flaggedN ? h('span.seg-count.warn', String(flaggedN)) : null), ro ? null : tab('review', 'scan', '페이지 검토·수정'));
   root.append(
-    topbar(h('div.topbar-crumb', h('button.btn.btn-ghost.btn-small#back-btn', { onclick: () => nav.home({ tab: 'books' }), title: '책장으로' }, icon('back'), '책장'), h('span.crumb-kind', icon('library'), '책장'), h('span.crumb-sep', '/'), nameInput, subjectEl, creator, share, ro ? null : h('span.save-status', ''))),
+    topbar(h('div.topbar-crumb', h('button.btn.btn-ghost.btn-small#back-btn', { onclick: () => nav.home({ tab: 'books' }), title: '' }, icon('back'), '책장'), h('span.crumb-kind', icon('library'), '책장'), h('span.crumb-sep', '/'), nameInput, subjectEl, creator, share, ro ? null : h('span.save-status', ''))),
     h(
       `main.sheet${enter ? '.view-enter' : ''}`,
       ro ? readonlyBanner(b) : null,
       h(`section.doc-row${bs.tab === 'review' ? '.compact' : ''}`, ROLES.map((role, i) => docCard(role, i))),
-      h('div.tabs-row', tabs, h('span.small.muted', '1. 파일 넣기 → 2. 분석 → 3. 결과 확인·수정')),
+      h('div.tabs-row', tabs, h('span.small.muted', '')),
       h(`section.tab-body${tabAnim ? `.enter-${tabAnim}` : ''}`, bs.tab === 'result' ? resultView() : reviewView()),
     ),
   );
@@ -387,7 +387,7 @@ function docCard(role, i) {
       'div.doc-head',
       h('span.doc-icon', icon(role === 'problem' ? 'book' : 'bookCheck')),
       h('div.doc-titles', h('div.doc-title', ROLE_NAME[role]), doc ? h('div.doc-file', { title: doc.originalName }, doc.originalName, h('span.muted', src ? ` · ${src.numPages}쪽` : ' · 여는 중…')) : h('div.doc-file.muted', '아직 파일이 없어요')),
-      doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pickMore, disabled: locked, title: '지금 파일과 분석 결과는 그대로 두고 뒤에 이어 붙여요' }, icon('plus'), '파일 추가') : null,
+      doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pickMore, disabled: locked, title: '기존 파일·분석 결과는 유지해요' }, icon('plus'), '파일 추가') : null,
       doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pick, disabled: locked }, icon('refresh'), '파일 바꾸기') : null,
     ),
   );
@@ -409,7 +409,7 @@ function docCard(role, i) {
   const rangeInput = h('input.input.input-small', {
     value: doc.range || '',
     placeholder: '전체',
-    title: '분석할 쪽 (PDF 쪽 번호). 예: 5-120 또는 3-10, 15. 답지는 "빠른 정답" 쪽을 빼면 좋아요.',
+    title: 'PDF 쪽 번호예요. 예: 5-120, 3-10, 15',
     disabled: ro,
     onchange: (e) => {
       doc.range = e.target.value.trim();
@@ -419,7 +419,7 @@ function docCard(role, i) {
   const styleSelect = h(
     'select.input.input-small',
     {
-      title: '문제 번호 모양. 자동으로 잘 안 잡히면 직접 고르세요.',
+      title: '자동 인식이 안 되면 번호 모양을 골라요',
       disabled: ro,
       onchange: (e) => {
         doc.options.numberStyle = e.target.value;
@@ -446,7 +446,7 @@ function docCard(role, i) {
   const offsetInput = h('input.input.input-tiny', {
     type: 'number',
     value: String(bookPage(doc, 0)),
-    title: 'PDF 1쪽이 책의 몇 쪽인지 (쪽 번호 표시용)',
+    title: 'PDF 첫 쪽에 적힌 책 쪽 번호예요',
     disabled: ro,
     onchange: (e) => {
       const v = parseInt(e.target.value, 10);
@@ -463,8 +463,8 @@ function docCard(role, i) {
       'div.doc-options',
       h('label', h('span', '쪽 범위'), rangeInput),
       h('label', h('span', '번호 모양'), styleSelect),
-      h('label', { title: 'PDF 1쪽이 책의 몇 쪽인지 (쪽 번호 표시용)' }, h('span', 'PDF 1쪽 = 책'), offsetInput, '쪽'),
-      h('label.check', { title: '해설이 다음 단이나 다음 쪽으로 넘어가며 이어지는 경우 (답지는 보통 켜 둠)' }, flowCheck, h('span', '다음 단·쪽으로 이어짐')),
+      h('label', { title: 'PDF 첫 쪽에 적힌 책 쪽 번호예요' }, h('span', 'PDF 1쪽 = 책'), offsetInput, '쪽'),
+      h('label.check', { title: '이어지는 해설을 묶어요. 답지는 켜 두는 편이 좋아요' }, flowCheck, h('span', '다음 단·쪽으로 이어짐')),
     ),
   );
 
@@ -479,7 +479,7 @@ function docCard(role, i) {
       h('button.btn.btn-small', { onclick: () => job.cancel() }, icon('stop'), '멈추기'),
       h(
         'button.btn.btn-small.btn-primary.bg-btn',
-        { onclick: () => nav.home({ tab: 'books' }), title: '분석은 계속하고 책장으로 나가요. 다른 책이나 오답노트를 보는 동안 위쪽 막대에서 진행 상황을 볼 수 있어요.' },
+        { onclick: () => nav.home({ tab: 'books' }), title: '분석은 계속돼요. 진행은 위쪽 막대에 보여요' },
         icon('collapse'),
         '다른 일 하면서 기다리기',
       ),
@@ -495,7 +495,7 @@ function docCard(role, i) {
             missing ? h('button.sum-chip.warn', { onclick: () => showResult(role) }, `빠진 번호 ${missing}`) : null,
             h('span.muted.small', formatDate(doc.analyzedAt)),
           )
-        : h('div.doc-summary.muted', '파일 준비 완료. 분석 단추를 누르세요.'),
+        : h('div.doc-summary.muted', ''),
       ro
         ? null
         : h(
@@ -526,9 +526,9 @@ async function importFiles(role, paths, { add = false } = {}) {
   }
   const old = b.docs[role];
   if (add && old) return addMoreFiles(role, paths);
-  if (old && !(await confirmDialog(`${ROLE_NAME[role]} 파일을 바꾸면 기존 파일과 분석 결과가 교체됩니다. 계속할까요?`, { ok: '바꾸기', danger: true }))) return;
+  if (old && !(await confirmDialog(`${ROLE_NAME[role]}의 기존 파일·분석 결과가 새 파일로 바뀌어요.`, { ok: '바꾸기', danger: true }))) return;
   const pdfs = paths.filter((x) => /\.pdf$/i.test(x));
-  if (pdfs.length > 1 && !(await confirmDialog(`PDF ${pdfs.length}개를 이름 순서대로 이어 붙여 하나의 ${ROLE_NAME[role]}(으)로 씁니다. 계속할까요?`))) return;
+  if (pdfs.length > 1 && !(await confirmDialog(`PDF ${pdfs.length}개를 이름순으로 이어 붙여 ${ROLE_NAME[role]}(으)로 써요.`))) return;
   try {
     const removed = (old?.items || []).map((it) => it.id);
     await saver.flush();
@@ -555,7 +555,7 @@ async function addMoreFiles(role, paths) {
   const b = bs.book;
   let doc = b.docs[role];
   const pdfs = paths.filter((x) => /\.pdf$/i.test(x));
-  if (pdfs.length > 1 && !(await confirmDialog(`PDF ${pdfs.length}개를 이름 순서대로 지금 ${ROLE_NAME[role]} 뒤에 이어 붙입니다. 계속할까요?`))) return;
+  if (pdfs.length > 1 && !(await confirmDialog(`PDF ${pdfs.length}개를 이름순으로 ${ROLE_NAME[role]} 뒤에 붙여요.`))) return;
   try {
     const before = doc.files.length;
     await saver.flush();
@@ -599,7 +599,7 @@ async function analyzeRole(role, { only = null } = {}) {
     else running.open();
     return;
   }
-  if (!only && doc.edited && !(await confirmDialog(`${ROLE_NAME[role]}에서 직접 고친 내용이 있습니다. 다시 분석하면 사라집니다. 계속할까요?`, { ok: '다시 분석', danger: true }))) return;
+  if (!only && doc.edited && !(await confirmDialog(`다시 분석하면 ${ROLE_NAME[role]}에서 직접 고친 내용이 사라져요.`, { ok: '다시 분석', danger: true }))) return;
   let pages;
   try {
     pages = only || parsePageRange(doc.range, src.numPages);
@@ -608,7 +608,7 @@ async function analyzeRole(role, { only = null } = {}) {
     return;
   }
   if (!pages.length) {
-    toast('분석할 쪽이 없어요. 쪽 범위를 확인해 주세요.', { type: 'error' });
+    toast('쪽 범위를 확인해요. 분석할 쪽이 없어요.', { type: 'error' });
     return;
   }
   // 화면을 떠나도 계속 돌고(위쪽 막대에 표시), 결과는 이 책(b)에만 씀
@@ -707,8 +707,8 @@ function resultView() {
   const role = b.docs[bs.role] ? bs.role : b.docs.problem ? 'problem' : 'answer';
   const doc = b.docs[role];
   if (!doc) {
-    if (bs.readonly) view.append(h('div.empty-state', h('div.empty-art', icon('upload')), h('h3', '아직 올린 파일이 없어요'), h('p.muted', '만든 사람이 문제집을 올리고 분석하면 여기서 볼 수 있어요.')));
-    else view.append(h('div.empty-state', h('div.empty-art', icon('upload')), h('h3', '문제집부터 올려 주세요'), h('p.muted', '위 칸에 PDF나 사진을 끌어다 놓고 [분석]을 누르면 쪽마다 문제 번호를 찾아 보여 줘요.')));
+    if (bs.readonly) view.append(h('div.empty-state', h('div.empty-art', icon('upload')), h('h3', '아직 올린 파일이 없어요'), h('p.muted', '만든 사람이 파일을 올려야 해요.')));
+    else view.append(h('div.empty-state', h('div.empty-art', icon('upload')), h('h3', '문제집부터 올려 주세요'), h('p.muted', '')));
     return view;
   }
   const left = h('div.result-main');
@@ -738,10 +738,10 @@ function resultView() {
       ),
     ),
   );
-  left.append(h('div.result-toolbar', roleSeg, h('span.spacer'), h('span.small.muted', '번호를 누르면 오른쪽에서 볼 수 있어요')));
+  left.append(h('div.result-toolbar', roleSeg, h('span.spacer'), h('span.small.muted', '번호를 누르면 미리보기가 열려요')));
 
   if (!doc.analyzedAt) {
-    left.append(h('div.empty-state', h('div.empty-art', icon('scan')), h('h3', '아직 분석 전이에요'), h('p.muted', bs.readonly ? '만든 사람이 분석하면 여기서 볼 수 있어요.' : `위 ${ROLE_NAME[role]} 카드에서 [분석]을 눌러 주세요.`)));
+    left.append(h('div.empty-state', h('div.empty-art', icon('scan')), h('h3', '아직 분석 전이에요'), h('p.muted', bs.readonly ? '만든 사람이 분석해야 해요.' : `[${ROLE_NAME[role]} 분석]을 눌러요.`)));
     return view;
   }
 
@@ -865,7 +865,7 @@ function checkPanel(role, doc, pages, missing) {
     }),
   );
   panel.append(head, list);
-  if (!ro) panel.append(h('div.cp-foot', h('span.small.muted', geminiReady() ? '다시 읽을 쪽을 고른 뒤 [정밀 인식]을 누르세요.' : aiOff() ? '정밀 인식은 설정에서 켤 수 있습니다.' : '정밀 인식을 쓰려면 설정에서 서비스 키를 입력하세요.'), h('span.spacer'), gemBtn));
+  if (!ro) panel.append(h('div.cp-foot', h('span.small.muted', geminiReady() ? '' : aiOff() ? '설정에서 정밀 인식을 켜요.' : '설정에서 서비스 키를 입력해요.'), h('span.spacer'), gemBtn));
   return panel;
 }
 
@@ -907,7 +907,7 @@ async function deepPage(role, page) {
   const doc = b.docs[role];
   const src = bs.sources[role];
   if (!doc || !src || !canSave(b)) return;
-  const close = toast(`${pageLabel(doc, page)} 꼼꼼히 다시 찾는 중… (고해상도로 한 번 더 읽어요)`, { timeout: 0 });
+  const close = toast(`${pageLabel(doc, page)} 꼼꼼히 다시 찾는 중…`, { timeout: 0 });
   bs.working++;
   setRestartBusy('deep-page', true);
   try {
@@ -920,7 +920,7 @@ async function deepPage(role, page) {
       if (!keep) return;
     }
     if (sameAsBefore) {
-      toast(`더 찾은 번호가 없어요 (${items.length}개 그대로). 페이지 검토에서 점선 후보를 눌러 추가하거나 정밀 인식을 사용하세요.`, {
+      toast(`페이지 검토·정밀 인식으로 확인해요. 더 찾은 번호는 없어요 (${items.length}개).`, {
         timeout: 9000,
         actions: [
           { label: '페이지 검토', onClick: () => switchTab('review', { role, page }) },
@@ -1005,7 +1005,7 @@ function reviewView() {
   const ed = getEditor();
   const b = bs.book;
   if (!b.docs.problem && !b.docs.answer) {
-    return h('div.empty-state', h('div.empty-art', icon('files')), h('h3', '먼저 파일을 올려 주세요'), h('p.muted', '문제집이나 답지를 올리고 분석하면 여기서 쪽마다 인식 결과를 확인하고 고칠 수 있어요.'));
+    return h('div.empty-state', h('div.empty-art', icon('files')), h('h3', '먼저 파일을 올려 주세요'), h('p.muted', ''));
   }
   const wrap = h('div.review-view', ed.el);
   const role = b.docs[ed.role] ? ed.role : b.docs.problem ? 'problem' : 'answer';

@@ -108,7 +108,7 @@ export function bankView(summaries) {
 function renderBank(root, summaries, books, entries, failed) {
   clear(root);
   const intro = h('div');
-  const intake = h('details.bank-intake', { open: bs.intake, ontoggle: (e) => { bs.intake = e.target.open; } }, h('summary', icon('bookPlus'), '교재 넣기', h('span.small.muted', '처음 한 번 넣으면 글자로 찾을 수 있어요')));
+  const intake = h('details.bank-intake', { open: bs.intake, ontoggle: (e) => { bs.intake = e.target.open; } }, h('summary', icon('bookPlus'), '교재 넣기', h('span.small.muted', '')));
   const bookList = h('div.bank-books');
   intake.append(bookList);
   const list = h('div.bank-list', { onscroll: () => { bs.scroll = list.scrollTop; } });
@@ -137,17 +137,17 @@ function renderBank(root, summaries, books, entries, failed) {
     clear(intro);
     if (!bs.intro) return;
     intro.append(h('section.bank-intro',
-      h('div.bank-heading', h('h3', '문제은행 사용 순서'), h('button.btn.btn-ghost', { title: '안내 닫기', onclick: () => { bs.intro = false; writeLocal('ohdap.bankIntro', true); renderIntro(); } }, icon('x'), '안내 닫기')),
+      h('div.bank-heading', h('h3', '문제은행 사용 순서'), h('button.btn.btn-ghost', { title: '', onclick: () => { bs.intro = false; writeLocal('ohdap.bankIntro', true); renderIntro(); } }, icon('x'), '안내 닫기')),
       h('div.bank-steps', [
-        ['1. 교재 넣기', '아래에서 교재를 골라 글자·수식으로 옮겨요.'],
-        ['2. 문항 찾아 담기', '쪽·번호·글자로 찾고 체크칸을 눌러 담아요.'],
-        ['3. 시험지 저장', '오른쪽 바구니에서 PDF나 한글 문서로 저장해요.'],
+        ['1. 교재 넣기', ''],
+        ['2. 문항 찾아 담기', ''],
+        ['3. 시험지 저장', ''],
       ].map(([title, text]) => h('div', h('strong', title), h('p.small.muted', text))))));
   }
 
   function renderBooks() {
     clear(bookList);
-    if (!summaries.length) bookList.append(h('p.muted', '아직 등록한 교재가 없어요. 책장에 먼저 교재를 등록해 주세요.'));
+    if (!summaries.length) bookList.append(h('p.muted', '아직 등록한 교재가 없어요.'));
     for (const s of summaries) {
       const book = books.find((b) => b.id === s.id);
       const items = entries.filter((e) => e.bookId === s.id);
@@ -163,7 +163,7 @@ function renderBank(root, summaries, books, entries, failed) {
       if (low) card.append(h('span.small.bank-review-count', `확인 필요 ${low}군데`));
       if (locked) card.append(h('p.small.muted', '학원 계약에 없는 과목 · 보기만'));
       else if (job) card.append(h('button.btn', { onclick: () => job.open() }, '넣는 중 · 진행 보기'));
-      else if (!s.problemAnalyzed && !total) card.append(h('p.small.muted', '책장에서 먼저 분석해 주세요'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
+      else if (!s.problemAnalyzed && !total) card.append(h('p.small.muted', '책 분석이 필요해요'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
       else if (!book) card.append(h('p.small.warn-text', '교재를 읽지 못했어요. 책장에서 확인해 주세요.'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
       else if (total && n === total) card.append(h('strong.bank-complete', icon('check'), '다 넣었어요'));
       else card.append(h('button.btn.btn-primary', { onclick: () => attempt(() => putBank(book, { onChange: changed })) }, n || bankTargets(book).some((b) => bestTranscript(book.id, { ...b, src: { files: book.docs.problem.files } })) ? '이어서 넣기' : '문제은행에 넣기'));
@@ -242,7 +242,7 @@ function renderBank(root, summaries, books, entries, failed) {
     const top = bs.previewScroll;
     const e = entries.find((x) => keyOf(x) === bs.focus);
     clear(preview);
-    if (!e) { preview.append(h('h3', '미리보기'), h('p.empty-hint', '왼쪽 문항을 누르면 문제와 해설, 옮긴 글을 여기서 볼 수 있어요.')); return; }
+    if (!e) { preview.append(h('h3', '미리보기'), h('p.empty-hint', '문항을 누르면 미리보기가 열려요.')); return; }
     preview.append(h('h3', `${e.bookName} · ${itemName(e.item)}`), h('p.small.muted', '문제 그림을 여는 중…'));
     const releases = ['problem', 'answer'].map((role) => holdSource(e.bookObj, role));
     try {
@@ -280,7 +280,7 @@ function renderBank(root, summaries, books, entries, failed) {
       : b.type === 'math' ? h('div.bank-math', b.latex)
         : b.type === 'choices' ? h('div.bank-choices', b.items.map((v, i) => h('p', `${choiceMark(i)} ${v}`))) : h('p.muted', '[그림]')));
     else {
-      panel.append(h('p.small.muted', open(e) ? '아직 글자로 옮기지 않았어요. 위의 [문제은행에 넣기]를 누르면 이 책의 문항을 모두 옮겨요.' : '아직 글자로 옮긴 결과가 없어요.'));
+      panel.append(h('p.small.muted', open(e) ? '아직 글자로 옮긴 결과가 없어요.' : '아직 글자로 옮긴 결과가 없어요.'));
       if (open(e)) panel.append(h('button.btn', { onclick: () => attempt(() => putBank(e.bookObj, { item: e.item, onChange: changed })) }, '이 문항만 옮기기'));
     }
     return panel;
@@ -292,7 +292,7 @@ function renderBank(root, summaries, books, entries, failed) {
     basket.append(h('div.export-panel', h('div.export-head', h('h3', '시험지 바구니'), h('span.sel-count', h('strong', String(picked.length)), '문항')),
       picked.length ? h('div.sel-list', picked.map((e) => h('span.sel-chip',
         h('button.bank-chip-open', { title: `${e.bookName} · 미리보기`, onclick: () => show(e) }, `${e.bookName} ${itemName(e.item)}`),
-        h('button.sel-x', { title: '빼기', onclick: () => { bs.picked = bs.picked.filter((p) => pickedKey(p) !== keyOf(e)); persist(); renderList(); renderBasket(); } }, icon('x'))))) : h('p.empty-hint', '왼쪽 문항의 체크칸을 눌러 담아 주세요.'),
+        h('button.sel-x', { title: '빼기', onclick: () => { bs.picked = bs.picked.filter((p) => pickedKey(p) !== keyOf(e)); persist(); renderList(); renderBasket(); } }, icon('x'))))) : h('p.empty-hint', '아직 담은 문항이 없어요.'),
       picked.length ? h('button.btn.btn-small', { onclick: () => { bs.picked = []; persist(); renderList(); renderBasket(); } }, '모두 비우기') : null,
       picked.some((e) => e.stemKey) ? h('p.small.muted', '지문도 함께 들어가요') : null,
       exportOptions(picked, entries)));
@@ -389,7 +389,7 @@ function exportOptions(picked, entries) {
       h('div.opt-row', h('span.opt-label', '풀이 여백'), seg('space', Object.entries(SPACE_OPTIONS).map(([k, v]) => [k, v.short]))),
       h('div.opt-row', [['labels', '출처(책·쪽·번호)'], ['renumber', '새 번호']].map(([key, label]) => h('label.switch',
         h('input', { type: 'checkbox', checked: o[key], onchange: (ev) => set(key, ev.target.checked) }), h('span.sw'), label))), hint),
-    h('div.export-buttons', [['problems', '문제지', '고른 문제만'], ['answers', '해설지', '고른 해설만'], ['both-inline', '문제 + 해설', '문제마다 바로 뒤에'], ['both-end', '문제 + 해설', '해설은 맨 뒤에']].map(([mode, title, sub]) => h('button.export-btn', {
+    h('div.export-buttons', [['problems', '문제지', ''], ['answers', '해설지', ''], ['both-inline', '문제 + 해설', '문제마다 바로 뒤에'], ['both-end', '문제 + 해설', '해설은 맨 뒤에']].map(([mode, title, sub]) => h('button.export-btn', {
       dataset: { mode }, disabled: !picked.length || mode !== 'problems' && !anyAnswers,
       title: !picked.length ? '먼저 문항을 담아 주세요.' : mode !== 'problems' && !anyAnswers ? '정답·해설을 직접 쓰거나 답지를 올려 주세요.' : sub,
       onclick: () => attempt(() => restartGuard.track('export', () => exportBank(mode, entries))),

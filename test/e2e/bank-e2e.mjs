@@ -91,7 +91,7 @@ const expectMissingModel = async (id) => {
   await win.click('.modal .btn-primary:has-text("넣기 시작")');
   const warning = win.locator('.modal', { has: win.locator('h3', { hasText: '수식 인식 모델이 필요해요' }) });
   await warning.waitFor({ timeout: 30000 });
-  assert.match(await warning.innerText(), /설정.*모델/);
+  assert.match(await warning.innerText(), /설정에서 수식 인식 파일을 받아요/);
   await warning.getByRole('button', { name: '설정 열기', exact: true }).click();
   await win.waitForSelector('.settings-modal');
   await win.waitForFunction(async (bookId) => !(await import('./js/shared.js')).findJob(`bank:${bookId}`), id);
@@ -127,7 +127,7 @@ try {
   step('분석 안 된 교재 안내 → 책 열기 → 실제 문제집·답지 분석');
   await win.click('.seg-tab[data-tab="bank"]');
   await win.waitForSelector('.bank-book');
-  assert.match(await win.textContent(`.bank-book[data-book="${ids.math}"]`), /책장에서 먼저 분석/);
+  assert.match(await win.textContent(`.bank-book[data-book="${ids.math}"]`), /책 분석이 필요해요/);
   await win.click(`.bank-book[data-book="${ids.math}"] button`);
   for (const role of ['problem', 'answer']) {
     await win.click(`.doc-card[data-role="${role}"] .doc-foot .btn`);
@@ -146,7 +146,7 @@ try {
   assert.ok(await win.isDisabled(`.bank-row[data-book="${ids.korean}"] input`));
   assert.ok(await win.$(`.bank-book[data-book="${ids.english}"] button`));
   assert.ok(await win.$('.bank-intro'));
-  await win.click('button[title="안내 닫기"]');
+  await win.click('button:has-text("안내 닫기")');
   assert.equal(await win.locator('.bank-intro').count(), 0);
   await win.getByRole('button', { name: '처음 안내 다시 보기', exact: true }).click();
   assert.ok(await win.$('.bank-intro'));

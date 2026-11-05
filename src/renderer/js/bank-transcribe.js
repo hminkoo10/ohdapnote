@@ -46,7 +46,7 @@ async function runBank(book, { item, useAi, onChange }) {
   const current = h('p.small.muted');
   const ui = jobDialog({ key: `bank:${book.id}`, bookId: book.id, abort, total: targets.length,
     title: '문제은행에 넣는 중', jobTitle: `${book.name} · 문제은행`,
-    body: h('div', h('div.progress', bar), status, current, h('p.small.muted', '취소를 누르면 멈춰요. 옮긴 글은 남아 있어서 다음에 이어서 넣을 수 있어요. 지문도 따로 함께 옮겨요.')) });
+    body: h('div', h('div.progress', bar), status, current, h('p.small.muted', '멈춰도 옮긴 글은 남아요. 지문도 함께 옮겨요.')) });
   const releases = ['problem', 'answer'].map((role) => holdSource(book, role));
   let done = 0;
   let failure = null;
@@ -87,7 +87,7 @@ async function runBank(book, { item, useAi, onChange }) {
             if (!model && !warned) {
               warned = true;
               const next = await modal({ title: '수식 인식 모델이 필요해요',
-                body: h('p', '스캔본이나 일반 글꼴 수학 PDF는 설정에서 수식 인식 모델을 먼저 받아 주세요. 이미 옮긴 글은 남아요. 글자를 안전하게 읽을 수 있는 PDF는 모델 없이도 옮길 수 있어요.'),
+                body: h('p', '설정에서 수식 인식 파일을 받아요. 옮긴 글은 남고, 읽을 수 있는 PDF는 계속 옮겨요.'),
                 buttons: [{ label: '설정 열기', value: 'settings' }, { label: useAi ? 'PDF·정밀 인식으로 계속' : 'PDF만 계속', value: 'continue', primary: true }] });
               if (next !== 'continue') {
                 if (next === 'settings') nav.settings();

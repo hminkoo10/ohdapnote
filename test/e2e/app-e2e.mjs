@@ -281,7 +281,7 @@ try {
   // 세부 설정: 한 요청에 2문항씩 → 4문항이 요청 2개로 (분당 60개 = 1초 간격으로 시작, 응답은 1.5초 → 동시에 2개)
   await win.fill('.settings .set-adv > .field:has-text("묶음 크기") input', '2');
   await win.click('.modal-footer .btn-primary');
-  await win.waitForSelector('.export-hint:has-text("모두 정밀 인식으로")', { timeout: 10000 });
+  await win.waitForSelector('.export-hint:has-text("모두 정밀 인식해요")', { timeout: 10000 });
 
   // 뒤에서 옮기는 중에 오답노트를 고치고 다시 내보내면 앞 작업을 멈추고 고친 내용으로 새로 (예전에는 앞 창을 다시 보여 줘서 고친 게 빠졌음)
   step('한글: 뒤에서 옮기는 중에 문항 하나를 빼고 다시 → 고친 내용으로 새로 / [취소] 뒤 다시 → 새로');
@@ -338,12 +338,12 @@ try {
     await clearToasts();
   };
   await setAi(false);
-  await win.waitForSelector('.export-hint:has-text("정밀 인식이 꺼져")', { timeout: 10000 });
+  await win.waitForSelector('.export-hint:has-text("인식 설정이 없어 스캔본은 그림으로 넣어요")', { timeout: 10000 });
   const off = await exportHwpx('app-export-ai-off.hwpx');
   if (count(off, 'hp:equation') !== 0 || count(off, 'hp:pic') < 4) throw new Error('AI 를 껐는데 AI 결과가 들어갔습니다');
   if ((await app.evaluate(() => globalThis.gemCalls.length)) !== calls2) throw new Error('AI 를 껐는데 AI 를 불렀습니다');
   await setAi(true);
-  await win.waitForSelector('.export-hint:has-text("모두 정밀 인식으로")', { timeout: 10000 });
+  await win.waitForSelector('.export-hint:has-text("모두 정밀 인식해요")', { timeout: 10000 });
 
   step('다른 AI: 세부 설정에서 Claude 로 바꿔 해설지 한글 내보내기 / OpenAI 호환 (내 컴퓨터의 가짜 서버로, 메인 프로세스·SDK 그대로)');
   const fakeSeen = [];
@@ -385,7 +385,7 @@ try {
     await win.click('.modal-footer .btn-primary');
     await waitToast('설정을 저장했어요', 10000);
     await clearToasts();
-    await win.waitForSelector('.export-hint:has-text("모두 정밀 인식으로")', { timeout: 10000 });
+    await win.waitForSelector('.export-hint:has-text("모두 정밀 인식해요")', { timeout: 10000 });
     const out = join(OUT, 'app-export-claude.hwpx');
     rmSync(out, { force: true });
     await stubSave(out);
@@ -495,7 +495,7 @@ try {
   await win.click('.seg:has(input[name="format"]) label:has-text("한글")');
   await win.waitForSelector('.convert-row:not([hidden]) input[value="mix"]:checked', { state: 'attached' });
   await win.click('.seg:has(input[name="convert"]) label:has-text("이 컴퓨터만")');
-  await win.waitForSelector('.export-hint:has-text("이 컴퓨터에서만")', { timeout: 10000 });
+  await win.waitForSelector('.export-hint:has-text("수식 인식 파일이 필요해요")', { timeout: 10000 });
   const scanOcr = await exportHwpx('app-export-scan-ocr.hwpx');
   const mathCalls1 = await app.evaluate(() => globalThis.mathCalls);
   console.log(`    OCR만: 수식 인식 요청 ${mathCalls1.length}개 (수식 ${mathCalls1.map((c) => c.images).join('+')}개), AI 요청 ${(await app.evaluate(() => globalThis.aiCalls)).length}개`);

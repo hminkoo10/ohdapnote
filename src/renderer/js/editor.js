@@ -157,13 +157,13 @@ export function createEditor(ctx) {
         h('span.tb-pagelabel', `${pageLabel(d, st.page)}`),
       ),
       h('div.tb-group',
-        h(`button.btn.btn-small${st.mode === 'draw' ? '.btn-active' : ''}`, { onclick: () => setMode(st.mode === 'draw' ? 'select' : 'draw'), title: '빈 곳을 드래그해서 새 문항 영역을 그립니다' }, icon('plus'), '문항 추가'),
-        h(`button.btn.btn-small${st.mode === 'addRect' ? '.btn-active' : ''}`, { onclick: () => setMode(st.mode === 'addRect' ? 'select' : 'addRect'), disabled: !it, title: '선택한 문항에 영역을 하나 더 그립니다 (다음 단·쪽으로 이어지는 부분)' }, icon('box'), '영역 추가'),
+        h(`button.btn.btn-small${st.mode === 'draw' ? '.btn-active' : ''}`, { onclick: () => setMode(st.mode === 'draw' ? 'select' : 'draw'), title: '빈 곳을 끌어 문항 영역을 그려요' }, icon('plus'), '문항 추가'),
+        h(`button.btn.btn-small${st.mode === 'addRect' ? '.btn-active' : ''}`, { onclick: () => setMode(st.mode === 'addRect' ? 'select' : 'addRect'), disabled: !it, title: '다음 단·쪽에 이어지는 영역을 그려요' }, icon('box'), '영역 추가'),
         h('button.btn.btn-small', { onclick: deleteSelected, disabled: !it, title: '선택한 영역 삭제 (Delete)' }, icon('trash'), '삭제'),
         h('label.tb-num', '번호', numInput),
       ),
       h('div.tb-group.tb-right',
-        h('button.btn.btn-small', { onclick: () => ctx.reanalyzePage(st.role, st.page), title: '이 쪽만 고해상도로 한 번 더, 앞뒤 쪽 번호에 맞춰 꼼꼼히 다시 찾아요 (이 쪽에서 직접 고친 내용은 바뀔 수 있어요)' }, icon('search'), '꼼꼼히 다시 찾기'),
+        h('button.btn.btn-small', { onclick: () => ctx.reanalyzePage(st.role, st.page), title: '이 쪽을 다시 읽어요. 직접 고친 내용이 바뀔 수 있어요' }, icon('search'), '꼼꼼히 다시 찾기'),
         h('button.btn.btn-small', { onclick: () => ctx.geminiPage(st.role, st.page), title: '이 쪽 정밀 인식 (설정에서 서비스 키 입력)' }, icon('scan'), '정밀 인식'),
         h('button.btn.btn-icon.btn-ghost', { title: '축소', 'aria-label': '축소', onclick: () => setZoom(st.zoom / 1.2) }, icon('zoomOut')),
         h('span.muted.small.tb-zoom', `${Math.round(st.zoom * 100)}%`),
@@ -201,9 +201,9 @@ export function createEditor(ctx) {
       if (why.length && ghostCands().length) parts.push(h('span.muted', '점선 번호를 누르면 그 자리에 문항이 추가돼요.'));
     }
     const modeHint = {
-      select: '상자를 눌러 고르고, 끌어서 옮기거나 모서리로 크기를 바꿀 수 있어요.',
-      draw: '빈 곳을 드래그해서 새 문항 영역을 그리고, 번호를 입력해 주세요.',
-      addRect: '선택한 문항에 이어지는 영역을 드래그해서 그리세요. (다른 쪽으로 넘어가도 됩니다)',
+      select: '상자를 끌어 이동하고, 모서리로 크기를 바꿔요.',
+      draw: '빈 곳을 끌어 영역을 그리고 번호를 적어요.',
+      addRect: '이어지는 영역을 끌어 그려요. 다른 쪽도 가능해요.',
     }[st.mode];
     parts.push(h('span.muted', modeHint));
     hint.append(...parts);
@@ -492,8 +492,8 @@ export function createEditor(ctx) {
     const ri = st.selected.rect;
     const role = st.role;
     const message = it.rects.length > 1
-      ? `${it.number}번 문항의 선택한 영역을 삭제할까요? 다른 영역은 남습니다.`
-      : `${it.number}번 문항 상자를 삭제할까요? 오답노트에서 고른 목록에서도 빠집니다. 원본 파일은 남습니다.`;
+      ? `${it.number}번의 선택한 영역을 지워요. 다른 영역은 남아요.`
+      : `${it.number}번 상자를 지우면 오답노트 선택에서도 빠져요. 원본 파일은 남아요.`;
     if (!(await confirmDialog(message, { title: '문항 영역 삭제', ok: '삭제', danger: true }))) return;
     if (doc() !== d || st.role !== role || selectedItem() !== it || st.selected.rect !== ri) return;
     if (it.rects.length > 1) {

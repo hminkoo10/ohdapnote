@@ -30,7 +30,7 @@ export function aiSettingsCard(s) {
     const m1 = text(v1, { list: listId, placeholder });
     const m2 = text(v2, { list: listId, placeholder: '(없음 — 1순위만 사용)' });
     const datalist = h(`datalist#${listId}`);
-    const msg = h('div.small.muted.model-msg', '모델 목록을 불러오면 입력칸에서 고를 수 있어요. 직접 적어도 돼요.');
+    const msg = h('div.small.muted.model-msg', '모델 이름을 직접 적어도 돼요.');
     const chips = h('div.model-chips');
     const load = async () => {
       msg.textContent = '불러오는 중…';
@@ -57,7 +57,7 @@ export function aiSettingsCard(s) {
           ),
         ),
       );
-      msg.textContent = `${r.models.length}개 모델 — 칩을 누르면 1순위, Shift+누르면 2순위로 들어가요.${id === 'gemini' ? ' (flash 계열이 빠르고 무료 한도가 넉넉해요)' : ''}`;
+      msg.textContent = `${r.models.length}개 — 클릭: 1순위, Shift+클릭: 2순위`;
     };
     return {
       m1,
@@ -66,7 +66,7 @@ export function aiSettingsCard(s) {
         h('label.field', h('span', '1순위 모델'), h('div.field-row', m1, datalist, h('button.btn.btn-small', { onclick: load }, icon('list'), '모델 목록'))),
         h('label.field', h('span', '2순위 모델'), m2),
         h('div.field-note', msg, chips),
-        h('p.small.muted', '1순위 모델의 사용 한도가 다 차거나 쓸 수 없으면 자동으로 2순위 모델로 넘어가요.'),
+        h('p.small.muted', '1순위를 쓸 수 없으면 2순위로 넘어가요.'),
       ],
     };
   };
@@ -99,8 +99,8 @@ export function aiSettingsCard(s) {
     say('muted', 'Codex CLI 를 찾는 중…');
     const r = await api.aiCodexStatus(codexPath.value.trim());
     const ver = r.version ? ` (${r.version})` : '';
-    if (!r.found) say('warn-text', 'Codex CLI 를 찾지 못했어요 — 설치한 뒤 "다시 확인"을 누르거나, 고급에 codex 경로를 적어 주세요.');
-    else if (!r.loggedIn) say('warn-text', `Codex CLI 찾음${ver} · 로그인 안 됨 — 명령 프롬프트에서 codex login 으로 ChatGPT 계정에 로그인해 주세요.`);
+    if (!r.found) say('warn-text', 'Codex CLI 설치 후 [다시 확인], 또는 고급에 경로를 적어요.');
+    else if (!r.loggedIn) say('warn-text', `codex login으로 ChatGPT 계정에 로그인해요. CLI${ver} 확인됨`);
     else if (r.method === 'apikey') say('warn-text', `Codex CLI 찾음${ver} · API 키로 로그인되어 있어서 구독이 아니라 API 요금으로 나가요. ChatGPT 계정으로 쓰려면 codex logout 후 codex login`);
     else say('ok-text', `Codex CLI 찾음${ver} · ChatGPT 계정으로 로그인됨`);
   };
@@ -110,27 +110,27 @@ export function aiSettingsCard(s) {
       'div.ai-panel',
       h(
         'p.small.muted',
-        '선택한 쪽을 다시 읽거나 한글 문서의 글자·수식으로 옮깁니다. ',
+        '',
         link('API 키 받기', 'https://aistudio.google.com/apikey'),
-        ' · 무료 등급의 이미지는 Google 서비스 개선에 쓰일 수 있습니다.',
+        ' · 무료 등급 이미지는 Google 서비스 개선에 쓰일 수 있어요.',
       ),
       h('label.field', h('span', 'Gemini API 키'), gem.key),
     ),
     openai: h(
       'div.ai-panel',
-      h('p.small.muted', '연결할 서비스의 키를 입력하세요. 주소와 모델은 고급에서 정합니다.'),
+      h('p.small.muted', '주소·모델은 고급에서 정해요.'),
       h('label.field', h('span', '서비스 API 키'), oa.key),
     ),
     anthropic: h(
       'div.ai-panel',
-      h('p.small.muted', 'Anthropic Claude API 키로 써요. 쓴 만큼 요금이 나가요. ', link('API 키 받기', 'https://console.anthropic.com/settings/keys'), ' · 모델은 바꿀 수 있어요.'),
+      h('p.small.muted', '쓴 만큼 요금이 나가요. ', link('API 키 받기', 'https://console.anthropic.com/settings/keys'), ''),
       h('label.field', h('span', 'API 키'), cl.key),
     ),
     codex: h(
       'div.ai-panel',
       h(
         'p.small.muted',
-        '이 컴퓨터에 연결한 ChatGPT 구독으로 정밀 인식을 사용합니다. 설치·로그인 안내는 고급에서 확인하세요.',
+        '연결한 ChatGPT 구독을 써요. 설치·로그인은 고급에서 확인해요.',
       ),
       h('div.field-row', cx.status, h('span.spacer'), h('button.btn.btn-small', { onclick: checkCodex }, icon('refresh'), '다시 확인')),
     ),
@@ -152,26 +152,26 @@ export function aiSettingsCard(s) {
     only(
       'gemini',
       gem.models.nodes,
-      rpmField(gem.rpm, '무료 한도를 넘지 않게 천천히 보내요'),
+      rpmField(gem.rpm, '무료 한도에 맞춰요'),
       h('label.field', h('span', '게이트웨이 주소'), gemBase),
-      h('p.small.muted', '비우면 Google 로 바로 보내요. Cloudflare AI Gateway 같은 게이트웨이를 쓰면 그 주소(/v1beta 앞까지)를 적어요.'),
+      h('p.small.muted', '비우면 Google로 보내요. 게이트웨이 주소는 /v1beta 앞까지 적어요.'),
     ),
     only('openai',
-      h('p.small.muted', 'OpenAI 방식(Chat Completions)으로 받는 서비스와 연결합니다. OpenAI, OpenRouter, LiteLLM 등의 주소와 그림을 읽을 수 있는 모델을 입력하세요.'),
-      h('p.small.muted', '내 컴퓨터에서만 쓰려면 Ollama(http://localhost:11434/v1) · LM Studio(http://localhost:1234/v1) 등의 서버를 실행하세요. 로컬 서버의 API 키는 비워 둘 수 있습니다.'),
+      h('p.small.muted', 'OpenAI 호환 주소·이미지 인식 모델을 적어요.'),
+      h('p.small.muted', '로컬 서버는 실행 후 연결해요. API 키는 비워도 돼요.'),
       h('label.field', h('span', '주소'), oa.base), oa.models.nodes,
-      rpmField(oa.rpm, '서버 한도에 맞춰요 (로컬이면 크게 둬도 돼요)')),
+      rpmField(oa.rpm, '서버 한도에 맞춰요')),
     only('anthropic', cl.models.nodes, rpmField(cl.rpm, '계정 한도에 맞춰요'), h('label.field', h('span', '게이트웨이 주소'), claudeBase), h('p.small.muted', '비우면 https://api.anthropic.com 으로 보내요.')),
     only('codex',
-      h('p.small.muted', '공식 Codex CLI 설치 후 명령 프롬프트에서 codex login 으로 로그인하세요. 오답노트는 임시 폴더에서 읽기 전용으로 실행합니다. 한 요청에 수십 초 걸릴 수 있습니다.'),
+      h('p.small.muted', 'Codex CLI 설치 → codex login. 요청당 수십 초 걸릴 수 있어요.'),
       h('label.field', h('span', '모델'), cx.model), h('label.field', h('span', 'codex 경로'), codexPath)),
-    h('label.field', h('span', '동시 요청 수'), h('div.field-row', concInput, h('span.small.muted', '요청 여러 개를 같이 보내요 (기본 3)'))),
-    h('label.field', h('span', '묶음 크기'), h('div.field-row', batchInput, h('span.small.muted', '한글 내보내기에서 한 요청에 담는 문항 수 (기본 4, 1이면 하나씩)'))),
+    h('label.field', h('span', '동시 요청 수'), h('div.field-row', concInput, h('span.small.muted', '기본 3개'))),
+    h('label.field', h('span', '묶음 크기'), h('div.field-row', batchInput, h('span.small.muted', '요청당 문항 수예요 (기본 4, 1이면 하나씩)'))),
   );
 
   // 끄면 AI 를 전혀 쓰지 않음 (넣어 둔 키·모델은 그대로 남음)
   const onInput = h('input', { type: 'checkbox', checked: s.aiEnabled !== false });
-  const offNote = h('p.small.muted', '정밀 인식 꺼짐. 저장한 키·모델은 유지됩니다. 스캔본을 옮기는 방법은 내보내기에서 선택하세요.');
+  const offNote = h('p.small.muted', '꺼도 저장한 키·모델은 남아요.');
 
   // 학원 AI / 내 키 (학원 공간에서만): 학원 AI 는 원장이 통합 클라우드에서 정하고, 키는 보이지 않음
   const academy = !!state.appInfo?.academy;
@@ -210,9 +210,9 @@ export function aiSettingsCard(s) {
   const renderSource = () => {
     if (!academy) return;
     clear(sourceNote);
-    if (source === 'personal') sourceNote.append('아래에 넣은 내 키·모델로 써요.');
-    else if (a) sourceNote.append(`원장님이 통합 클라우드에서 정한 학원 AI 를 써요: ${PROVIDERS[a.provider]?.label || a.provider}${a.model ? ` · ${a.model}` : ''}. `, cloudBtn());
-    else sourceNote.append(`아직 학원 AI 가 없어요. ${state.appInfo?.manager ? '통합 클라우드의 ‘학원 AI’에서 정하면' : '원장님이 통합 클라우드에서 정하면'} 학원 사람 모두가 같이 써요. 그때까지는 아래 내 설정을 써요. `, cloudBtn());
+    if (source === 'personal') sourceNote.append('');
+    else if (a) sourceNote.append(`학원 AI: ${PROVIDERS[a.provider]?.label || a.provider}${a.model ? ` · ${a.model}` : ''}. `, cloudBtn());
+    else sourceNote.append(`학원 AI 미설정: 내 설정을 써요. ${state.appInfo?.manager ? '통합 클라우드에서 설정해요.' : '설정은 원장님께 요청해요.'} `, cloudBtn());
   };
 
   const show = () => {

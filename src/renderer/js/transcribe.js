@@ -183,7 +183,7 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
   };
   /** AI 가 못 옮긴 문항: OCR 결과가 있으면 그것으로, 없으면 그림으로 */
   const aiFailed = (b, why) => {
-    if (has(ocrResult(b))) settle(b, 'ok', `${why} → 스캔 인식 결과로`, 'OCR');
+    if (has(ocrResult(b))) settle(b, 'ok', `${why} → OCR 결과로`, 'OCR');
     else settle(b, why === '읽은 내용이 없음' || why === '한도 초과' ? 'empty' : 'err', `${why} → 그림으로`, 'AI');
   };
 
@@ -201,7 +201,7 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
           const r = await scanTranscribe(canvas, { number: b.item.passage ? '' : b.item.number, signal: abort.signal, api, onStatus: (msg) => row.set('run', msg, 'OCR') });
           if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
           if (!r.blocks.length) {
-            if (useAi) row.set('wait', '읽은 내용이 없음 → 정밀 인식으로', 'OCR');
+            if (useAi) row.set('wait', '읽은 내용이 없음 → AI 에게', 'OCR');
             else settle(b, 'empty', '읽은 내용이 없음 → 그림으로', 'OCR');
             continue;
           }
@@ -210,12 +210,12 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
           store.dirty = true;
           const what = `글자·수식으로 옮김${r.formulas ? ` (수식 ${r.formulas}개)` : ''}`;
           if (r.reliable) settle(b, 'ok', what, 'OCR');
-          else if (useAi) row.set('wait', `미덥지 않음 (${r.reasons[0]}) → 정밀 인식으로`, 'OCR');
+          else if (useAi) row.set('wait', `미덥지 않음 (${r.reasons[0]}) → AI 에게`, 'OCR');
           else settle(b, 'ok', `${what} · 확인 필요 (${r.reasons[0]})`, 'OCR');
         } catch (err) {
           if (err?.name === 'AbortError' || abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
           console.warn('OCR 로 옮기지 못함', err);
-          if (useAi) row.set('wait', `${err.message} → 정밀 인식으로`, 'OCR');
+          if (useAi) row.set('wait', `${err.message} → AI 에게`, 'OCR');
           else settle(b, 'err', `${err.message} → 그림으로`, 'OCR');
         }
       }
@@ -381,7 +381,7 @@ function transcribeDialog(work, { ocr, ai: aiCount, useAi, useOcr }, abort, { ke
       return row;
     }),
   );
-  const how = useOcr && useAi ? `먼저 이 컴퓨터에서 글자·수식을 읽고, 필요한 문항만 외부 서비스로 보내 정밀 인식합니다.` : useOcr ? '이 컴퓨터에서 글자·수식을 읽습니다. 한 문항에 몇 초~수십 초 걸립니다.' : `외부 서비스로 문항을 보내 정밀 인식합니다.`;
+  const how = useOcr && useAi ? `필요한 문항만 외부 서비스로 보내요.` : useOcr ? '이 컴퓨터에서 읽어요. 문항당 몇 초~수십 초 걸려요.' : `문항을 외부 서비스로 보내요.`;
   const status = h('div.small.muted.gem-status', useAi ? `모델: ${aiModelText()}` : '수식 인식: 이 컴퓨터 (Pix2Text)');
   const bar = h('div.progress-bar');
   const jd = jobDialog({
@@ -393,7 +393,7 @@ function transcribeDialog(work, { ocr, ai: aiCount, useAi, useOcr }, abort, { ke
     title: `문항 ${work.length}개를 글자·수식으로`,
     body: h(
       'div.gem-run',
-      h('p.small.muted', `새로 옮길 문항 ${ocr + aiCount}개 — ${how} 옮기지 못한 문항은 그림으로 넣어요. 옮긴 결과는 저장해 두어 다음에는 다시 하지 않아요.`),
+      h('p.small.muted', `${ocr + aiCount}문항 — ${how} 못 옮긴 문항은 그림으로 넣어요.`),
       h('div.progress', bar),
       status,
       list,

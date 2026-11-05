@@ -234,7 +234,7 @@ try {
   await win.click('.seg-tab[data-tab="books"]');
   await win.click('.card-new:has-text("새 책 등록")');
   await win.waitForSelector('.modal');
-  assert((await win.textContent('.modal')).includes('계약한 과목이 없어서'), '계약 과목이 없을 때 안내가 없습니다: ' + (await win.textContent('.modal')));
+  assert((await win.textContent('.modal')).includes('계약한 과목이 없어'), '계약 과목이 없을 때 안내가 없습니다: ' + (await win.textContent('.modal')));
   assert(!(await win.$('.modal input')), '계약 과목이 없는데 이름 칸이 있습니다');
   await shot('4-none');
   await win.click('.modal .btn-primary');

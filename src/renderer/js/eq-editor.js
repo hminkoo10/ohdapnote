@@ -25,7 +25,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
   const paint = () => {
     preview.innerHTML = eqToMathML(script.value, { display: true, sourceMap: true });
     const errors = parseEq(script.value).errors;
-    warning.textContent = errors.length ? '괄호나 명령을 확인해 주세요. 지금 모양으로도 넣을 수 있어요.' : '';
+    warning.textContent = errors.length ? '괄호·명령을 확인해요. 현재 모양으로도 넣어요.' : '';
     preview.classList.toggle('eq-has-warning', errors.length > 0);
   };
   const apply = (result) => {
@@ -186,7 +186,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
   paint();
   await api.setEditorShortcutScope('equation');
   const result = modal({ title: eq ? '수식 고치기' : '수식 넣기', width: 900, className: 'answer-equation-modal',
-    body: h('div.eq-editor', h('p.eq-guide', '틀을 고르고 빈칸에 써 보세요. Tab으로 다음 칸, 위 수식을 누르면 그 부분을 고쳐요.'),
+    body: h('div.eq-editor', h('p.eq-guide', '틀의 빈칸에 적어요. Tab은 다음 칸, 수식을 누르면 수정해요.'),
       h('strong', '바로 보이는 수식'), preview, warning, toolbar, panel, extra, h('label', '한글 수식 스크립트', script), h('label.check', centered, '가운데 수식으로 넣기')),
     onKeyDown: (event) => {
       if (composing || event.isComposing) return false;

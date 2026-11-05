@@ -16,8 +16,8 @@ export function topbar(left, right = null) {
       'div.topbar-right',
       right,
       jobBadge,
-      h('button.btn.btn-ghost#help-btn', { onclick: () => openHelp(), title: '사용 설명서를 브라우저에서 열어요' }, icon('help'), h('span', '도움말')),
-      h('button.btn.btn-ghost#settings-btn', { onclick: () => openSettings(), title: '설정' }, icon('gear'), h('span', '설정')),
+      h('button.btn.btn-ghost#help-btn', { onclick: () => openHelp(), title: '브라우저에서 열어요' }, icon('help'), h('span', '도움말')),
+      h('button.btn.btn-ghost#settings-btn', { onclick: () => openSettings(), title: '' }, icon('gear'), h('span', '설정')),
     ),
   );
 }
@@ -56,7 +56,7 @@ function mathOcrCard() {
   const card = h(
     'section.set-card',
     h('h4', icon('scan'), '이 컴퓨터의 수식 인식'),
-    h('p.small.muted', '스캔본을 이 컴퓨터에서 글자·한글 수식으로 옮깁니다. 한글(HWPX) 저장 시 선택할 수 있습니다.'),
+    h('p.small.muted', '한글(HWPX) 저장에 쓸 수식 인식 파일이에요.'),
     h('div.field-row', getBtn, cancelBtn, status),
     progress,
   );
@@ -105,7 +105,7 @@ function mathOcrCard() {
       mathocrDl.running = false;
       setRestartBusy('mathocr', false);
     }
-    if (r?.ok) toast('수식 인식 모델을 받았어요. 이제 스캔본도 이 컴퓨터에서 옮길 수 있어요.', { type: 'success' });
+    if (r?.ok) toast('수식 인식 파일을 받았어요.', { type: 'success' });
     else if (!r?.aborted) toast(`수식 인식 모델을 받지 못했어요: ${r?.error || '알 수 없는 오류'}`, { type: 'error', timeout: 8000 });
     await mathocrDl.render?.();
     document.dispatchEvent(new Event('mathocr:changed')); // 오답노트 화면의 한글 내보내기 안내도
@@ -152,7 +152,7 @@ export async function openSettings() {
     'div.settings',
     h('section.set-card',
       h('h4', icon('school'), '내보내기 기본값'),
-      h('p.small.muted', 'PDF·한글 시험지 머리에 들어가요. 학원 명단 학생은 담당 선생님 이름이 먼저 들어가고, 오답노트마다 바꿀 수 있어요.'),
+      h('p.small.muted', '시험지 머리에 써요. 명단 학생은 담당 선생님 이름을 우선해요.'),
       h('label.field', h('span', '학원 이름'), academyInput),
       h('label.field', h('span', '시험지에 쓸 선생님 이름(기본값)'), teacherInput),
     ),
@@ -165,8 +165,8 @@ export async function openSettings() {
     h('section.set-card',
       h('h4', icon('gear'), '프로그램'),
       h('label.field', h('span', '애니메이션'), motionSelect),
-      h('div.field', h('span', '통합 클라우드 계정'), h('div.field-row', h('span', accountText()), h('button.btn.btn-small', { onclick: () => api.openCloud() }, '통합 클라우드 열기'), h('button.btn.btn-small', { onclick: () => openHelp('settings'), title: '사용 설명서를 브라우저에서 열어요' }, icon('help'), '사용 설명서'))),
-      h('p.small.muted', '업데이트는 통합 클라우드가 받아 둬요. 오답노트를 다시 켜면 새 버전으로 바뀌어요.'),
+      h('div.field', h('span', '통합 클라우드 계정'), h('div.field-row', h('span', accountText()), h('button.btn.btn-small', { onclick: () => api.openCloud() }, '통합 클라우드 열기'), h('button.btn.btn-small', { onclick: () => openHelp('settings'), title: '브라우저에서 열어요' }, icon('help'), '사용 설명서'))),
+      h('p.small.muted', '업데이트는 다시 켤 때 적용돼요.'),
       h('div.credit', h('span', `오답노트 ${state.appInfo.version}`), h('span.dot'), h('span', `개발 ${state.appInfo.developer || '구현민'}`)),
     ),
   );
