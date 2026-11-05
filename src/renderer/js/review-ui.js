@@ -8,6 +8,7 @@ export function reviewInput(block, { item, label, onSelect, onChange } = {}) {
   const value = () => block.type === 'math' ? block.latex ?? block.eq ?? '' : item !== undefined ? block.items[item] : block.text || '';
   const marks = () => (block.low || []).flatMap((mark, index) => item === undefined || mark.item === item ? [{ mark, index }] : []);
   const input = h('textarea.input.review-text', { value: value(), 'aria-label': label, spellcheck: false, rows: block.type === 'para' ? 4 : 2 });
+  input.value = value();
   const ink = h('div.review-ink', { 'aria-hidden': 'true' });
   const backdrop = h('div.review-backdrop', ink);
   const buttons = h('div.review-mark-buttons');

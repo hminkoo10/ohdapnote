@@ -6,16 +6,18 @@ export const LOW_CONF = Object.freeze({
 });
 
 export function textLow(unit) {
-  const reason = unit.check ? 'disagree' : Number.isFinite(unit.conf) && unit.conf < LOW_CONF.text ? 'ocr' : null;
+  const scores = [unit.conf, unit.wordConf].filter(Number.isFinite);
+  const conf = scores.length ? Math.min(...scores) : undefined;
+  const reason = unit.check ? 'disagree' : conf < LOW_CONF.text ? 'ocr' : null;
   if (!reason) return [];
   return [{ start: 0, end: unit.str.length, reason,
-    ...(Number.isFinite(unit.conf) ? { conf: Math.max(0, Math.min(1, unit.conf / 100)) } : {}),
+    ...(Number.isFinite(conf) ? { conf: Math.max(0, Math.min(1, conf / 100)) } : {}),
     box: { x0: unit.x0, y0: unit.y0, x1: unit.x1, y1: unit.y1 } }];
 }
 
 export function mathLow(conf) {
   if (!conf || !(conf.mean < LOW_CONF.confMean || conf.min < LOW_CONF.confMin)) return null;
-  return { reason: 'math', conf: Math.max(0, Math.min(1, Math.min(conf.mean, conf.min))) };
+  return { reason: 'math', conf: Math.max(0, Math.min(1, Math.min(...[conf.mean, conf.min].filter(Number.isFinite)))) };
 }
 
 export function relativeBox(box, width, height) {

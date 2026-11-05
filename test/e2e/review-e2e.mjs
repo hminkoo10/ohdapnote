@@ -1,0 +1,211 @@
+// 확인 표시: 실제 저장·편집·확대·내보내기·답지 불러오기까지 한 번에 확인.
+import { _electron as electron } from '../lib/playwright.mjs';
+import { fakeCloud } from '../lib/fake-cloud.mjs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import assert from 'node:assert/strict';
+import { transcriptKey } from '../../src/renderer/js/transcript-store.js';
+
+const require = createRequire(import.meta.url);
+const { PDFDocument, StandardFonts } = require('pdf-lib');
+const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
+const OUT = join(ROOT, 'test/e2e/out');
+mkdirSync(OUT, { recursive: true });
+const tmp = mkdtempSync(join(OUT, 'review-temp-'));
+const academy = join(tmp, 'academy');
+const id = 'aaaaaaaa-1234-4000-8000-000000000045';
+const dir = join(academy, 'books', id);
+mkdirSync(dir, { recursive: true });
+const pdf = await PDFDocument.create();
+const page = pdf.addPage([595, 842]);
+const font = await pdf.embedFont(StandardFonts.Helvetica);
+page.drawText('Review the function x + 1. Answer 12.', { x: 40, y: 700, size: 18, font });
+writeFileSync(join(dir, 'source.pdf'), await pdf.save());
+const item = { id: 'problem-1', number: '1', num: 1, page: 0, rects: [{ page: 0, x: 0.04, y: 0.12, w: 0.9, h: 0.16 }] };
+const second = { ...item, id: 'problem-2', number: '2', num: 2 };
+const answer = { ...item, id: 'answer-1' };
+const doc = (items) => ({ files: [{ name: 'source.pdf', originalName: 'source.pdf', kind: 'pdf' }], items, pageCount: 1, pageInfo: {}, range: '', options: { flow: 'column', numberStyle: 'auto' }, pageOffset: 0, analyzedAt: Date.now() });
+const book = { id, kind: 'book', version: 2, name: '확인 표시 연습 교재', subject: 'english', createdBy: { id: 'teacher-a', name: '김선생' }, createdAt: Date.now(), updatedAt: Date.now(), docs: { problem: doc([item, second]), answer: doc([answer]) }, answerOverrides: {} };
+const box = { x: 0.03, y: 0.2, w: 0.2, h: 0.2 };
+const low = (start, end, reason = 'ocr') => ({ start, end, reason, conf: 0.5, box });
+const text = '가나 다라 마바 $x+1$ 끝';
+const blocks = [
+  { type: 'para', text, low: [low(0, 2), low(3, 5, 'disagree'), low(6, 8), low(9, 14, 'math')] },
+  { type: 'math', latex: 'x^{2}', low: [{ reason: 'math', conf: 0.2, box }] },
+  { type: 'choices', items: ['첫째 보기', '둘째 보기'], low: [low(0, 2)].map((m) => ({ ...m, item: 1 })) },
+];
+const key = (it, role = 'problem') => transcriptKey({ role, item: it, stem: null, src: { files: book.docs[role].files } });
+const answerText = '정답 12. 함수 $x^2$ 입니다.';
+const answerBlocks = [{ type: 'para', text: answerText, low: [low(7, 9), low(10, 15, 'math')] }, { type: 'math', latex: 'x+1', low: [{ reason: 'math', box }] }];
+writeFileSync(join(dir, 'book.json'), JSON.stringify(book));
+writeFileSync(join(dir, 'transcripts.json'), JSON.stringify({ version: 1, items: {
+  [key(item) + '|local']: { blocks, at: Date.now() },
+  [key(second) + '|pdf']: { blocks: [{ type: 'para', text: '표시 없는 옛 문항' }] },
+  [key(answer, 'answer') + '|local']: { blocks: answerBlocks },
+} }));
+const cloud = fakeCloud({ dir: join(tmp, 'cloud'), academyDir: academy, subjects: ['math', 'english'], members: [{ id: 'teacher-a', name: '김선생', role: 'teacher' }] });
+const env = { ...process.env };
+delete env.ELECTRON_RUN_AS_NODE;
+let app;
+let win;
+const errors = [];
+const call = (fn, ...args) => win.evaluate(([name, values]) => window.ohdap[name](...values), [fn, args]);
+const clearToasts = () => win.locator('.toast').evaluateAll((nodes) => nodes.forEach((node) => node.remove()));
+const shot = async (name) => {
+  await win.evaluate(async () => { await document.fonts.ready; await Promise.all(document.getAnimations().filter((a) => Number.isFinite(a.effect.getComputedTiming().endTime)).map((a) => a.finished.catch(() => {}))); });
+  await win.screenshot({ path: join(OUT, `review-${name}.png`) });
+};
+const openEditor = async () => {
+  await win.locator('.bank-row[data-item="problem-1"]').click();
+  await win.locator('.bank-transcript').getByRole('button', { name: '글 고치기', exact: true }).click();
+  await win.waitForSelector('.review-modal');
+};
+const count = () => win.locator('.review-count').innerText();
+try {
+  app = await electron.launch({ executablePath: require('electron'), args: ['--no-sandbox', ROOT], env: { ...env, OHDAP_E2E: '1', OHDAP_USER_DATA: join(tmp, 'local'), MAGOEDU_DEV: '1', MAGOEDU_ACADEMY: '테스트학원', MAGOEDU_ACADEMY_DIR: academy, MAGOEDU_DATA_DIR: join(tmp, 'data'), MAGOEDU_LOCAL_DIR: join(tmp, 'local'), MAGOEDU_USER_ID: 'teacher-a', MAGOEDU_USER_NAME: '김선생', MAGOEDU_ROLE: 'teacher', ...cloud.env } });
+  win = await app.firstWindow();
+  win.on('pageerror', (err) => errors.push(err.message));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1040, 900));
+  await win.waitForSelector('.seg-tab[data-tab="bank"]');
+  await win.click('.seg-tab[data-tab="bank"]');
+  await win.waitForSelector('.bank-row');
+  console.log('▶ 문항 개수·교재 합계·표시 없는 옛 문항·거르기');
+  assert.match(await win.locator('.bank-book').innerText(), /확인할 곳 6개/);
+  assert.match(await win.locator('.bank-row[data-item="problem-1"]').innerText(), /확인할 곳 6개/);
+  assert.equal(await win.locator('.bank-row').count(), 2);
+  await win.locator('[data-bank-focus="review"]').check();
+  await win.waitForFunction(() => document.querySelectorAll('.bank-row').length === 1);
+  await shot('list');
+  await openEditor();
+  console.log('▶ 밑줄·수식 테두리·가리킨 원본 확대·1040px');
+  assert.ok(await win.locator('.review-mark:not(.review-math)').count() >= 3);
+  assert.equal(await win.locator('.review-math').count(), 2);
+  assert.equal(await count(), '1/6');
+  const bounds = await win.locator('.review-mark').first().boundingBox();
+  await win.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await win.waitForSelector('.review-zoom canvas');
+  assert.ok(await win.locator('.review-zoom canvas').evaluate((canvas) => canvas.width > 0 && canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data.some((v, i) => i % 4 !== 3 && v < 240)));
+  assert.ok(await win.locator('.review-modal').evaluate((el) => el.getBoundingClientRect().left >= 0 && el.getBoundingClientRect().right <= innerWidth && el.scrollWidth <= el.clientWidth));
+  await shot('editor');
+  console.log('▶ 맞아요·수정 구간 제거·뒤 표시 이동·기본 되돌리기');
+  await win.locator('.review-toolbar').getByRole('button', { name: '맞아요', exact: true }).click();
+  assert.match(await count(), /\/5$/);
+  const field = win.locator('.review-text').first();
+  await field.evaluate((el) => { el.focus(); el.setSelectionRange(3, 5); });
+  await win.keyboard.insertText('수정문장');
+  assert.match(await count(), /\/4$/);
+  await field.press('Control+z');
+  assert.equal(await field.inputValue(), text);
+  assert.match(await count(), /\/5$/);
+  await field.press('Control+y');
+  assert.equal(await field.inputValue(), '가나 수정문장 마바 $x+1$ 끝');
+  assert.match(await count(), /\/4$/);
+  const initial = await count();
+  await field.press('F8');
+  assert.notEqual(await count(), initial);
+  await win.keyboard.press('Shift+F8');
+  assert.equal(await count(), initial);
+  console.log('▶ 여러 줄 붙여넣기·스크롤·되돌리기');
+  await field.evaluate((el) => { el.focus(); el.setSelectionRange(el.value.length, el.value.length); });
+  await win.keyboard.insertText('\n붙여 넣은 긴 문장입니다. '.repeat(24));
+  assert.match(await count(), /\/4$/);
+  await field.evaluate((el) => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); });
+  const scroll = await field.evaluate((el) => ({ top: el.scrollTop, offset: new DOMMatrix(getComputedStyle(el.previousElementSibling.firstElementChild).transform).m42 }));
+  assert.ok(scroll.top > 0 && Math.abs(scroll.top + scroll.offset) < 1, JSON.stringify(scroll));
+  await field.press('Control+z');
+  assert.equal(await field.inputValue(), '가나 수정문장 마바 $x+1$ 끝');
+  console.log('▶ 한글 조합 중에는 표시 유지, 조합 끝에서만 위치 갱신');
+  await field.evaluate((el) => {
+    el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    el.value += 'ㅎ';
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: true, inputType: 'insertCompositionText' }));
+    el.value = el.value.slice(0, -1) + '한';
+    el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '한' }));
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+  });
+  assert.match(await count(), /\/4$/);
+  await win.locator('.review-modal .modal-footer').getByRole('button', { name: '저장', exact: true }).click();
+  await win.waitForSelector('.review-modal', { state: 'detached' });
+  await win.waitForFunction(() => document.querySelector('.bank-row')?.textContent.includes('확인할 곳 4개'));
+  const stored = (await call('getTranscripts', id)).items[key(item) + '|edit'].blocks;
+  assert.deepEqual(stored[0].low.map((m) => [m.start, m.end]), [[8, 10], [11, 16]]);
+  assert.equal(stored.reduce((n, b) => n + (b.low?.length || 0), 0), 4);
+  console.log('▶ PDF·HWPX 내보내기 알림에 남은 개수, 확인창 없이 저장');
+  await clearToasts();
+  await win.locator('.bank-row input[type="checkbox"]').check();
+  for (const format of ['pdf', 'hwpx']) {
+    const dest = join(tmp, `review.${format}`);
+    await app.evaluate(({ dialog }, path) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: path }); }, dest);
+    await win.locator(`.seg label:has(input[name="bank-format"][value="${format}"])`).click();
+    await win.locator('.export-btn[data-mode="problems"]').click();
+    await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((el) => el.textContent.includes('저장했어요') && el.textContent.includes('확인할 곳 4개')), null, { timeout: 60000 });
+    assert.ok(existsSync(dest));
+    await shot(`export-${format}`);
+    await clearToasts();
+  }
+  console.log('▶ 원래대로 하면 표시도 원래대로');
+  await openEditor();
+  await win.locator('.review-modal .modal-footer').getByRole('button', { name: '원래대로', exact: true }).click();
+  await win.waitForSelector('.review-modal', { state: 'detached' });
+  await win.waitForFunction(() => document.querySelector('.bank-row')?.textContent.includes('확인할 곳 6개'));
+  console.log('▶ 넣기 완료 알림의 확인하러 가기');
+  await clearToasts();
+  await win.evaluate(async (bookId) => {
+    const b = await window.ohdap.getBook(bookId);
+    await (await import('./js/bank-transcribe.js')).putBank(b, { item: b.docs.problem.items[0] });
+  }, id);
+  await win.locator('.modal-footer').getByRole('button', { name: '닫기', exact: true }).click();
+  await win.waitForSelector('.modal-overlay', { state: 'detached' });
+  await win.locator('.toast').getByRole('button', { name: '확인하러 가기', exact: true }).click();
+  await win.waitForFunction((bookId) => document.querySelector('[data-bank-focus="bookId"]')?.value === bookId, id);
+  assert.equal(await win.locator('[data-bank-focus="bookId"]').inputValue(), id);
+  assert.equal(await win.locator('[data-bank-focus="review"]').isChecked(), true);
+  console.log('▶ 답지 불러오기 밑줄·수식·맞아요·고치기, 저장에는 표시 없음');
+  await clearToasts();
+  await win.evaluate(async (bookId) => {
+    const b = await window.ohdap.getBook(bookId);
+    const { openAnswerEditor } = await import('./js/answer-editor.js');
+    openAnswerEditor({ book: b, item: b.docs.problem.items[0] });
+  }, id);
+  await win.waitForSelector('.answer-editor-modal');
+  await win.getByRole('button', { name: '답지 인식 결과 불러오기', exact: true }).click();
+  await win.waitForFunction(() => document.querySelector('.answer-review')?.textContent.includes('확인할 곳 3개'));
+  assert.ok(await win.evaluate(() => CSS.highlights.get('answer-review').size > 0));
+  assert.equal(await win.locator('.answer-review-math').count(), 2);
+  await shot('answer');
+  await win.locator('.answer-review').getByRole('button', { name: '맞아요', exact: true }).click();
+  assert.match(await win.locator('.answer-review').innerText(), /확인할 곳 2개/);
+  const editor = win.locator('.answer-document[contenteditable="true"]');
+  await editor.evaluate((el) => {
+    const p = el.querySelector('p');
+    const node = p.firstChild;
+    const range = document.createRange(); range.setStart(node, 0); range.setEnd(node, 2);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    document.execCommand('insertText', false, '풀이');
+  });
+  assert.match(await win.locator('.answer-review').innerText(), /확인할 곳 2개/, '다른 구간 수정은 수식 표시 보존');
+  await editor.locator('[data-eq]').first().click();
+  await win.locator('.answer-equation-script').fill('y^{2}');
+  await win.locator('.answer-equation-modal .modal-footer .btn-primary').click();
+  await win.waitForSelector('.answer-equation-modal', { state: 'detached' });
+  assert.match(await win.locator('.answer-review').innerText(), /확인할 곳 1개/);
+  await win.waitForFunction(() => document.querySelector('.answer-status')?.textContent === '저장됨');
+  const saved = (await call('getAnswers', id)).items[item.id];
+  assert.ok(saved.blocks.every((b) => !b.low && !b.reviewLow));
+  const disk = readFileSync(join(dir, 'answers.json'), 'utf8');
+  assert.doesNotMatch(disk, /"(?:low|reviewLow)"/);
+  await win.locator('.answer-editor-modal .modal-footer').getByRole('button', { name: '닫기', exact: true }).click();
+  assert.deepEqual(errors, []);
+  console.log('PASS 확인 표시 E2E');
+} catch (err) {
+  console.error(err);
+  if (win) { console.error((await win.locator('body').innerText().catch(() => '')).slice(-5000)); await win.screenshot({ path: join(OUT, 'review-fail.png') }).catch(() => {}); }
+  process.exitCode = 1;
+} finally {
+  if (app) await app.close().catch(() => {});
+  cloud.stop();
+  assert.ok(resolve(tmp).startsWith(resolve(OUT) + sep));
+  rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+}

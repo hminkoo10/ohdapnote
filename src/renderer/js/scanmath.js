@@ -265,6 +265,7 @@ export function textSymbols(passes, h, comps = null) {
           x1: w.x1,
           y1: w.y1,
           conf: Math.min(...sylls.map((s) => s.conf)),
+          wordConf: w.conf, // 표시용으로만 전달. 글자 선택에 쓰는 conf는 그대로 둠.
           kind: 'hangul',
           n: sylls.length,
           punct: syms.length - sylls.length,
@@ -850,7 +851,7 @@ export function assembleBlocks(plan, latexOf, results = []) {
       const offset = s.length;
       if (t.t === 'math') {
         const mark = mathLow(results[t.f]?.conf);
-        if (mark) low.push({ ...mark, start: offset, end: offset + piece.length, box: relativeBox(t.box, W, H) });
+        if (mark && piece.includes('$')) low.push({ ...mark, start: offset + piece.indexOf('$'), end: offset + piece.lastIndexOf('$') + 1, box: relativeBox(t.box, W, H) });
       } else {
         low.push(...(t.low || []).map((mark) => ({ ...mark, start: offset + mark.start, end: offset + mark.end, box: relativeBox(mark.box, W, H) })));
       }
