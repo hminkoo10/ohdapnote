@@ -1297,6 +1297,9 @@ select.input {
 .review-math { outline: 2px solid #b47b00; outline-offset: 1px; background: #fff3c6; }
 .review-mark-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .review-mark-button { font-size: 16px; min-height: 38px; border-bottom: 3px solid #d5a800; white-space: normal; text-align: left; }
+::highlight(answer-review) { text-decoration: underline 3px #d5a800; background-color: #fff3c6; }
+.answer-review-math { outline: 2px solid #b47b00; outline-offset: 2px; background: #fff3c6; }
+.answer-review .review-toolbar { position: static; }
 .bank-review-count { color: #705000; background: #fff3c6; font-size: 16px; padding: 4px 8px; border-radius: 4px; }
 @media (max-width: 760px) {
   .review-layout { grid-template-columns: minmax(0, 1fr); }

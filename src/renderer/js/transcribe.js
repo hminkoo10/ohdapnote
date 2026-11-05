@@ -6,6 +6,7 @@ import { scanTranscribe } from './scanocr.js';
 import { transcribeParts } from './pdfmath.js';
 import { transcriptKey, pickTranscript, trimTranscripts } from './transcript-store.js';
 import { subjectOf } from './subjects.js';
+import { countLow } from './lowconf.js';
 import { api, state, nav, geminiReady, aiOff, aiOptions, aiLabel, aiModelText, jobDialog, holdSource, restartSaveHooks, restartPendingChecks } from './shared.js';
 
 export { transcriptKey } from './transcript-store.js';
@@ -279,12 +280,14 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
     await Promise.all(Array.from({ length: Math.min(ai.concurrency, batches.length) }, worker));
   };
 
+  let reviewCount = 0;
   const transcribe = async (block, segs) => {
     if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
     let stack = null;
     const getStack = async () => (stack ||= await renderStack(segs, TRANSCRIBE_WIDTH));
     // 그림(그래프·도형)은 바로 잘라 두고 큰 canvas 는 버림
     const finish = async (list) => {
+      reviewCount += countLow(list);
       const crops = new Map();
       for (const b of list) if (b.type === 'figure') crops.set(b.box, await cropImage(await getStack(), b.box));
       stack = null;
@@ -332,6 +335,7 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
       }
     }
     const bytes = await buildHwpx({ blocks, options: opts, title: info.title, info, transcribe });
+    bytes.reviewCount = reviewCount;
     bytes.job = ui; // 옮기기 창을 띄웠으면 부른 쪽이 finish() — 앞에 보이면 창을 닫고, 뒤로 보내 두었으면 [저장하기] 알림
     return bytes;
   } catch (err) {

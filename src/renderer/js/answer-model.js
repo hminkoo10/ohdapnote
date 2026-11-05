@@ -48,13 +48,15 @@ export function createAnswerHistory(initial, { delay = 800, limit = 100 } = {}) 
   };
 }
 
-function inlineRuns(text) {
+function inlineRuns(text, spans = []) {
   const runs = [];
   const re = /\$([^$\n]+)\$|\\\(([^]*?)\\\)/g;
   let start = 0;
   for (const m of text.matchAll(re)) {
     if (m.index > start) runs.push({ text: text.slice(start, m.index) });
-    runs.push({ eq: latexToHwpEq(m[1] ?? m[2]) });
+    const eq = latexToHwpEq(m[1] ?? m[2]);
+    spans.push({ start: m.index, end: m.index + m[0].length, length: eqToText(eq).length });
+    runs.push({ eq });
     start = m.index + m[0].length;
   }
   if (start < text.length || !runs.length) runs.push({ text: text.slice(start) });
@@ -62,14 +64,29 @@ function inlineRuns(text) {
 }
 
 /** 그림 자르기는 호출자가 처리하고, 여기서는 글·수식 변환만 한다. */
-export function importAnswerBlocks(blocks) {
+export function importAnswerBlocks(blocks, { review = false } = {}) {
   return blocks.flatMap((b) => {
-    if (b.type === 'math') return [{ type: 'math', eq: b.eq ?? latexToHwpEq(b.latex || '') }];
+    if (b.type === 'math') return [{ type: 'math', eq: b.eq ?? latexToHwpEq(b.latex || ''), ...(review && b.low?.length ? { reviewLow: copy(b.low) } : {}) }];
     if (b.type === 'figure') return [{ ...b }];
     const texts = b.type === 'choices' ? b.items.map((s, i) => `${'①②③④⑤'[i] || i + 1} ${s}`) : [b.text || ''];
-    return texts.map((text) => {
-      const runs = b.runs ? copy(b.runs) : inlineRuns(text);
-      return { type: 'para', text: runsText(runs), runs };
+    return texts.map((text, item) => {
+      const spans = [];
+      const runs = b.runs ? copy(b.runs) : inlineRuns(text, spans);
+      const prefix = b.type === 'choices' ? text.length - b.items[item].length : 0;
+      const offset = (at, end) => {
+        let delta = 0;
+        for (const span of spans) {
+          if (at <= span.start) break;
+          if (at < span.end) return span.start + delta + (end ? span.length : 0);
+          delta += span.length - (span.end - span.start);
+        }
+        return at + delta;
+      };
+      const low = review ? (b.low || []).filter((mark) => b.type !== 'choices' || mark.item === item).map((mark) => {
+        const { item: ignored, ...rest } = mark;
+        return { ...rest, start: offset((mark.start ?? 0) + prefix, false), end: offset((mark.end ?? text.length - prefix) + prefix, true) };
+      }) : [];
+      return { type: 'para', text: runsText(runs), runs, ...(low.length ? { reviewLow: low } : {}) };
     });
   });
 }

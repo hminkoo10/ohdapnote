@@ -7,6 +7,7 @@ import { eqToMathML } from './hwpeqview.js';
 import { openEquationEditor } from './eq-editor.js';
 import { blocksToModel, modelToBlocks, createAnswerHistory, importAnswerBlocks, recognizedAnswer, answerContent } from './answer-model.js';
 import { createSaveQueue } from './save-queue.js';
+import { answerReview, withoutAnswerReview } from './answer-review.js';
 
 const fail = (err) => toast(err.message || String(err), { type: 'error', timeout: 9000 });
 const writable = (book) => book.$canEdit !== false && book.$subjectOpen !== false;
@@ -29,7 +30,11 @@ function mathNode(eq, display = false) {
 export function renderAnswerDocument(root, blocks, images = new Map()) {
   root.replaceChildren();
   for (const b of blocksToModel(blocks)) {
-    if (b.type === 'math') root.append(mathNode(b.eq, true));
+    if (b.type === 'math') {
+      const node = mathNode(b.eq, true);
+      if (b.reviewLow?.length) node.dataset.reviewLow = JSON.stringify(b.reviewLow);
+      root.append(node);
+    }
     else if (b.type === 'figure') {
       root.append(h('div.answer-figure', { contenteditable: 'false', draggable: true, tabindex: '0', dataset: { block: 'figure', file: b.file, w: b.w, h: b.h } }, h('img', { src: images.get(b.file) || '', alt: '해설 그림' })));
     } else {
@@ -62,7 +67,12 @@ export function readAnswerDocument(root) {
       flush(); model.push({ type: 'figure', file: node.dataset.file, w: +node.dataset.w, h: +node.dataset.h }); return;
     }
     if (node.dataset.eq !== undefined) {
-      if (node.dataset.block === 'math') { flush(); model.push({ type: 'math', eq: node.dataset.eq }); }
+      if (node.dataset.block === 'math') {
+        flush();
+        let low;
+        try { low = JSON.parse(node.dataset.reviewLow || '[]'); } catch { low = []; }
+        model.push({ type: 'math', eq: node.dataset.eq, ...(low.length ? { reviewLow: low } : {}) });
+      }
       else runs.push({ eq: node.dataset.eq });
       return;
     }
@@ -123,17 +133,20 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
     redo.disabled = !editable || !history.canRedo;
   };
   const saver = createSaveQueue(async () => {
-    const sent = structuredClone(draft);
+    const sent = structuredClone(withoutAnswerReview(draft));
     saved = await api.saveAnswer(book.id, item.id, sent);
     failed = false;
   }, { delay: 800, changed: updateStatus, failed: (err) => { failed = true; fail(err); } });
   saver.set({});
-  const draw = () => { answer.value = draft.answer; renderAnswerDocument(editor, draft.blocks, images); updateStatus(); };
+  const review = answerReview(editor, readAnswerDocument, () => capture());
+  const draw = () => { answer.value = draft.answer; renderAnswerDocument(editor, draft.blocks, images); updateStatus(); review.update(); };
   const capture = (kind = '') => {
     if (!editable || composing) return;
+    review.sync();
     draft = { answer: answer.value, blocks: readAnswerDocument(editor) };
     if (history.push(draft, kind)) saver.dirty();
     updateStatus();
+    review.update();
   };
   function travel(forward) {
     if (!editable) return;
@@ -209,7 +222,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
       const segs = blockSegs(block);
       const found = bestTranscript(book.id, block)?.entry.blocks || await pdfTranscribe(segs, { plain: book.subject !== 'math' });
       if (!found?.length) throw new Error('아직 읽어 둔 답지 글이 없어요. 답지 그림을 보며 직접 써 주세요.');
-      const blocks = importAnswerBlocks(found);
+      const blocks = importAnswerBlocks(found, { review: true });
       let canvas;
       for (let i = 0; i < blocks.length; i++) if (blocks[i].type === 'figure' && !blocks[i].file) {
         canvas ||= await renderStack(segs, TRANSCRIBE_WIDTH);
@@ -265,7 +278,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
   const unload = (e) => {
     if (!editable) return;
     composing = false; capture();
-    if (uploads.size || saver.pending && !api.saveAnswerSync(book.id, item.id, draft)) { e.preventDefault(); e.returnValue = ''; }
+    if (uploads.size || saver.pending && !api.saveAnswerSync(book.id, item.id, withoutAnswerReview(draft))) { e.preventDefault(); e.returnValue = ''; }
   };
   restartSaveHooks.add(flush); restartPendingChecks.add(pending); leaveHooks.add(flush);
   window.addEventListener('beforeunload', unload);
@@ -292,10 +305,11 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
   await modal({ title: `정답·해설 · ${item.number || item.num || ''}번`, width: 980, className: 'answer-editor-modal',
     body: h('div', h('p.small.muted', editable ? '글은 그냥 쓰고, 수식은 [수식] 단추를 눌러 넣어요. 저장은 저절로 돼요.' : '만든 사람과 원장만 고칠 수 있어요. 지금은 보기만 해요.'),
       h('div.answer-heading', h('label', '정답', answer), editable ? h('div.answer-choices', [...'①②③④⑤'].map((v) => h('button.btn.btn-small', { onclick: () => { if (editable) { answer.value = v; capture(); } } }, v))) : null, status),
-      h('div.answer-layout', h('section.answer-writing', toolbar, editor), reference)),
+      h('div.answer-layout', h('section.answer-writing', toolbar, review.element, editor), reference)),
     beforeClose: flush,
     onClose: () => {
       closed = true; stop(); saver.cancel();
+      review.close();
       api.setEditorShortcutScope('');
       document.removeEventListener('selectionchange', rememberSelection); window.removeEventListener('beforeunload', unload);
       restartSaveHooks.delete(flush); restartPendingChecks.delete(pending); leaveHooks.delete(flush);

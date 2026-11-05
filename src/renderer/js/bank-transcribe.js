@@ -8,6 +8,7 @@ import { scanTranscribe } from './scanocr.js';
 import { geminiTranscribeBatch, canvasToBase64Jpeg } from './gemini.js';
 import { loadTranscripts, saveTranscripts, bestTranscript, transcriptKey, pdfTranscribe, TRANSCRIBE_WIDTH } from './transcribe.js';
 import { subjectOf, subjectOpen } from './subjects.js';
+import { countLow } from './lowconf.js';
 
 export async function putBank(book, { item = null, onChange = () => {} } = {}) {
   const old = findJob(`bank:${book.id}`);
@@ -145,10 +146,13 @@ async function runBank(book, { item, useAi, onChange }) {
   } finally {
     stored = await saveTranscripts();
     const stopped = failure?.name === 'AbortError' || abort.signal.aborted;
-    const message = !stored ? '옮긴 글을 저장하지 못했어요. 앱을 끄지 말고 다시 넣기를 눌러 주세요.' : stopped ? '넣기를 멈췄어요. 옮긴 글은 남아 있어요.' : failure ? `넣지 못했어요: ${failure.message}` : `${book.name} · 문제은행에 넣기를 마쳤어요.`;
+    const remaining = targets.reduce((sum, b) => sum + countLow(bestTranscript(book.id, b)?.entry.blocks), 0);
+    const note = remaining ? ` 확인할 곳 ${remaining}개가 있어요. 원본과 비교해 고쳐 주세요.` : '';
+    const message = (!stored ? '옮긴 글을 저장하지 못했어요. 앱을 끄지 말고 다시 넣기를 눌러 주세요.' : stopped ? '넣기를 멈췄어요. 옮긴 글은 남아 있어요.' : failure ? `넣지 못했어요: ${failure.message}` : `${book.name} · 문제은행에 넣기를 마쳤어요.`) + note;
     status.textContent = message;
     const bad = !stored || (failure && !stopped);
-    if (!ui.finish({ message, type: bad ? 'error' : 'success' })) toast(message, { type: bad ? 'error' : 'info' });
+    const actions = remaining ? [{ label: '확인하러 가기', onClick: () => import('./bankview.js').then((view) => view.openBankReview(book.id)) }] : [];
+    if (!ui.finish({ message, type: bad ? 'error' : 'success', actions })) toast(message, { type: bad ? 'error' : 'info', actions });
     releases.forEach((release) => release());
     onChange();
   }

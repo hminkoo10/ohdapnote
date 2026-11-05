@@ -13,6 +13,7 @@ import { answerContent } from './answer-model.js';
 import { blockSegs, renderStack } from './hwpx.js';
 import { TRANSCRIBE_WIDTH } from './transcribe.js';
 import { REVIEW_HELP, reviewPanel } from './review-ui.js';
+import { countLow } from './lowconf.js';
 
 const readLocal = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
@@ -22,7 +23,7 @@ const writeLocal = (key, value) => {
 };
 const saved = readLocal('ohdap.bankBasket', {});
 const bs = {
-  filters: { subject: '', bookId: '', page: '', number: '', text: '' },
+  filters: { subject: '', bookId: '', page: '', number: '', text: '', review: false },
   picked: Array.isArray(saved?.picked) ? saved.picked.filter((p) => p?.bookId && p?.itemId) : [],
   opts: { ...DEFAULT_EXPORT_OPTIONS, ...(saved?.options || {}), convert: CONVERT_MODES[saved?.options?.convert] ? saved.options.convert : 'ocr' },
   info: saved?.info || {}, focus: null, limit: 200, scroll: 0, previewScroll: 0, homeScroll: 0,
@@ -45,6 +46,13 @@ const pathName = { edit: '고침', ai: 'AI', ocr: 'OCR', pdf: 'PDF' };
 const lookupBlock = (e, item = e.item) => ({ kind: 'problem', role: 'problem', item, stem: null, src: { files: e.bookObj.docs.problem.files } });
 const result = (e, item = e.item) => bestTranscript(e.bookId, lookupBlock(e, item));
 const textOf = (e) => [blocksToText(result(e)?.entry.blocks), e.stemKey ? blocksToText(result(e, passageItem(e.item))?.entry.blocks) : ''].join(' ');
+const reviewCount = (e) => countLow(result(e)?.entry.blocks) + (e.stemKey ? countLow(result(e, passageItem(e.item))?.entry.blocks) : 0);
+
+export function openBankReview(bookId) {
+  bs.filters = { subject: '', bookId, page: '', number: '', text: '', review: true };
+  bs.limit = 200; bs.scroll = 0; bs.intake = false;
+  nav.home({ tab: 'bank' });
+}
 
 /** 첫 화면을 실시간으로 다시 그리기 직전, 입력 위치·스크롤을 기억 */
 export function rememberBankView() {
@@ -144,6 +152,7 @@ function renderBank(root, summaries, books, entries, failed) {
       const book = books.find((b) => b.id === s.id);
       const items = entries.filter((e) => e.bookId === s.id);
       const n = items.filter((e) => result(e) && (!e.stemKey || result(e, passageItem(e.item)))).length;
+      const low = book ? bankTargets(book).reduce((sum, b) => sum + countLow(bestTranscript(book.id, { ...b, src: { files: book.docs.problem.files } })?.entry.blocks), 0) : 0;
       const total = items.length || s.problemCount || 0;
       const job = findJob(`bank:${s.id}`);
       const locked = s.subjectOpen === false || !subjectOpen(s, state.appInfo);
@@ -151,6 +160,7 @@ function renderBank(root, summaries, books, entries, failed) {
         h('div.bank-heading', h('strong', s.name), h('span.tag.soft', subjectName(s.subject))),
         h('div.progress', h('div.progress-bar', { style: { width: `${job?.total ? job.done * 100 / job.total : total ? n * 100 / total : 0}%` } })),
         h('p.small.muted', job ? job.label || '파일을 준비하는 중…' : `옮긴 문항 ${n} / 전체 ${total}`));
+      if (low) card.append(h('span.bank-review-count', `확인할 곳 ${low}개`));
       if (locked) card.append(h('p.small.muted', '학원 계약에 없는 과목 · 보기만'));
       else if (job) card.append(h('button.btn', { onclick: () => job.open() }, '넣는 중 · 진행 보기'));
       else if (!s.problemAnalyzed && !total) card.append(h('p.small.muted', '책장에서 먼저 분석해 주세요'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
@@ -174,12 +184,13 @@ function renderBank(root, summaries, books, entries, failed) {
     ...(subjects.length > 1 ? [selectFilter('subject', '과목', [['', '모든 과목'], ...subjects.map((s) => [s.code, s.name])])] : []),
     selectFilter('bookId', '책', [['', '모든 교재'], ...summaries.map((b) => [b.id, b.name])]),
     field('page', '쪽', '예: 12 또는 12-15'), field('number', '번호', '예: 3 또는 3-7'), field('text', '글자로 찾기', '예: 이차함수, 빈칸'),
-    h('button.btn', { onclick: () => { Object.keys(bs.filters).forEach((k) => { bs.filters[k] = ''; }); filters.querySelectorAll('input, select').forEach((el) => { el.value = ''; }); updateFilter.flush(); } }, '지우기'));
+    h('label.bank-check', h('input', { type: 'checkbox', checked: bs.filters.review, dataset: { bankFocus: 'review' }, onchange: (ev) => { bs.filters.review = ev.target.checked; updateFilter.flush(); } }), '확인할 곳 있는 문항만'),
+    h('button.btn', { onclick: () => { Object.keys(bs.filters).forEach((k) => { bs.filters[k] = k === 'review' ? false : ''; }); filters.querySelectorAll('input, select').forEach((el) => { if (el.type === 'checkbox') el.checked = false; else el.value = ''; }); updateFilter.flush(); } }, '지우기'));
 
   function renderList() {
     const top = bs.scroll;
     clear(list);
-    const found = filterBank(entries, bs.filters, textOf);
+    const found = filterBank(entries, bs.filters, textOf).filter((e) => !bs.filters.review || reviewCount(e));
     count.textContent = `${found.length}문항`;
     if (!summaries.length || !entries.length && !Object.values(bs.filters).some(Boolean)) {
       list.append(h('div.empty-state', h('p', '책장에 교재를 등록하고 분석하면 여기에 문항이 모여요'), h('button.btn.btn-primary', { onclick: () => nav.home({ tab: 'books' }) }, '책장으로')));
@@ -217,6 +228,7 @@ function renderBank(root, summaries, books, entries, failed) {
       h('label.bank-check', { title: open(e) ? '시험지 바구니에 담기' : '학원 계약에 없는 과목 · 보기만', onclick: (ev) => ev.stopPropagation() },
         h('input', { type: 'checkbox', checked: selected(e), disabled: !open(e), 'aria-label': `${itemName(e.item)} 담기`, onchange: (ev) => pick(e, ev.target.checked) })),
       h('div.bank-row-text', h('strong', `${pageLabel(e.bookObj.docs.problem, e.item.page)} · ${itemName(e.item)}`),
+        reviewCount(e) ? h('span.bank-review-count', `확인할 곳 ${reviewCount(e)}개`) : null,
         h(`span.bank-snippet${r ? '' : '.muted'}`, blocksToText(r?.entry.blocks) || '아직 글자로 옮기지 않았어요')),
       r ? h('span.tag.soft.bank-path', pathName[r.path]) : null);
       (e.stemKey ? setBox : bookGroup).append(row);
@@ -435,6 +447,11 @@ async function buildBankExport(mode, all) {
     await attachAnswers(entries);
     const info = { ...examInfo(), subtitle: `문제 ${entries.length}문항` };
     const blocks = makeBankBlocks(mode, entries, opts, (role, it, e) => pageLabel(e.bookObj.docs[role], it.page));
+    let remaining = blocks.reduce((sum, block) => {
+      const entry = entries.find((e) => e.src?.[block.role] === block.src);
+      return sum + (block.answerBlocks || !entry || !block.item ? 0 : countLow(bestTranscript(entry.bookId, block)?.entry.blocks));
+    }, 0);
+    const reviewNote = () => remaining ? ` 확인할 곳 ${remaining}개가 남아 있어요. 원본과 비교해 주세요.` : '';
     const sig = JSON.stringify({ mode, opts, info, blocks: blocks.map((b) => [b.item?.id, b.item?.rects, b.num, b.source, b.answerBlocks]) });
     const modeName = { problems: '문제지', answers: '해설지', 'both-inline': '문제+해설', 'both-end': '문제+해설(해설 뒤)' }[mode];
     const d = new Date();
@@ -444,13 +461,14 @@ async function buildBankExport(mode, all) {
       if (res.canceled) return;
       pendingExports.delete(token);
       restartGuard.report();
-      toast(`저장했어요 — ${res.path}`, { type: 'success', timeout: 10000, actions: [{ label: '열기', onClick: () => api.openPath(res.path) }, { label: '폴더 보기', onClick: () => api.showItemInFolder(res.path) }] });
+      toast(`저장했어요 — ${res.path}${reviewNote()}`, { type: 'success', timeout: 10000, actions: [{ label: '열기', onClick: () => api.openPath(res.path) }, { label: '폴더 보기', onClick: () => api.showItemInFolder(res.path) }] });
     };
     if (opts.format === 'hwpx') {
       const bytes = await exportHwpx(blocks, entries, opts, info, { key: 'hwpx:bank', sig });
+      remaining = bytes.reviewCount || 0;
       const token = {};
       const save = () => restartGuard.track('export', async () => saved(await api.saveFile({ defaultName: `${name}.hwpx`, data: bytes, filters: [{ name: '한글 문서', extensions: ['hwpx'] }], title: '한글 문서 저장' }), token));
-      if (bytes.job?.finish({ message: '문제은행 한글 시험지가 준비됐어요.', actions: [{ label: '저장하기', onClick: () => attempt(save) }] })) {
+      if (bytes.job?.finish({ message: `문제은행 한글 시험지가 준비됐어요.${reviewNote()}`, actions: [{ label: '저장하기', onClick: () => attempt(save) }] })) {
         pendingExports.add(token);
         restartGuard.report();
       } else await save();
