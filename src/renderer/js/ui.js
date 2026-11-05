@@ -88,7 +88,7 @@ export function toast(message, { type = 'info', actions = [], timeout = actions.
 // ---------------------------------------------------------------------------
 // 모달
 // ---------------------------------------------------------------------------
-export function modal({ title, body, buttons = [], width = 460, onClose, beforeClose, className = '' }) {
+export function modal({ title, body, buttons = [], width = 460, onClose, beforeClose, onKeyDown, className = '' }) {
   return new Promise((resolve) => {
     let closed = false;
     let closing = false;
@@ -110,6 +110,8 @@ export function modal({ title, body, buttons = [], width = 460, onClose, beforeC
     };
     const onKey = (e) => {
       if ([...document.querySelectorAll('.modal-overlay:not(.closing)')].at(-1) !== overlay) return;
+      if (e.isComposing) return;
+      if (onKeyDown?.(e) === true) { e.preventDefault(); e.stopPropagation(); return; }
       if (e.key === 'Escape') {
         e.stopPropagation();
         close(null);

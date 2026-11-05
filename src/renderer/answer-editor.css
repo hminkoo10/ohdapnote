@@ -25,6 +25,122 @@
 .answer-readonly .answer-math { cursor: default; }
 .answer-editor-modal .modal-body { overflow-y: auto; }
 .preview-head.ans { flex-wrap: wrap; }
+.answer-equation-modal .modal-body {
+  overflow: auto;
+}
+.eq-editor {
+  min-width: 0;
+}
+.eq-guide {
+  margin: 0 0 12px;
+  color: #405a68;
+  line-height: 1.6;
+}
+.answer-equation-modal .answer-equation-preview {
+  min-height: 130px;
+  max-height: 240px;
+  font-size: 32px;
+  background: #fff;
+}
+.answer-equation-preview [data-eq-start]:hover {
+  background: #e3eff7;
+  cursor: text;
+}
+[data-eq-empty] {
+  background: #e3edf5;
+  outline: 1px dashed #91a9bb;
+}
+.answer-equation-preview.eq-has-warning {
+  border-color: #ba8b3b;
+}
+.answer-equation-modal .warn-text {
+  min-height: 18px;
+  margin: 4px 0 8px;
+}
+.eq-toolbar, .eq-extra-tools, .eq-symbol-tabs, .eq-matrix-size, .eq-command {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.eq-toolbar {
+  border-block: 1px solid #d9e1e8;
+  padding: 10px 0;
+}
+.eq-extra-tools {
+  margin: 10px 0;
+}
+.eq-extra-tools .input, .eq-matrix-size .input {
+  width: auto;
+  max-width: 160px;
+}
+.eq-matrix-size .input {
+  width: 70px;
+}
+.eq-picker {
+  padding: 12px;
+  margin: 8px 0;
+  background: #f3f7fa;
+  border: 1px solid #cbd9e4;
+  border-radius: 8px;
+  max-height: 240px;
+  overflow: auto;
+}
+.eq-picker[hidden] {
+  display: none;
+}
+.eq-picker-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.eq-template-grid, .eq-symbol-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+.eq-template-grid button, .eq-symbol-grid button {
+  display: flex;
+  flex-direction: column;
+  min-height: 64px;
+  white-space: normal;
+}
+.eq-template-sample, .eq-symbol-grid math {
+  font-size: 22px;
+}
+.eq-symbol-grid small {
+  font-size: 11px;
+}
+.eq-macro-list > div {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.eq-command .input {
+  flex: 1;
+  min-width: 140px;
+}
+.answer-equation-script {
+  resize: vertical;
+  min-height: 90px;
+  max-height: 240px;
+}
+.eq-help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.eq-help-table th, .eq-help-table td {
+  padding: 8px;
+  border-bottom: 1px solid #d9e1e8;
+  text-align: left;
+}
+.eq-help-table td:nth-child(2) {
+  white-space: nowrap;
+}
 @media (max-width: 800px) {
   .answer-layout { grid-template-columns: minmax(0, 1fr); }
   .answer-reference { max-height: 240px; }

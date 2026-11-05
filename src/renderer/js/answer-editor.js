@@ -3,7 +3,8 @@ import { api, getSources, itemImage, restartSaveHooks, restartPendingChecks, lea
 import { loadTranscripts, bestTranscript, pdfTranscribe, TRANSCRIBE_WIDTH } from './transcribe.js';
 import { blockSegs, renderStack, cropImage } from './hwpx.js';
 import { computeMatches, findItem } from './store.js';
-import { eqToMathML, parseEq } from './hwpeqview.js';
+import { eqToMathML } from './hwpeqview.js';
+import { openEquationEditor } from './eq-editor.js';
 import { blocksToModel, modelToBlocks, createAnswerHistory, importAnswerBlocks, recognizedAnswer, answerContent } from './answer-model.js';
 import { createSaveQueue } from './save-queue.js';
 
@@ -171,22 +172,13 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
   async function equation(node) {
     if (!editable) return;
     rememberSelection(); history.boundary();
-    const script = h('textarea.input.answer-equation-script', { rows: 4, maxlength: 8000, value: node?.dataset.eq || '', 'aria-label': '한글 수식 스크립트' });
-    const preview = h('div.answer-equation-preview');
-    const warning = h('p.small.warn-text');
-    const centered = h('input', { type: 'checkbox', checked: node?.dataset.block === 'math' });
-    const paint = () => { preview.innerHTML = eqToMathML(script.value, { display: true }); warning.textContent = parseEq(script.value).errors.some((e) => e.severity !== 'warning') ? '괄호나 빈칸을 확인해 주세요. 지금 모양으로도 넣을 수 있어요.' : ''; };
-    script.addEventListener('input', paint);
-    const templates = [['분수', '{} over {}'], ['근호', 'sqrt {}'], ['위 첨자', '{}^{}'], ['아래 첨자', '{}_{}'], ['α', 'alpha'], ['β', 'beta'], ['π', 'pi'], ['괄호', 'LEFT ( {} RIGHT )']];
-    const tools = h('div.answer-toolbar', templates.map(([label, value]) => h('button.btn.btn-small', { onclick: () => { script.setRangeText(value, script.selectionStart, script.selectionEnd, 'end'); script.focus(); paint(); } }, label)));
-    paint();
-    const eq = await modal({ title: '수식 넣기', width: 560, className: 'answer-equation-modal', body: h('div', h('label', '바로 보이는 수식'), preview, warning, tools, h('label', '한글 수식 스크립트'), script, h('label.check', centered, '가운데 수식으로 넣기')), buttons: [{ label: '취소', value: null }, { label: '넣기', primary: true, onClick: () => script.value }] });
-    if (eq === null || eq === undefined) return;
-    const next = mathNode(eq, centered.checked);
-    if (node?.isConnected && (node.dataset.block === 'math') === centered.checked) { node.replaceWith(next); capture(); }
+    const result = await openEquationEditor({ eq: node?.dataset.eq || '', display: node?.dataset.block === 'math' });
+    if (!result || !editable) return;
+    const next = mathNode(result.eq, result.display);
+    if (node?.isConnected && (node.dataset.block === 'math') === result.display) { node.replaceWith(next); capture(); }
     else {
       if (node?.isConnected) { const r = document.createRange(); r.selectNode(node); selection = r; }
-      insert(next, centered.checked);
+      insert(next, result.display);
     }
   }
   const putImage = async (file) => {

@@ -388,6 +388,14 @@ const fence = (value, stretchy = true) => value ? tag('mo', escapeXML(value), ` 
 const weight = style => ['bold', 'rmbold', 'bf'].includes(style.font) ? ' style="font-weight:bold"' : '';
 
 function render(node, style = {}) {
+  const body = renderNode(node, style);
+  if (!style.sourceMap || node.type === 'style') return body;
+  const empty = node.type === 'empty' || node.type === 'sequence' && !node.children.length;
+  return tag('mrow', empty ? '<mspace width="0.7em" height="0.8em" depth="0.2em"></mspace>' : body,
+    ` data-eq-start="${node.start}" data-eq-end="${node.end}"${empty ? ' data-eq-empty="true"' : ''}`);
+}
+
+function renderNode(node, style = {}) {
   const draw = child => render(child, { ...style }) || '<mrow></mrow>';
   switch (node.type) {
     case 'sequence': {
@@ -461,8 +469,8 @@ function render(node, style = {}) {
 }
 
 /** DOM·외부 글꼴·실행 코드 없이 Chromium MathML Core에서 표시할 문자열을 만듭니다. */
-export function eqToMathML(script, { display = false } = {}) {
-  return tag('math', render(parseEq(script)), ` xmlns="http://www.w3.org/1998/Math/MathML" display="${display ? 'block' : 'inline'}"`);
+export function eqToMathML(script, { display = false, sourceMap = false } = {}) {
+  return tag('math', render(parseEq(script), { sourceMap }), ` xmlns="http://www.w3.org/1998/Math/MathML" display="${display ? 'block' : 'inline'}"`);
 }
 
 function toText(node) {
