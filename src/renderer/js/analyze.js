@@ -24,6 +24,7 @@ import {
   excludeRangeNumbers,
   dropInsetResets,
   rangeAllowsNumber,
+  filterAnswerCandidates,
 } from './detect.js';
 import { recognizeWords, recognizeLine, OCR_WORKERS } from './ocr.js';
 import { geminiDetect, canvasToBase64Jpeg } from './gemini.js';
@@ -121,13 +122,14 @@ function inferColumnsFromCandidates(page, splitHint = null) {
  * 한 쪽의 레이아웃과 글자 레이어(있으면)까지 읽습니다. OCR 이 필요하면 needsOcr = true.
  *  - 스캔본 위에 보이지 않게 깔린 OCR 글자(휴대폰 스캔 앱 등)는 한글이 엉터리인 경우가 많아 쓰지 않습니다.
  */
-async function readPage(src, index, { forceOcr = false, ocrFallback = true, deep = false, splitHint = null, passages = false } = {}) {
+async function readPage(src, index, { forceOcr = false, ocrFallback = true, deep = false, splitHint = null, passages = false, role = 'problem' } = {}) {
   const canvas = await src.renderPage(index, ANALYSIS_WIDTH);
   const grid = inkGridFromCanvas(canvas);
   const layout = analyzeLayout(grid);
   const ocrBody = { bodyTop: layout.bodyTop, bodyBottom: layout.bodyBottom };
   if (passages) trimPassageMargins(grid, layout);
-  const page = { index, layout, grid, passages, ocrBody, candidates: [], source: 'text', footerNumbers: [], headings: [], ranges: [], ocrPasses: [], needsOcr: false };
+  const answer = role === 'answer' && passages;
+  const page = { index, layout, grid, passages, answer, ocrBody, candidates: [], source: 'text', footerNumbers: [], headings: [], ranges: [], ocrPasses: [], needsOcr: false };
   if (layout.blank) return page;
 
   let tokens = forceOcr ? [] : await src.getTextTokens(index);
@@ -137,8 +139,8 @@ async function readPage(src, index, { forceOcr = false, ocrFallback = true, deep
   }
   const textChars = tokens.reduce((n, t) => n + t.str.length, 0);
   const runText = () => {
-    const ex = extractCandidates(tokens, layout, { passages });
-    page.candidates = ex.candidates;
+    const ex = extractCandidates(tokens, layout, { passages, answer });
+    page.candidates = answer ? filterAnswerCandidates(ex.candidates, tokens) : ex.candidates;
     page.headings = ex.headings;
     page.ranges = ex.ranges;
     page.answerBoxes = ex.answerBoxes;
@@ -220,9 +222,9 @@ function extractOcr(page) {
   const labels = [];
   const near = (p, q) => Math.abs(p.y0 - q.y0) < 0.01 && Math.abs(p.x0 - q.x0) < 0.03;
   for (const toks of page.ocrPasses) {
-    const ex = extractCandidates(toks, page.layout, { ocr: true, passages: page.passages });
+    const ex = extractCandidates(toks, page.layout, { ocr: true, passages: page.passages, answer: page.answer });
     page.bodyH ||= ex.bodyH;
-    for (const c of ex.candidates) if (!onHangul(c) && !cands.some((d) => samePlace(c, d))) cands.push(c);
+    for (const c of ex.candidates) if (!onHangul(c) && (page.answer || !cands.some((d) => samePlace(c, d)))) cands.push(c);
     for (const r of ex.ranges) if (!ranges.some((q) => q.a === r.a && q.b === r.b && Math.abs(q.y0 - r.y0) < 0.01)) ranges.push(r);
     for (const b of ex.answerBoxes) if (!boxes.some((q) => near(q, b))) boxes.push(b);
     for (const l of ex.sectionLabels) if (!labels.some((q) => near(q, l))) labels.push(l);
@@ -230,6 +232,7 @@ function extractOcr(page) {
   const text = page.textCands || [];
   page.source = text.length ? 'text' : 'ocr';
   page.candidates = [...text, ...cands.filter((o) => !text.some((t) => samePlace(t, o)))].sort(byReadingOrder);
+  if (page.answer) page.candidates = filterAnswerCandidates(page.candidates, page.ocrPasses.flat());
   if (!text.length) {
     page.ranges = ranges;
     page.answerBoxes = boxes;
@@ -335,7 +338,7 @@ function earlyPageOcr(src, { ocrLang, signal, onProgress, count }) {
  * @returns {Promise<{index:number, layout:object, grid:object, candidates:object[], source:string, footerNumbers:number[]}>}
  */
 export async function analyzePage(src, index, { ocrLang = 'kor+eng', forceOcr = false, ocrFallback = true, deep = false, role = 'problem', splitHint = null, passages = false } = {}) {
-  const page = await readPage(src, index, { forceOcr, ocrFallback, deep, splitHint, passages });
+  const page = await readPage(src, index, { forceOcr, ocrFallback, deep, splitHint, passages, role });
   if (page.needsOcr) await ocrPage(src, page, { ocrLang, passes: deep ? [...OCR_PASSES, ...OCR_RETRY] : OCR_PASSES, splitHint, role });
   return page;
 }
@@ -425,7 +428,8 @@ async function fillOcrGaps(src, results, anchors, signature, { signal, onProgres
     if (!regions.length) continue;
     onProgress?.({ phase: 'scan', done: k, total: results.length, message: `${r.index + 1}쪽 빠진 번호 찾는 중` });
     const starts = r.passages ? results.slice(k, nextPage + 1).flatMap((p) => (p.ranges || []).map((rg) => ({ ...rg, page: p.index, zone: zoneOf(p.layout, rg.y0) }))) : [];
-    const found = await findNumbersInRegions(src, r, regions, ref, signature, starts);
+    let found = await findNumbersInRegions(src, r, regions, ref, signature, starts);
+    if (r.answer) found = filterAnswerCandidates(found, r.ocrPasses.flat());
     if (found.length) {
       r.candidates.push(...found);
       r.candidates.sort(byReadingOrder);
@@ -739,7 +743,7 @@ export async function analyzeDocument(src, opts) {
     abortIfNeeded(signal);
     const idx = pages[k];
     onProgress?.({ phase: 'scan', done: k, total: pages.length, message: `${idx + 1}쪽 분석 중` });
-    const page = await readPage(src, idx, { ocrFallback: false, splitHint, passages });
+    const page = await readPage(src, idx, { ocrFallback: false, splitHint, passages, role });
     if (page.layout.inferred) splitHint = page.layout.inferred;
     results.push(page);
     if (page.needsOcr) early.push(page);
@@ -817,7 +821,7 @@ export async function analyzeDocument(src, opts) {
   if (answersFrom >= 0) flags.set(answersFrom, ['여기부터는 정답과 풀이 같아서 뺌 (문제 쪽까지만 범위를 정하면 사라짐)']);
   const cutters = buildCutters(results, anchors, signature);
   const ranges = new Map(results.filter((r) => r.ranges?.length).map((r) => [r.index, r.ranges]));
-  let items = computeItems(pages, anchors, layouts, grids, { flow, passages, source: sourceMap, cutters, stopPages: tablePages, ranges });
+  let items = computeItems(pages, anchors, layouts, grids, { flow, passages, answer: role === 'answer' && passages, source: sourceMap, cutters, stopPages: tablePages, ranges });
   // 앞 쪽 해설이 통째로 이어지는 쪽(긴 해설의 가운데 쪽)은 번호가 없는 게 맞음
   if (flow === 'continue') {
     const continued = new Set(items.flatMap((it) => it.rects.filter((r) => r.page !== it.page).map((r) => r.page)));
@@ -1009,7 +1013,8 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
     const mainChain = chain.filter((c) => schemeKey(c) === sigKey);
     const regions = mainChain.length ? gapRegions(page, mainChain, prevLast, nextFirst) : [];
     if (regions.length) {
-      const found = await findNumbersInRegions(src, page, regions, mainChain, sig);
+      let found = await findNumbersInRegions(src, page, regions, mainChain, sig);
+      if (page.answer) found = filterAnswerCandidates(found, page.ocrPasses.flat());
       chain = [...chain, ...found].sort(byReadingOrder);
     }
   }
@@ -1018,6 +1023,7 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
   const newItems = computeItems([idx], anchors, new Map([[idx, page.layout]]), new Map([[idx, page.grid]]), {
     flow: doc.options?.flow || 'column',
     passages,
+    answer: page.answer,
     source: new Map([[idx, page.source]]),
     cutters: buildCutters([page], anchors, doc.signature),
     ranges: new Map([[idx, page.ranges || []]]),

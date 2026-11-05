@@ -248,7 +248,9 @@ export function extractCandidates(tokens, layout, opts = {}) {
   const tiny = (u, w) => !opts.ocr && u.y1 - u.y0 < 0.55 * (w.y1 - w.y0);
   const hasLeftNeighbor = (w) => {
     const gap = Math.max(1.6 * (w.y1 - w.y0), 0.012);
-    return neighbours(w).some((u) => u.x0 < w.x0 && u.x1 >= w.x0 - gap && !SYMBOL_ONLY.test(u.str) && sameCol(u, w) && !isBlank(u) && !tiny(u, w));
+    // 해설 번호 아래 정답 상자를 OCR 이 크게 잡아도 같은 줄 앞 글자는 아님
+    const below = (u) => opts.answer && u.y0 > w.y0 + 0.4 * (w.y1 - w.y0) && u.y1 > w.y1;
+    return neighbours(w).some((u) => u.x0 < w.x0 && u.x1 >= w.x0 - gap && !below(u) && !SYMBOL_ONLY.test(u.str) && sameCol(u, w) && !isBlank(u) && !tiny(u, w));
   };
   // 번호 바로 앞의 체크 칸·별 같은 기호가 있으면 그 기호 위치를 줄 시작으로 봄
   const lineStartX = (w) => {
@@ -305,7 +307,7 @@ export function extractCandidates(tokens, layout, opts = {}) {
           // 공통 지문 머리는 괄호로 싸여 있거나 단 왼쪽 끝에서 시작함
           // (선택지 "④ ∛−27" 을 OCR 이 "3−27" 로 읽은 것 같은 줄 가운데 수식은 아님)
           const bracketed = /^[[(【〔]/.test(m[0]) || /[\])】〕]$/.test(m[0]);
-          const atLineStart = w.x0 - cols[colOf((w.x0 + w.x1) / 2)].x0 < 0.06;
+          const atLineStart = w.x0 - cols[colOf((w.x0 + w.x1) / 2)].x0 < (opts.answer ? Math.max(0.012, 2 * L.h) : 0.06);
           if ((bracketed || atLineStart) && !hasLeftNeighbor(w)) {
             const cy = (w.y0 + w.y1) / 2;
             if (!(layout?.hasHeader && cy < bodyTop) && !(layout?.hasFooter && cy > bodyBottom)) {
@@ -455,6 +457,33 @@ export function extractCandidates(tokens, layout, opts = {}) {
   candidates.sort(byReadingOrder);
   const { kept, boxes } = dropAnswerRows(candidates);
   return { candidates: kept, bodyH, lineCount: lines.length, headings, ranges, answerBoxes: boxes, sectionLabels };
+}
+
+/** 해설 번호의 OCR 근거를 합치고 본문 수치·한글 조각을 뺌 (잘라 읽은 후보도 같은 검사) */
+export function filterAnswerCandidates(candidates, tokens) {
+  const merged = [];
+  for (const c of candidates) {
+    const prev = merged.find((d) => c.num === d.num && Math.abs(c.y0 - d.y0) < 0.01 && Math.abs(c.x0 - d.x0) < 0.02);
+    if (!prev) merged.push({ ...c });
+    else {
+      const dotted = prev.style === 'dot' || c.style === 'dot';
+      // 옆 제목까지 먹은 상자 대신 더 또렷하게 읽은 숫자의 좌표
+      if (c.conf > prev.conf) Object.assign(prev, c);
+      if (dotted) prev.style = 'dot';
+    }
+  }
+  const hangul = tokens.filter((t) => t.conf >= 60 && /[가-힣]/.test(t.str));
+  return merged.filter((c) => {
+    if (c.conf < 60) return false;
+    const h = hOf(c);
+    const cx = (c.x0 + c.x1) / 2;
+    const cy = (c.y0 + c.y1) / 2;
+    return !hangul.some((t) => {
+      if (cx > t.x0 && cx < t.x1 && cy > t.y0 && cy < t.y1) return !t.str.startsWith(c.digits) || /^\d+[가-힣]/.test(t.str);
+      const overlap = Math.min(c.y1, t.y1) - Math.max(c.y0, t.y0);
+      return c.style === 'plain' && t.x0 >= c.x1 - 0.001 && t.x0 - c.x1 < 0.5 * h && overlap > 0.5 * h;
+    });
+  });
 }
 
 /**
@@ -1268,6 +1297,39 @@ export function dropInsetResets(order, anchors) {
   return stray.size;
 }
 
+/** 번호 리셋 직전의 넓고 고립된 제목 띠. 그 위쪽은 앞 해설의 이어지는 부분 */
+function answerResetCut(grid, a, x0, x1, top) {
+  const { w, h, data } = grid;
+  const left = Math.max(0, Math.floor(x0 * w));
+  const right = Math.min(w, Math.ceil(x1 * w));
+  const numH = hOf(a) * h;
+  const start = Math.max(0, Math.ceil(top * h), Math.floor(a.y0 * h - 12 * numH));
+  const end = Math.min(h, Math.floor(a.y0 * h));
+  let band = null;
+  let blank = 0;
+  let cut = null;
+  for (let y = start; y < end; y++) {
+    let lo = right;
+    let hi = left;
+    for (let x = left; x < right; x++) if (data[y * w + x]) { lo = Math.min(lo, x); hi = x + 1; }
+    if (hi > lo) {
+      if (!band) band = { y, lo, hi, gap: blank };
+      band.lo = Math.min(band.lo, lo);
+      band.hi = Math.max(band.hi, hi);
+      band.end = y + 1;
+      blank = 0;
+    } else {
+      blank++;
+      if (band && blank >= Math.max(1, 0.5 * numH)) {
+        const bh = band.end - band.y;
+        if (band.gap >= 0.5 * numH && bh >= 2 * numH && bh <= 6 * numH && band.hi - band.lo >= 0.75 * (right - left)) cut = (band.y - 1) / h;
+        band = null;
+      }
+    }
+  }
+  return cut;
+}
+
 /**
  * 번호 위치로 문항 영역을 계산합니다.
  * @param {number[]} order  분석한 페이지(순서대로)
@@ -1292,6 +1354,8 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
       prevCols = null;
       continue;
     }
+    // 새 회의 제목·정답표가 첫 번호보다 위에 있어도 앞 회 해설은 이 쪽으로 잇지 않음
+    if (opts.answer && open?.num != null && chain.length && chain[0].num < open.num && zoneOf(L, chain[0].y0) > 0) open = null;
     const cols = L.columns?.length ? L.columns : [{ x0: 0, x1: 1 }];
     // 번호가 하나도 없고 단 폭도 앞 쪽과 다른 쪽(책 끝 메모·광고 쪽 등)으로는 앞 해설이 이어지지 않음
     // (마지막 쪽에 왼쪽 단만 차 있는 해설 끝은 단 폭이 같아서 이어짐)
@@ -1310,7 +1374,11 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
         const x0 = Math.max(0, col.x0 - 0.006, ...gut.filter((g) => g.x1 <= col.x0 + 0.002).map((g) => g.x1));
         const x1 = Math.min(1, col.x1 + 0.006, ...gut.filter((g) => g.x0 >= col.x1 - 0.002).map((g) => g.x0));
         const inCol = chain.filter((a) => a.col === c && a.y0 >= top - 0.01 && (a.y0 < bottom || z === zones.length - 1)).sort(byReadingOrder);
-        if (opts.passages && open?.num != null && inCol.length && inCol[0].num < open.num) open = null;
+        let resetCut = null;
+        if (opts.passages && open?.num != null && inCol.length && inCol[0].num < open.num) {
+          if (opts.answer) resetCut = answerResetCut(grid, inCol[0], x0, x1, top);
+          if (resetCut == null) open = null;
+        }
         // 한 줄에 나란히 놓인 번호들은 한 줄로 묶음 (세로는 다음 줄 번호까지, 가로는 오른쪽 번호 앞까지)
         const rows = [];
         for (const a of inCol) {
@@ -1326,6 +1394,7 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
           .filter((k) => k.x1 > col.x0 + 0.005 && k.x0 < col.x1 - 0.005)
           .map((k) => k.y0)
           .filter((cy) => cy > top && cy < bottom - 0.006 && !inCol.some((a) => Math.abs(cy - a.y0) < a.h * 1.2));
+        if (resetCut != null) cuts.push(resetCut);
         const cutBetween = (ya, yb) => {
           let v = yb;
           for (const cy of cuts) if (cy > ya + 0.005 && cy < v) v = cy;
