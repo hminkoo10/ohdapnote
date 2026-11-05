@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inkGridFromRgba, analyzeLayout, trimRect, cutAbove, snapUpToGap } from '../../src/renderer/js/layout.js';
+import { inkGridFromRgba, analyzeLayout, trimRect, cutAbove, snapUpToGap, trimPassageMargins } from '../../src/renderer/js/layout.js';
 
 /** 흰 종이 RGBA 에 회색 사각형들을 칠함 (lum: 0 검정 ~ 255 흰색) */
 function paper(w, h) {
@@ -93,6 +93,80 @@ function cells(w, h) {
   };
   return { grid: { w, h, data }, fill };
 }
+
+test('analyzeLayout: 좁은 거터의 기울어진 세로선은 줄 합집합으로 단을 나눔', () => {
+  const { grid, fill } = cells(240, 340);
+  grid.lines = new Uint8Array(grid.data.length);
+  for (let y = 35; y < 310; y += 7) {
+    fill(20, y, 117, y + 3);
+    fill(124, y, 220, y + 3);
+  }
+  for (let y = 35; y < 310; y++) {
+    const x = 119 + Math.floor((y - 35) / 95);
+    grid.lines[y * grid.w + x] = 2;
+    grid.data[y * grid.w + x] = 1;
+  }
+  // 선 양옆 번짐 때문에 빈칸 규칙만으로는 못 나눔
+  for (let y = 35; y < 310; y += 20) fill(117, y, 124, y + 1);
+  const L = analyzeLayout(grid);
+  assert.equal(L.columns.length, 2);
+  assert.ok(L.gutters[0].rule);
+  assert.ok(L.columns[0].x1 <= 0.5 && L.columns[1].x0 >= 0.5);
+  // 같은 줄의 짧은 선 여러 개를 더해서 긴 선으로 보지는 않음
+  grid.lines.fill(0);
+  for (let y = 0; y < grid.h; y++) for (let x = 117; x < 124; x++) grid.data[y * grid.w + x] = 0;
+  fill(117, 35, 124, 65);
+  for (let y = 35; y < 65; y++) for (let x = 119; x < 122; x++) grid.lines[y * grid.w + x] = 2;
+  assert.equal(analyzeLayout(grid).columns.length, 1);
+});
+
+test('trimPassageMargins: 기울어진 머리선·쪽번호와 그 아래 꼬리말만 제외', () => {
+  const { grid, fill } = cells(240, 340);
+  grid.lines = new Uint8Array(grid.data.length);
+  fill(20, 20, 220, 27);
+  for (let x = 20; x < 220; x++) grid.lines[(30 + Math.floor((x - 20) / 70)) * 240 + x] = 1;
+  for (let y = 38; y < 315; y += 6) {
+    fill(20, y, 110, y + 2);
+    fill(130, y, 220, y + 2);
+  }
+  fill(113, 320, 130, 328);
+  fill(150, 330, 220, 334);
+  const columns = [{ x0: 20 / 240, x1: 110 / 240 }, { x0: 130 / 240, x1: 220 / 240 }];
+  const L = { blank: false, columns, bodyTop: 20 / 340, bodyBottom: 334 / 340, content: {}, spans: [{ y0: 30 / 340, y1: 33 / 340 }, { y0: 0.5, y1: 0.52 }] };
+  trimPassageMargins(grid, L);
+  assert.equal(L.bodyTop, 33 / 340);
+  assert.equal(L.bodyBottom, 320 / 340);
+  assert.ok(L.hasHeader && L.hasFooter);
+  assert.deepEqual(L.spans, [{ y0: 0.5, y1: 0.52 }]);
+  // 본문 아래에 따로 놓인 왼쪽 글줄은 쪽번호가 아님
+  for (let y = 320; y < 328; y++) for (let x = 113; x < 130; x++) grid.data[y * 240 + x] = 0;
+  fill(20, 320, 80, 328);
+  const other = { bodyTop: 0.1, bodyBottom: 1, content: {} };
+  trimPassageMargins(grid, other);
+  assert.equal(other.bodyBottom, 1);
+  assert.equal(other.bodyTop, 0.1); // 1단 교재 상자 윗변은 머리선이 아님
+  for (let y = 30; y < 33; y++) for (let x = 111; x < 130; x++) grid.lines[y * 240 + x] = 0;
+  const boxes = { columns, bodyTop: 0.05, bodyBottom: 1, content: {} };
+  trimPassageMargins(grid, boxes);
+  assert.equal(boxes.bodyTop, 0.05); // 같은 높이 양쪽 상자도 제외
+});
+
+test('trimPassageMargins: 쪽번호와 높이가 겹친 옆 단 끝줄은 보존', () => {
+  const { grid, fill } = cells(240, 340);
+  grid.lines = new Uint8Array(grid.data.length);
+  fill(20, 318, 75, 320); // 왼쪽 단 끝줄
+  fill(125, 319, 130, 320); // 기울어진 쪽번호 윗변
+  fill(113, 320, 132, 328);
+  for (let x = 113; x < 132; x++) grid.lines[327 * 240 + x] = 1;
+  const L = { bodyTop: 0.1, bodyBottom: 1, content: {} };
+  trimPassageMargins(grid, L);
+  assert.equal(L.bodyBottom, 328 / 340);
+  assert.equal(grid.data[319 * 240 + 20], 1);
+  assert.equal(grid.data[319 * 240 + 125], 0);
+  assert.equal(grid.lines[327 * 240 + 120], 0);
+  const r = trimRect(grid, { x: 0, y: 0.9, w: 1, h: 0.1 }, 0);
+  assert.equal(r.y + r.h, 320 / 340);
+});
 
 test('cutAbove: 번호 바로 위에 붙은 좁은 문항 코드 줄은 그 문항으로, 앞 문항 마지막 줄은 앞 문항으로', () => {
   const W = 120;

@@ -11,6 +11,9 @@ import {
   guessPageOffset,
   mergeFigureColumns,
   flagPages,
+  excludeRangeNumbers,
+  dropInsetResets,
+  rangeAllowsNumber,
 } from '../../src/renderer/js/detect.js';
 import { analyzeLayout, trimRect, findLabelBlocks } from '../../src/renderer/js/layout.js';
 
@@ -184,6 +187,79 @@ test('computeItems: 열린 지문이 다음 쪽 첫 번호 앞까지 이어짐',
     assert.deepEqual(it.stem.map((r) => r.page), [0, 1]);
     assert.equal(it.stemId, '0:1~3');
   }
+});
+
+test('지문 범위를 다른 OCR 방식이 문항 번호로 읽어도 실제 문항과 구별함', () => {
+  const mk = (num, col, x0, y0) => ({ num, col, x0, x1: x0 + 0.025, y0, y1: y0 + 0.012 });
+  const cands = [mk(22, 0, 0.08, 0.12), mk(27, 0, 0.12, 0.12), mk(22, 1, 0.54, 0.12), mk(22, 0, 0.08, 0.65)];
+  const ranges = [{ a: 22, b: 27, col: 0, x0: 0.077, x1: 0.15, y0: 0.118, y1: 0.131 }];
+  assert.deepEqual(excludeRangeNumbers(cands, ranges), cands.slice(2));
+});
+
+test('rangeAllowsNumber: 세트 머리 앞의 다른 문항 속 숫자로 빈 번호를 채우지 않음', () => {
+  const ranges = [{ a: 22, b: 27, page: 3, zone: 0, col: 1, x0: 0.55, y0: 0.2, y1: 0.215 }];
+  const c = { zone: 0, col: 0, x0: 0.1, y0: 0.7, y1: 0.715 };
+  assert.equal(rangeAllowsNumber(22, 2, c, ranges), false);
+  assert.equal(rangeAllowsNumber(22, 3, c, ranges), false);
+  assert.equal(rangeAllowsNumber(22, 3, { ...c, col: 1 }, ranges), true);
+  assert.equal(rangeAllowsNumber(22, 4, c, ranges), true);
+  assert.equal(rangeAllowsNumber(21, 2, c, ranges), true);
+  assert.equal(rangeAllowsNumber(22, 3, { ...c, zone: 1 }, ranges), true);
+});
+
+test('extractCandidates: 지문 모드에서 백분율·여러 숫자 수식은 범위 머리가 아님', () => {
+  const layout = { columns: [{ x0: 0.1, x1: 0.9 }] };
+  const tokens = ['2~3%', '2-8-5]', '[4~6]'].map((str, i) => ({ str, x0: 0.1, x1: 0.18, y0: 0.2 + i * 0.2, y1: 0.215 + i * 0.2 }));
+  assert.deepEqual(extractCandidates(tokens, layout, { ocr: true, passages: true }).ranges.map((r) => [r.a, r.b]), [[4, 6]]);
+});
+
+test('computeItems: 번호 리셋 뒤 단독 문항에 이전 세트를 붙이지 않고 새 세트만 붙임', () => {
+  const f = passageFixture();
+  for (const p of [1, 2]) {
+    f.layouts.set(p, f.layouts.get(0));
+    f.grids.set(p, f.grids.get(0));
+    f.anchors.set(p, f.anchors.get(0).map((a) => ({ ...a })));
+  }
+  f.ranges.set(2, f.ranges.get(0).map((r) => ({ ...r })));
+  f.cutters.set(2, f.cutters.get(0));
+  const items = computeItems([0, 1, 2], f.anchors, f.layouts, f.grids, { ...f, passages: true });
+  assert.ok(items.filter((it) => it.page === 0).every((it) => it.stemId === '0:1~3'));
+  for (const it of items.filter((it) => it.page === 1)) {
+    for (const field of ['stem', 'stemId', 'stemLabel']) assert.equal(field in it, false);
+  }
+  assert.ok(items.filter((it) => it.page === 2).every((it) => it.stemId === '2:1~3'));
+});
+
+test('computeItems: 새 지문 뒤에서는 번호가 맞아도 더 오래된 세트로 돌아가지 않음', () => {
+  const f = passageFixture();
+  f.ranges.get(0)[0].b = 4;
+  const next = { a: 2, b: 3, col: 1, x0: 0.55, x1: 0.8, y0: 0.2, y1: 0.22 };
+  f.ranges.get(0).push(next);
+  f.cutters.get(0).push({ ...next, y0: next.y0 - 0.006 });
+  f.anchors.set(0, f.anchors.get(0).slice(1).map((a, i) => ({ ...a, num: i + 3, digits: String(i + 3) })));
+  const items = computeItems([0], f.anchors, f.layouts, f.grids, { ...f, passages: true });
+  assert.equal(items[0].stemLabel, '2~3');
+  assert.equal('stem' in items[1], false);
+});
+
+test('dropInsetResets: 문항 안 들여쓴 목록만 빼고, 다음 쪽의 실제 번호 리셋은 유지', () => {
+  const a = (num, x0 = 0.1) => ({ num, x0, relX: x0 - 0.09, col: 0, h: 0.015 });
+  const anchors = new Map([[0, [a(38), a(39), a(1, 0.14), a(2, 0.14)]], [1, [a(40), a(41)]], [2, [a(1), a(2)]]]);
+  assert.equal(dropInsetResets([0, 1, 2], anchors), 2);
+  assert.deepEqual([...anchors.values()].map((cs) => cs.map((c) => c.num)), [[38, 39], [40, 41], [1, 2]]);
+  const uncertain = new Map([[0, [a(39), a(1, 0.14), a(2, 0.14)]]]);
+  assert.equal(dropInsetResets([0], uncertain), 0);
+});
+
+test('computeItems: 새 회차 첫 문항 위 안내문은 앞 회차 마지막 문항에 붙이지 않음', () => {
+  const f = passageFixture();
+  const a = f.anchors.get(0)[0];
+  f.anchors.set(0, [{ ...a, num: 45, digits: '45' }]);
+  f.anchors.set(1, [{ ...a, num: 1, digits: '1', col: 0, x0: 0.1, x1: 0.12 }]);
+  f.layouts.set(1, f.layouts.get(0));
+  f.grids.set(1, f.grids.get(0));
+  const items = computeItems([0, 1], f.anchors, f.layouts, f.grids, { passages: true });
+  assert.equal(items[0].rects.length, 1);
 });
 
 test('byReadingOrder: 띠 위 오른쪽 단을 띠 아래 왼쪽 단보다 먼저 읽음', () => {

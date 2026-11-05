@@ -385,7 +385,29 @@ export function analyzeLayout(grid) {
   // (가운데가 아닌 긴 선은 예전처럼 빈 띠로만 판단 — 목차 쪽의 번호·제목 사이 선 같은 것)
   const vcov = new Uint16Array(w);
   for (let x = 0; x < w; x++) for (let y = bodyTopRow; y < bodyBottomRow; y++) if (lines[y * w + x] & 2) vcov[x]++;
-  const longRule = (x) => vcov[x] >= 0.6 * bodyRows && Math.abs(x - w / 2) <= 0.06 * w;
+  const longRules = new Uint8Array(w);
+  for (let x = cx0; x < cx1; x++) if (vcov[x] >= 0.6 * bodyRows && Math.abs(x - w / 2) <= 0.06 * w) longRules[x] = 1;
+  // 기울어진 세로선은 이웃 칸에 나뉨. 좁은 띠의 줄 합집합으로 덮음을 셈
+  for (let x = Math.round(w * 0.44); x < Math.round(w * 0.56); ) {
+    if (vcov[x] < 0.08 * bodyRows) {
+      x++;
+      continue;
+    }
+    let e = x + 1;
+    while (e < w * 0.56 && vcov[e] >= 0.08 * bodyRows) e++;
+    if (e - x <= Math.max(3, Math.round(w * 0.035))) {
+      let covered = 0;
+      for (let y = bodyTopRow; y < bodyBottomRow; y++) {
+        for (let k = x; k < e; k++) if (lines[y * w + k] & 2) {
+          covered++;
+          break;
+        }
+      }
+      if (covered >= 0.6 * bodyRows) for (let k = x; k < e; k++) longRules[k] = 1;
+    }
+    x = e;
+  }
+  const longRule = (x) => longRules[x];
   for (let x = cx0; x < cx1; x++) {
     if (!longRule(x)) continue;
     rule[x] = 2;
@@ -488,6 +510,82 @@ export function analyzeLayout(grid) {
     return { x0: a / w, x1: (b + 1) / w };
   });
   return result;
+}
+
+/** 지문 시험지의 머리 구분선·가운데 쪽번호를 본문에서 뺌 */
+export function trimPassageMargins(grid, layout) {
+  const { w, h, data, lines } = grid;
+  if (layout.blank || !lines) return;
+  // 기울어진 머리 구분선도 몇 줄의 가로 합집합으로 찾음
+  const cols = layout.columns || [];
+  for (let y = Math.floor(h * 0.04); cols.length === 2 && y < h * 0.18; ) {
+    const xs = new Set();
+    let e = y;
+    while (e < h * 0.18) {
+      const row = [];
+      for (let x = Math.round(w * 0.03); x < w * 0.97; x++) if (lines[e * w + x] & 1) row.push(x);
+      if (row.length < w * 0.04) break;
+      row.forEach((x) => xs.add(x));
+      e++;
+    }
+    // 양쪽 상자·밑줄이 같은 높이에 있어도 거터를 가로지르지 않으면 머리선이 아님
+    const gx0 = Math.floor(cols[0].x1 * w);
+    const gx1 = Math.ceil(cols[1].x0 * w);
+    let across = 0;
+    for (let x = gx0; x <= gx1; x++) if (xs.has(x)) across++;
+    if (e > y && e - y <= h * 0.025 && xs.size >= w * 0.65 && across >= 0.8 * (gx1 - gx0 + 1)) {
+      layout.bodyTop = Math.max(layout.bodyTop, e / h);
+      layout.hasHeader = true;
+      break;
+    }
+    y = Math.max(y + 1, e);
+  }
+  // 아래 중앙에 따로 놓인 작은 쪽번호 띠. 그 아래 저작권 줄도 함께 제외
+  for (let y = Math.ceil(h * 0.91); y < h * 0.98; ) {
+    let e = y;
+    let x0 = w;
+    let x1 = 0;
+    while (e < h * 0.98) {
+      const xs = [];
+      for (let x = Math.round(w * 0.03); x < w * 0.97; x++) if (data[e * w + x]) xs.push(x);
+      if (xs.length < 3 || xs[0] < w * 0.42 || xs[xs.length - 1] > w * 0.6) break;
+      x0 = Math.min(x0, xs[0]);
+      x1 = Math.max(x1, xs[xs.length - 1]);
+      e++;
+    }
+    if (e - y >= h * 0.012 && x1 - x0 >= w * 0.025 && x1 - x0 <= w * 0.12) {
+      // 쪽번호 위 빈 줄이 있어야 함 (본문 한 줄의 가운데 토막은 아님)
+      let ink = 0;
+      for (let x = Math.round(w * 0.03); x < w * 0.97; x++) ink += data[(y - 1) * w + x];
+      if (ink <= 2) {
+        layout.bodyBottom = Math.min(layout.bodyBottom, y / h);
+        layout.hasFooter = true;
+        break;
+      }
+      // 기울어진 쪽번호 윗변이 옆 단 끝줄과 겹치면 번호 칸만 지움
+      const localInk = (row) => {
+        let n = 0;
+        for (let x = x0 - 1; x <= x1 + 1; x++) n += data[row * w + x];
+        return n;
+      };
+      let start = y;
+      while (start > y - 3 && localInk(start - 1) > 0) start--;
+      if (!localInk(start - 1)) {
+        for (let row = start; row < e; row++) for (let x = x0 - 1; x <= x1 + 1; x++) {
+          data[row * w + x] = 0;
+          lines[row * w + x] = 0;
+        }
+        delete grid._lineComps;
+        layout.bodyBottom = Math.min(layout.bodyBottom, e / h);
+        layout.hasFooter = true;
+        break;
+      }
+    }
+    y = Math.max(y + 1, e);
+  }
+  layout.spans = (layout.spans || []).filter((s) => s.y0 >= layout.bodyTop && s.y1 <= layout.bodyBottom);
+  layout.content.y0 = layout.bodyTop;
+  layout.content.y1 = layout.bodyBottom;
 }
 
 function rowsWithInk(at, xa, xb, y0, y1, rowInk, spanning) {

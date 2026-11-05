@@ -300,6 +300,8 @@ export function extractCandidates(tokens, layout, opts = {}) {
         last = L.words[j];
         const m = RANGE_RE.exec(text);
         if (m && +m[2] > +m[1] && +m[2] - +m[1] <= 40) {
+          // 본문 수치("2~3%")·여러 숫자가 이어진 OCR 잡음은 지문 머리가 아님
+          if (opts.passages && /^[%‰\d~∼～〜\-–—]/.test(text.slice(m[0].length))) break;
           // 공통 지문 머리는 괄호로 싸여 있거나 단 왼쪽 끝에서 시작함
           // (선택지 "④ ∛−27" 을 OCR 이 "3−27" 로 읽은 것 같은 줄 가운데 수식은 아님)
           const bracketed = /^[[(【〔]/.test(m[0]) || /[\])】〕]$/.test(m[0]);
@@ -1232,6 +1234,40 @@ export function zoneOf(L, y) {
   return 0;
 }
 
+/** 다른 OCR 방식에서 문항으로 읽힌 지문 범위 숫자도 제외 */
+export function excludeRangeNumbers(candidates, ranges) {
+  return candidates.filter((c) => !ranges.some((r) => c.col === r.col && c.y0 < r.y1 + 0.006 && c.y1 > r.y0 - 0.006 && c.x0 < r.x1 + 0.006 && c.x1 > r.x0 - 0.006));
+}
+
+/** 빠진 번호를 다시 읽을 때, 그 세트 머리보다 앞의 숫자는 쓰지 않음 */
+export function rangeAllowsNumber(num, page, candidate, ranges) {
+  return !ranges.some((r) => num >= r.a && num <= r.b && (page < r.page || (page === r.page && byReadingOrder(candidate, r) < 0)));
+}
+
+/** 문항 안 들여쓴 목록 번호가 사슬을 끊으면, 앞뒤 연속 번호로 연결 */
+export function dropInsetResets(order, anchors) {
+  const all = order.flatMap((page) => (anchors.get(page) || []).map((a) => ({ page, a })));
+  const stray = new Set();
+  for (let i = 1; i < all.length; i++) {
+    const prev = all[i - 1];
+    const cur = all[i];
+    if (prev.page !== cur.page || prev.a.col !== cur.a.col || cur.a.num >= prev.a.num || cur.a.prefix || prev.a.prefix) continue;
+    if (cur.a.x0 - prev.a.x0 < Math.max(0.012, hOf(prev.a))) continue;
+    for (let j = i + 1; j < Math.min(all.length, i + 7); j++) {
+      const next = all[j];
+      if (next.page - prev.page > 2) break;
+      if (next.a.num === prev.a.num + 1 && !next.a.prefix && Math.abs(next.a.relX - prev.a.relX) <= 0.025) {
+        for (let k = i; k < j; k++) stray.add(all[k].a);
+        i = j;
+        break;
+      }
+      if (next.a.num >= prev.a.num) break;
+    }
+  }
+  for (const idx of order) if (anchors.has(idx)) anchors.set(idx, anchors.get(idx).filter((a) => !stray.has(a)));
+  return stray.size;
+}
+
 /**
  * 번호 위치로 문항 영역을 계산합니다.
  * @param {number[]} order  분석한 페이지(순서대로)
@@ -1274,6 +1310,7 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
         const x0 = Math.max(0, col.x0 - 0.006, ...gut.filter((g) => g.x1 <= col.x0 + 0.002).map((g) => g.x1));
         const x1 = Math.min(1, col.x1 + 0.006, ...gut.filter((g) => g.x0 >= col.x1 - 0.002).map((g) => g.x0));
         const inCol = chain.filter((a) => a.col === c && a.y0 >= top - 0.01 && (a.y0 < bottom || z === zones.length - 1)).sort(byReadingOrder);
+        if (opts.passages && open?.num != null && inCol.length && inCol[0].num < open.num) open = null;
         // 한 줄에 나란히 놓인 번호들은 한 줄로 묶음 (세로는 다음 줄 번호까지, 가로는 오른쪽 번호 앞까지)
         const rows = [];
         for (const a of inCol) {
@@ -1367,20 +1404,29 @@ export function computeItems(order, anchors, layouts, grids, opts = {}) {
       }
     });
   }
-  attachStems(items, stems);
+  attachStems(items, stems, !!opts.passages);
   return assignIds(items);
 }
 
 /** 공통 지문을 범위 안 번호의 문항들에 붙임 (지문 뒤에 나오는 문항부터, 다음 지문 전까지) */
-function attachStems(items, stems) {
+function attachStems(items, stems, passages = false) {
   if (!stems.length) return;
   const key = (page, z, c, y) => page * 1e6 + z * 1e4 + c * 100 + y;
   const sortedStems = stems.sort((a, b) => key(a.page, a.z, a.c, a.y) - key(b.page, b.z, b.c, b.y));
+  let prev = null;
+  let resetAt = -Infinity;
   for (const it of items) {
     if (it.prefix) continue;
     const k = key(it.page, it.zone ?? 0, it.col ?? 0, it.rects[0].y);
+    // 번호가 되돌아가면 앞 회차·선택 과목의 지문은 더 붙이지 않음
+    if (passages && prev && it.num < prev.num) resetAt = prev.k;
     let st = null;
-    for (const s of sortedStems) if (key(s.page, s.z, s.c, s.y) < k && it.num >= s.a && it.num <= s.b) st = s;
+    for (const s of sortedStems) {
+      const sk = key(s.page, s.z, s.c, s.y);
+      if (sk < k && sk > resetAt && (passages || (it.num >= s.a && it.num <= s.b))) st = s;
+    }
+    if (st && (it.num < st.a || it.num > st.b)) st = null;
+    prev = { num: it.num, k };
     if (st) {
       it.stem = [...st.rects];
       it.stemLabel = `${st.a}~${st.b}`;
