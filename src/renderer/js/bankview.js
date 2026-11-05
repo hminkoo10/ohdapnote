@@ -8,6 +8,7 @@ import { bankEntries, filterBank, orderPicked, makeBankBlocks, bankTargets, pass
 import { loadTranscripts, bestTranscript, setEditedTranscript, clearEditedTranscript, exportHwpx } from './transcribe.js';
 import { putBank } from './bank-transcribe.js';
 import { answerEditorButton, showAnswerPreview } from './answer-editor.js';
+import { attachAnswers } from './answers.js';
 
 const readLocal = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
@@ -418,9 +419,10 @@ async function buildBankExport(mode, all) {
       if (!e.src.problem || e.answer && !e.src.answer && mode !== 'problems') throw new Error(`${e.bookName} 원본을 열지 못했어요.`);
     }
     const opts = { ...bs.opts, plainPdf: true };
+    await attachAnswers(entries);
     const info = { ...examInfo(), subtitle: `문제 ${entries.length}문항` };
     const blocks = makeBankBlocks(mode, entries, opts, (role, it, e) => pageLabel(e.bookObj.docs[role], it.page));
-    const sig = JSON.stringify({ mode, opts, info, blocks: blocks.map((b) => [b.item?.id, b.item?.rects, b.num, b.source]) });
+    const sig = JSON.stringify({ mode, opts, info, blocks: blocks.map((b) => [b.item?.id, b.item?.rects, b.num, b.source, b.answerBlocks]) });
     const modeName = { problems: '문제지', answers: '해설지', 'both-inline': '문제+해설', 'both-end': '문제+해설(해설 뒤)' }[mode];
     const d = new Date();
     const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;

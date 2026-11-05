@@ -16,6 +16,17 @@ const other = { id: 'b', name: '영어 교재', subject: 'english', docs: { prob
 const entries = bankEntries([book, other]);
 const label = (role, it, e) => `p.${it.page + 1 + (e.bookObj.docs[role]?.pageOffset || 0)}`;
 
+test('문제은행 해설: 사람 글 우선, 답지 없는 교재의 정답도 출력', () => {
+  for (const original of [entries[0], entries.at(-1)]) {
+    const e = { ...original, writtenAnswer: { answer: '③', blocks: [{ type: 'para', text: '직접 쓴 풀이' }] } };
+    const blocks = makeBankBlocks('answers', [e], {}, label);
+    assert.deepEqual(blocks[0].answerBlocks, e.writtenAnswer.blocks);
+    assert.equal(blocks[0].bookId, original.bookId);
+    e.writtenAnswer = { answer: '12', blocks: [] };
+    assert.equal(makeBankBlocks('answers', [e], {}, label)[0].answerBlocks[0].text, '정답 12');
+  }
+});
+
 test('문제은행 일반 PDF: 명시해서 켜면 본문도 옮기고, 기존 기본값은 유지', () => {
   const text = 'Read the passage 다음 글';
   const glyphs = [...text].map((c, i) => ({ c, fam: 'Helvetica', style: '', x0: 50 + i * 8, x1: 58 + i * 8, base: 100, top: 92, bottom: 102, size: 10, xem: 10, rot: false, seq: i }));

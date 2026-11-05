@@ -5,6 +5,7 @@
 import { PDFDocument, StandardFonts, rgb, pushGraphicsState, popGraphicsState } from '../vendor/pdf-lib.esm.min.js';
 import { createCanvas } from './docsource.js';
 import { stripHiddenText } from './pdfclip.js';
+import { answerContent } from './answer-model.js';
 
 const A4 = { w: 595.28, h: 841.89 };
 const MARGIN = { top: 46, bottom: 42, left: 38, right: 38 };
@@ -190,7 +191,7 @@ export async function buildPdf(args) {
   }
 }
 
-async function buildPdfInner({ blocks, sources = {}, options, title, info, onProgress, forceRaster }) {
+async function buildPdfInner({ blocks, sources = {}, options, title, info, onProgress, forceRaster, renderAnswerPdf = (args) => window.ohdap.renderAnswerPdf(args) }) {
   const opts = { ...DEFAULT_EXPORT_OPTIONS, ...(options || {}) };
   const exam = { title: title || '오답노트', ...(info || {}) };
   const out = await PDFDocument.create();
@@ -199,13 +200,26 @@ async function buildPdfInner({ blocks, sources = {}, options, title, info, onPro
   out.setProducer('오답노트 (pdf-lib)');
   if (exam.teacher || exam.academy) out.setAuthor([exam.academy, exam.teacher].filter(Boolean).join(' '));
   const helv = await out.embedFont(StandardFonts.Helvetica);
+  const cols = Math.max(1, Math.min(2, opts.columns | 0));
+  const contentW = A4.w - MARGIN.left - MARGIN.right;
+  const colW = (contentW - COL_GAP * (cols - 1)) / cols;
+  const expanded = [];
+  for (const block of blocks) {
+    if (!block.answerBlocks) { expanded.push(block); continue; }
+    const bytes = await renderAnswerPdf({ bookId: block.bookId, blocks: block.answerBlocks, widthPt: colW });
+    const doc = await PDFDocument.load(bytes);
+    const pages = await out.embedPages(doc.getPages());
+    pages.forEach((embedded, i) => expanded.push({ ...block, num: i ? '' : block.num, source: i ? '해설 (계속)' : block.source, writtenSegs: [{ embedded, wPt: embedded.width, hPt: embedded.height, rect: {} }] }));
+  }
+  blocks = expanded;
 
   // ---- 1) 각 영역(segment)의 그릴 거리 준비 ----
   const srcIds = new Map(); // DocSource → 번호
   const srcList = [];
   const segs = []; // {block, src, rect, meta, wPt, hPt}
   for (const block of blocks) {
-    block.segs = [];
+    block.segs = block.writtenSegs || [];
+    if (block.answerBlocks) continue;
     if ((block.kind !== 'problem' && block.kind !== 'answer') || !block.item) continue;
     const src = block.src || sources[block.role];
     if (!src) continue;
@@ -287,9 +301,6 @@ async function buildPdfInner({ blocks, sources = {}, options, title, info, onPro
   }
 
   // ---- 4) 배치 ----
-  const cols = Math.max(1, Math.min(2, opts.columns | 0));
-  const contentW = A4.w - MARGIN.left - MARGIN.right;
-  const colW = (contentW - COL_GAP * (cols - 1)) / cols;
   const space = SPACE_OPTIONS[opts.space] || SPACE_OPTIONS.none;
 
   // 둘째 쪽부터 쓰는 작은 머리
@@ -460,6 +471,8 @@ export function makeBlocks(mode, entries, options, pageLabel) {
   });
   const answerBlock = (e, i) => {
     const base = { num: num(i), source: opts.labels ? `해설 · ${where(e)}` : '해설' };
+    const written = answerContent(e.writtenAnswer);
+    if (written) return { kind: 'answer', role: 'answer', item: e.problem, bookId: e.bookId, answerBlocks: written, ...base };
     return e.answer
       ? { kind: 'answer', role: 'answer', item: e.answer, src: e.src?.answer, ...base }
       : { kind: 'note', ...base, text: '(답지에서 짝이 되는 해설을 찾지 못했어요)', segs: [] };

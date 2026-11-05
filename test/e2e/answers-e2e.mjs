@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
+import { inflateRawSync } from 'node:zlib';
 
 const require = createRequire(import.meta.url);
 const env = { ...process.env };
@@ -31,6 +32,23 @@ const cloud = fakeCloud({ dir: join(tmp, 'cloud'), academyDir: academy, subjects
 let app;
 let win;
 const errors = [];
+function sectionXml(bytes) {
+  const buf = Buffer.from(bytes);
+  const end = buf.lastIndexOf(Buffer.from([80, 75, 5, 6]));
+  let p = buf.readUInt32LE(end + 16);
+  for (let i = 0; i < buf.readUInt16LE(end + 10); i++) {
+    const len = buf.readUInt16LE(p + 28);
+    const name = buf.toString('utf8', p + 46, p + 46 + len);
+    const at = buf.readUInt32LE(p + 42);
+    if (name === 'Contents/section0.xml') {
+      const start = at + 30 + buf.readUInt16LE(at + 26) + buf.readUInt16LE(at + 28);
+      const data = buf.subarray(start, start + buf.readUInt32LE(p + 20));
+      return (buf.readUInt16LE(p + 10) === 8 ? inflateRawSync(data) : data).toString('utf8');
+    }
+    p += 46 + len + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  throw new Error('HWPX 본문 없음');
+}
 const call = (fn, ...args) => win.evaluate(([f, a]) => window.ohdap[f](...a), [fn, args]);
 const openEditor = async () => {
   await win.evaluate(async (bookId) => {
@@ -87,6 +105,34 @@ try {
   assert.deepEqual((await saved()).blocks, entry.blocks);
   assert.equal(await win.locator('.answer-input').inputValue(), '③');
   await closeEditor();
+  console.log('▶ 해설 PDF 글자 검색·HWPX 수식 원문');
+  const exported = await win.evaluate(async (bookId) => {
+    const { makeBlocks, buildPdf } = await import('./js/exporter.js');
+    const { buildHwpx } = await import('./js/hwpx.js');
+    const { attachAnswers } = await import('./js/answers.js');
+    const book = await window.ohdap.getBook(bookId);
+    const entries = [{ bookId, problem: book.docs.problem.items[0], answer: null }];
+    await attachAnswers(entries);
+    const blocks = makeBlocks('answers', entries, {}, () => 'p.1');
+    const pdf = await buildPdf({ blocks, options: { space: 'none' }, title: '해설 시험' });
+    const hwpx = await buildHwpx({ blocks, title: '해설 시험' });
+    const pdfjs = await import('./vendor/pdfjs/pdf.min.mjs');
+    const task = pdfjs.getDocument({ data: pdf.slice() });
+    const doc = await task.promise;
+    const text = (await (await doc.getPage(1)).getTextContent()).items.map((x) => x.str).join('');
+    const page = await doc.getPage(1);
+    const viewport = page.getViewport({ scale: 1.5 });
+    const canvas = document.createElement('canvas'); canvas.width = viewport.width; canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    const screenshot = canvas.toDataURL('image/png').split(',')[1];
+    await task.destroy();
+    return { pdf: [...pdf], hwpx: [...hwpx], text, screenshot };
+  }, id);
+  assert.match(exported.text.replace(/\s/g, ''), /직접쓴해설검색문장/);
+  const section = sectionXml(exported.hwpx);
+  assert.match(section, /<hp:script>\{a\} over \{b\}<\/hp:script>/);
+  assert.match(section, /<hp:pic /);
+  writeFileSync(join(OUT, 'answers-pdf.png'), Buffer.from(exported.screenshot, 'base64'));
   assert.deepEqual(errors, []);
   console.log('정답·해설 E2E 통과');
 } finally {

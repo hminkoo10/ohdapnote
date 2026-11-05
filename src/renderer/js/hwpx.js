@@ -5,6 +5,8 @@
 //  - ZIP 묶기도 직접 (mimetype 은 맨 앞에 압축 없이)
 
 import { convertLatex } from './hwpeq.js';
+import { eqToMathML, eqToText } from './hwpeqview.js';
+import { readAnswerFigure } from './answers.js';
 import { DEFAULT_EXPORT_OPTIONS, SPACE_OPTIONS, unitScale } from './exporter.js';
 
 // 길이 단위: HWPUNIT (1pt = 100)
@@ -223,6 +225,23 @@ function equationXml(eq, ids) {
     `${sizeXml(eq.width, eq.height)}${POS_INLINE}<hp:outMargin left="56" right="56" top="0" bottom="0"/>` +
     `<hp:shapeComment>수식입니다.</hp:shapeComment><hp:script>${esc(eq.script)}</hp:script></hp:equation>`
   );
+}
+
+/** 사람이 쓴 스크립트는 변환하지 않음. MathML 크기는 배치에만 쓴다. */
+function writtenEquation(script) {
+  let width = Math.max(600, eqToText(script).length * 550);
+  let height = /over|sqrt|matrix|cases/.test(script) ? 2100 : 1200;
+  if (typeof document !== 'undefined') {
+    const node = document.createElement('span');
+    node.style.cssText = 'position:fixed;left:-20000px;top:0;font-size:10pt;white-space:nowrap';
+    node.innerHTML = eqToMathML(script);
+    document.body.append(node);
+    const rect = node.getBoundingClientRect();
+    width = Math.max(100, Math.ceil(rect.width * 75 + 120));
+    height = Math.max(1000, Math.ceil(rect.height * 75 + 120));
+    node.remove();
+  }
+  return { script, width, height, baseLine: 75 };
 }
 
 /** 글자처럼 줄에 놓이는 그림. w,h: HWPUNIT, img: {binId, pxW, pxH} */
@@ -512,7 +531,7 @@ export function blockSegs(block, sources = {}) {
  *   renderSeg?(seg) → Promise<Img>   Img = {bytes:Uint8Array, ext:'jpg'|'png', pxW, pxH}
  * @returns {Promise<Uint8Array>} .hwpx 파일 내용 (결과.stats = {text, picture} 문항 수)
  */
-export async function buildHwpx({ blocks, sources = {}, options, title, info, onProgress, transcribe, renderSeg = renderSegImage }) {
+export async function buildHwpx({ blocks, sources = {}, options, title, info, onProgress, transcribe, renderSeg = renderSegImage, readFigure = readAnswerFigure }) {
   const opts = { ...DEFAULT_EXPORT_OPTIONS, ...(options || {}) };
   const exam = { title: title || '오답노트', ...(info || {}) };
   const cols = Math.max(1, Math.min(2, opts.columns | 0));
@@ -521,12 +540,12 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
 
   // ---- 1) 영역 준비 + 글자로 옮기기 ----
   const prepared = new Map(); // block → {segs, t}
-  const work = blocks.filter((b) => blockSegs(b, sources).length);
+  const work = blocks.filter((b) => b.answerBlocks || blockSegs(b, sources).length);
   let done = 0;
   for (const block of work) {
     const segs = blockSegs(block, sources);
-    let t = null;
-    if (transcribe) {
+    let t = block.answerBlocks ? { blocks: block.answerBlocks } : null;
+    if (transcribe && !t) {
       try {
         t = await transcribe(block, segs);
       } catch (err) {
@@ -672,7 +691,7 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
     segs
       .map((sg) => {
         if (sg.type === 'text') return sg.v ? text(sg.v) : '';
-        const eq = convertLatex(sg.v, { baseUnit: BASE_UNIT });
+        const eq = sg.type === 'eq' ? writtenEquation(sg.v) : convertLatex(sg.v, { baseUnit: BASE_UNIT });
         return eq.script ? equationXml(eq, ids) : '';
       })
       .join('');
@@ -760,11 +779,17 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
     if (!prep) {
       if (block.text) list.push({ spec: { align: 'LEFT' }, runs: [{ cp: C.note, xml: text(block.text) }], lead: true });
     } else if (prep.t) {
-      const maxW = Math.max(...prep.segs.map((s) => s.wPt));
+      const maxW = prep.segs.length ? Math.max(...prep.segs.map((s) => s.wPt)) : colW / PT;
       const scale = Math.min(1, colW / (maxW * PT));
       let firstPara = true;
       for (const b of prep.t.blocks) {
         if (b.type === 'para') {
+          if (b.runs || block.answerBlocks) {
+            const segs = (b.runs || [{ text: b.text }]).map((r) => r.eq !== undefined ? { type: 'eq', v: r.eq } : { type: 'text', v: r.text });
+            list.push({ spec: {}, runs: [{ cp: C.body, xml: richXml(segs) || text('') }], lead: true });
+            preview.push(b.text); firstPara = false;
+            continue;
+          }
           // 공통 지문의 "[0030~0037]" 과, 지문 아래에 다시 적힌 문항 번호는 뗌
           let value = firstPara && block.kind === 'problem' ? stripStemLabel(b.text) : b.text;
           if (block.stem) value = stripItemNumber(value, block.item.number);
@@ -773,11 +798,17 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
             list.push({ spec: it.kind === 'display' ? { align: 'CENTER' } : {}, runs: [{ cp: C.body, xml: richXml(it.segs) }], lead: it.kind !== 'display' });
             preview.push(it.segs.map((sg) => sg.v).join(''));
           }
+        } else if (b.type === 'math' && b.eq !== undefined) {
+          list.push({ spec: { align: 'CENTER' }, runs: [{ cp: C.body, xml: equationXml(writtenEquation(b.eq), ids) }] });
         } else if (b.type === 'math' && b.latex) {
           list.push({ spec: { align: 'CENTER' }, runs: [{ cp: C.body, xml: richXml([{ type: 'math', v: b.latex }]) }] });
         } else if (b.type === 'choices' && b.items?.length) {
           for (const row of choiceItems(b.items, hang)) list.push({ spec: { align: 'LEFT', tab: row.tab }, runs: [{ cp: C.body, xml: row.xml }] });
           preview.push(b.items.map((s, i) => `${CHOICE_MARKS[i] || ''} ${s}`).join('  '));
+        } else if (b.type === 'figure' && b.file) {
+          const img = await readFigure(block.bookId, b);
+          const [w, h] = fitPic(b.w * 0.75, b.h * 0.75, 1, colW - hang, FIG_H);
+          list.push({ spec: { align: 'CENTER', line: 100, prev: 200, next: 400 }, runs: [picRun(img, w, h)] });
         } else if (b.type === 'figure' && b.box && prep.t.crop) {
           try {
             const img = await prep.t.crop(b.box);

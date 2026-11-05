@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('ohdap', {
   saveAnswerSync: (bookId, itemId, data) => ipcRenderer.sendSync('answers:saveSync', { bookId, itemId, data }),
   putAnswerImage: (bookId, data) => ipcRenderer.invoke('answers:putImage', { bookId, data }),
   getAnswerImage: (bookId, file) => ipcRenderer.invoke('answers:getImage', { bookId, file }),
+  renderAnswerPdf: (args) => ipcRenderer.invoke('answers:renderPdf', args),
 
   openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
   showItemInFolder: (p) => ipcRenderer.invoke('shell:showItem', p),

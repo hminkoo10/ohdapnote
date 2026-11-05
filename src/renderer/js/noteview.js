@@ -2,6 +2,7 @@
 
 import { h, clear, toast, modal, confirmDialog, icon, animateOut, countUp } from './ui.js';
 import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS, CONVERT_MODES } from './exporter.js';
+import { attachAnswers } from './answers.js';
 import { exportHwpx } from './transcribe.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiLabel, findJob, restartGuard, restartPendingChecks } from './shared.js';
@@ -943,6 +944,7 @@ async function buildExport(mode) {
     e.src = ns.sources.get(e.bookId);
   }
   const opts = n.exportOptions;
+  await attachAnswers(entries);
   const jobKey = `hwpx:${n.id}`;
   const label = (role, it, e) => pageLabel(e.bookObj.docs[role], it.page);
   const blocks = makeBlocks(mode, entries, opts, label);
@@ -1113,7 +1115,7 @@ async function applyChange(change) {
 
 /** 한글 문서 내용이 같은지 견주는 열쇠 (문항·영역·지문·번호·출처 + 내보내기 설정·시험지 머리) */
 function exportSig(mode, blocks, opts, info) {
-  return JSON.stringify({ mode, opts, info, blocks: blocks.map((b) => [b.kind, b.item?.id, b.item?.rects, b.stem, b.num, b.source, b.text]) });
+  return JSON.stringify({ mode, opts, info, blocks: blocks.map((b) => [b.kind, b.item?.id, b.item?.rects, b.stem, b.num, b.source, b.text, b.answerBlocks]) });
 }
 
 

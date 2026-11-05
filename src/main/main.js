@@ -1073,13 +1073,35 @@ function registerIpc() {
     if (!fs.existsSync(dest)) { markOwn(dest); fs.writeFileSync(dest, png); }
     return file;
   });
-  handle('answers:getImage', async (_e, { bookId, file } = {}) => {
+  const getAnswerImage = async ({ bookId, file } = {}) => {
     let dest = answerImagePath(bookId, file);
     if (!fs.existsSync(dest)) await fetchBookFiles(bookId, [file]);
     dest = answerImagePath(bookId, file);
     if (fs.statSync(dest).size > MAX_IMAGE_BYTES) throw new Error('그림이 너무 커요.');
     const bytes = imageBytes(fs.readFileSync(dest));
     return `data:image/png;base64,${bytes.toString('base64')}`;
+  };
+  handle('answers:getImage', (_e, args) => getAnswerImage(args));
+  let answerPrintQueue = Promise.resolve();
+  handle('answers:renderPdf', (_e, args = {}) => {
+    const run = async () => {
+      const { bookId, widthPt } = args;
+      const book = readJsonSync(bookFile(bookId), null, sanitizeBook);
+      if (!book || !subjectOpen(book)) throw new Error(SUBJECT_CLOSED);
+      const data = sanitizeAnswer({ answer: '', blocks: args.blocks });
+      if (!data || !Number.isFinite(widthPt) || widthPt < 100 || widthPt > 600) throw new Error('잘못된 해설 인쇄 크기예요.');
+      const images = {};
+      for (const b of data.blocks) if (b.type === 'figure' && !images[b.file]) images[b.file] = await getAnswerImage({ bookId, file: b.file });
+      const win = new BrowserWindow({ show: false, width: Math.ceil(widthPt * 4 / 3), height: 900, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+      try {
+        await win.loadURL('app://bundle/answer-print.html');
+        const height = await win.webContents.executeJavaScript(`window.renderAnswer(${JSON.stringify({ ...data, images, widthPt })})`);
+        return new Uint8Array(await win.webContents.printToPDF({ printBackground: true, margins: { top: 0, bottom: 0, left: 0, right: 0 }, pageSize: { width: widthPt / 72, height: Math.max(24, Math.min(620, height)) / 72 }, displayHeaderFooter: false, generateTaggedPDF: true }));
+      } finally { win.destroy(); }
+    };
+    const next = answerPrintQueue.then(run, run);
+    answerPrintQueue = next.catch(() => {});
+    return next;
   });
   photoImports = createPhotoImports({ readBook: checkBookWrite, dirFor: bookDir, markOwn, removeRemoteOnly, log,
     saveBook: (book, cur) => writeJsonAtomicSync(bookFile(book.id), toSave(book, cur)) });

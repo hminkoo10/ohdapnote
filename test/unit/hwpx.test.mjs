@@ -5,6 +5,30 @@ import { buildHwpx, splitMath, crc32, stripStemLabel } from '../../src/renderer/
 import { convertLatex } from '../../src/renderer/js/hwpeq.js';
 import { makeBlocks } from '../../src/renderer/js/exporter.js';
 
+test('사람 해설: 글·수식 순서, 수식 스크립트 원문, 책 그림을 그대로 넣음', async () => {
+  const eq = ' {a} over {b} + LEFT ( x RIGHT ) ';
+  let pictures = 0;
+  const bytes = await buildHwpx({ blocks: [{ kind: 'answer', bookId: 'book-1', answerBlocks: [
+    { type: 'para', text: '앞 수식 뒤', runs: [{ text: '앞 ' }, { eq }, { text: ' 뒤' }] },
+    { type: 'math', eq: 'sqrt {x^{2}}' },
+    { type: 'figure', file: 'answer-images/0123456789abcdef.png', w: 100, h: 40 },
+  ] }], transcribe: () => { throw new Error('사람 해설은 다시 인식하지 않음'); }, readFigure: async (bookId, block) => {
+    assert.equal(bookId, 'book-1'); assert.match(block.file, /^answer-images\//); pictures++;
+    return { ext: 'png', bytes: new Uint8Array([137, 80, 78, 71]), pxW: 100, pxH: 40 };
+  } });
+  const entries = unzip(bytes);
+  const xml = entries.find((e) => e.name === 'Contents/section0.xml').data.toString();
+  assert.ok(xml.includes(`<hp:script>${eq}</hp:script>`));
+  assert.match(xml, /<hp:script>sqrt \{x\^\{2\}\}<\/hp:script>/);
+  const para = xml.match(/<hp:p\b[^]*?<\/hp:p>/g).find((p) => p.includes('앞 '));
+  assert.ok(para.indexOf('앞 ') < para.indexOf('<hp:equation'));
+  assert.ok(para.indexOf('</hp:equation>') < para.indexOf(' 뒤'));
+  assert.match(xml, /<hp:pic /);
+  assert.equal(pictures, 1);
+  assert.ok(entries.some((e) => e.name === 'BinData/image1.png'));
+  parseXml(xml, '직접 쓴 해설');
+});
+
 // ---------------------------------------------------------------------------
 // 시험용 도구: ZIP 풀기, XML 읽기(짝 맞음 확인)
 // ---------------------------------------------------------------------------

@@ -5,6 +5,22 @@ import { makeBlocks, itemName } from '../../src/renderer/js/exporter.js';
 const e = (n, withAns = true) => ({ problem: { number: String(n), prefix: '', page: 0, rects: [] }, answer: withAns ? { number: String(n), page: 3, rects: [] } : null });
 const label = (role, it) => `p.${it.page + 1}`;
 
+test('사람 해설 우선: 답지 유무와 무관, 정답만 있으면 한 줄, 빈 기록은 원래 답지', () => {
+  const written = { answer: '③', blocks: [{ type: 'math', eq: '{a} over {b}' }] };
+  for (const withAns of [true, false]) {
+    const entry = { ...e(1, withAns), bookId: 'book-1', writtenAnswer: written };
+    const [block] = makeBlocks('answers', [entry], {}, label);
+    assert.deepEqual(block.answerBlocks, written.blocks);
+    assert.equal(block.bookId, entry.bookId);
+    assert.equal(block.item, entry.problem);
+    assert.equal(block.src, undefined);
+    entry.writtenAnswer = { answer: '③', blocks: [] };
+    assert.deepEqual(makeBlocks('answers', [entry], {}, label)[0].answerBlocks, [{ type: 'para', text: '정답 ③' }]);
+    entry.writtenAnswer = { answer: '', blocks: [{ type: 'para', text: '' }] };
+    assert.equal(makeBlocks('answers', [entry], {}, label)[0].kind, withAns ? 'answer' : 'note');
+  }
+});
+
 test('makeBlocks: 문제+해설 — 문제마다 바로 뒤에', () => {
   const kinds = makeBlocks('both-inline', [e(1), e(2, false)], {}, label).map((b) => b.kind);
   assert.deepEqual(kinds, ['problem', 'answer', 'problem', 'note']);
