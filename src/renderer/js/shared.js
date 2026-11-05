@@ -233,7 +233,7 @@ export async function renderPreview(box, o) {
       h(
         'div.preview-empty',
         h('span.pe-icon', icon('eye')),
-        h('div', o.emptyText || ['번호 위에 마우스를 올리면', h('br'), '문제와 해설을 여기서 볼 수 있어요.']),
+        h('div', o.emptyText || ['번호를 누르면', h('br'), '문제와 해설을 여기서 볼 수 있어요.']),
       ),
     );
     return;
@@ -252,7 +252,7 @@ export async function renderPreview(box, o) {
       h('strong', `${pageLabel(doc, item.page)} ${itemName(item)}`),
       item.stemLabel ? h('span.tag.soft', { title: '공통 지문이 함께 나가요' }, `지문 ${item.stemLabel}`) : null,
       h('span.push'),
-      o.onShow ? h('button.btn.btn-small.btn-ghost', { title: '책 화면에서 이 쪽 보기', onclick: () => o.onShow('problem', item.page, item.id) }, icon('eye')) : null,
+      o.onShow ? h('button.btn.btn-small.btn-ghost', { title: '책 화면에서 이 쪽 보기', onclick: () => o.onShow('problem', item.page, item.id) }, icon('eye'), '쪽 보기') : null,
       o.onToggleSelect
         ? h(
             `button.btn.btn-small${o.selected ? '.btn-active' : '.btn-primary'}`,
@@ -288,7 +288,7 @@ export async function renderPreview(box, o) {
         h('span.push'),
         answerEditorButton({ book, item, sources, answerItem: ans, onChange: () => renderPreview(box, o) }),
         sel,
-        ans && o.onShow ? h('button.btn.btn-small.btn-ghost', { title: '답지에서 보기', onclick: () => o.onShow('answer', ans.page, ans.id) }, icon('eye')) : null,
+        ans && o.onShow ? h('button.btn.btn-small.btn-ghost', { title: '답지에서 보기', onclick: () => o.onShow('answer', ans.page, ans.id) }, icon('eye'), '답지 보기') : null,
       ),
       ans
         ? h('div.preview-scroll', ansImg)
@@ -566,7 +566,7 @@ export function jobDialog({ title, jobTitle = title, body, width = 480, classNam
       buttons: finished
         ? [{ label: '닫기', value: 'close', primary: true }]
         : [
-            { label: '취소', value: 'cancel' },
+            { label: '작업 취소', value: 'cancel' },
             { label: '다른 일 하면서 기다리기', value: 'background', primary: true },
           ],
       onClose: (value) => {
@@ -577,6 +577,9 @@ export function jobDialog({ title, jobTitle = title, body, width = 480, classNam
       },
     });
     dialog = body.closest('.modal');
+    const closeBtn = dialog.querySelector('.modal-x');
+    closeBtn.title = finished ? '닫기' : '작업 취소';
+    closeBtn.setAttribute('aria-label', closeBtn.title);
     tellJobs();
   };
   const job = startJob({ ...jobOpts, title: jobTitle, open: show, here: () => !!dialog });
@@ -589,6 +592,8 @@ export function jobDialog({ title, jobTitle = title, body, width = 480, classNam
       const bg = job.finish(r);
       if (!dialog) resolveClosed();
       else {
+        dialog.querySelector('.modal-x').title = '닫기';
+        dialog.querySelector('.modal-x').setAttribute('aria-label', '닫기');
         // [취소] → [닫기], [백그라운드에서 계속]은 없앰
         const [cancelBtn, bgBtn] = dialog.querySelectorAll('.modal-footer .btn');
         bgBtn?.remove();
@@ -687,7 +692,7 @@ export function aiOptions() {
 }
 
 /** 진행 창에 보이는 "AI · 모델" */
-export const aiModelText = () => `${aiLabel()} · ${geminiModels().map((m) => m || '기본 모델').join(' → ')}`;
+export const aiModelText = () => `정밀 인식 · ${geminiModels().map((m) => m || '기본 모델').join(' → ')}`;
 
 /**
  * 진행 창에서 [백그라운드에서 계속]을 누르면 창만 닫히고 계속 돔 (위쪽 막대에서 다시 열기).
@@ -703,7 +708,7 @@ export const aiModelText = () => `${aiLabel()} · ${geminiModels().map((m) => m 
  */
 export async function runGeminiPages(book, role, pages, hooks = {}) {
   if (!geminiReady()) {
-    toast(aiOff() ? '설정에서 AI 가 꺼져 있어요.' : '설정에서 AI(API 키·모델)를 먼저 정해 주세요.', { type: 'error', actions: [{ label: '설정 열기', onClick: () => nav.settings() }] });
+    toast(aiOff() ? '설정에서 정밀 인식을 켜세요.' : '설정에서 정밀 인식의 서비스 키를 입력하세요.', { type: 'error', actions: [{ label: '설정 열기', onClick: () => nav.settings() }] });
     return;
   }
   const key = `gemini:${book.id}:${role}`;
@@ -728,7 +733,7 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
   const bar = h('div.progress-bar');
   const body = h(
     'div.gem-run',
-    h('p.small.muted', `고른 쪽을 AI(${aiLabel()})에게 보내 문항 위치를 다시 찾아요. 한 쪽에 몇 초~수십 초 걸려요. 그 쪽에 있던 문항은 AI 결과로 바뀝니다.`),
+    h('p.small.muted', `고른 쪽을 외부 인식 서비스로 보내 문항 위치를 다시 찾습니다. 한 쪽에 몇 초~수십 초 걸리며, 기존 문항은 정밀 인식 결과로 바뀝니다.`),
     h('div.progress', bar),
     status,
     list,
@@ -741,8 +746,8 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
     role,
     abort,
     total: pages.length,
-    title: `AI로 ${pages.length}쪽 인식`,
-    jobTitle: `${book.name} · AI ${pages.length}쪽`,
+    title: `${pages.length}쪽 정밀 인식`,
+    jobTitle: `${book.name} · 정밀 인식 ${pages.length}쪽`,
     body,
     width: 480,
     className: 'gem-modal',
@@ -800,7 +805,7 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
     if (err?.name !== 'AbortError') failure = err;
     else {
       aborted = true;
-      toast(`AI 인식을 멈췄어요.${changed ? ` (${changed}쪽은 바뀌었어요)` : ''}`);
+      toast(`정밀 인식을 멈췄습니다.${changed ? ` (${changed}쪽은 바뀌었어요)` : ''}`);
     }
   }
   try {
@@ -808,7 +813,7 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
   } finally {
     // 결과를 저장한 뒤에 끝냄 (책을 지울 때 stopJobs 가 저장까지 기다리게)
     const actions = hooks.open && !hooks.isOpen?.() ? [{ label: '책 열기', onClick: hooks.open }] : [];
-    ui.finish(aborted || failure ? {} : { message: `${book.name} · ${ROLE_NAME[role]}: AI 인식 끝 — ${changed}쪽 바꿈${errors ? `, 실패 ${errors}쪽` : ''}`, actions });
+    ui.finish(aborted || failure ? {} : { message: `${book.name} · ${ROLE_NAME[role]}: 정밀 인식 완료 — ${changed}쪽 바꿈${errors ? `, 실패 ${errors}쪽` : ''}`, actions });
     if (aborted || failure) ui.close();
     releaseSrc();
     releaseBook();

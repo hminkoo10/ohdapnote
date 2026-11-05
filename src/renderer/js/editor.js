@@ -5,7 +5,7 @@
 //  - Delete: 선택한 영역(또는 문항) 삭제
 //  - 점선 번호(인식은 했지만 고르지 않은 후보)를 누르면 그 자리에 문항 추가
 
-import { h, clear, icon, debounce, toast } from './ui.js';
+import { h, clear, icon, debounce, toast, confirmDialog } from './ui.js';
 import { ROLE_NAME, pageLabel, itemsByPage } from './store.js';
 import { sortItems } from './detect.js';
 
@@ -150,10 +150,10 @@ export function createEditor(ctx) {
     });
     toolbar.append(
       h('div.tb-group',
-        h('button.btn.btn-icon', { title: '이전 쪽 (←)', onclick: () => go(-1), disabled: st.page <= 0 }, icon('left')),
+        h('button.btn.btn-icon', { title: '이전 쪽 (←)', 'aria-label': '이전 쪽', onclick: () => go(-1), disabled: st.page <= 0 }, icon('left')),
         pageInput,
         h('span.muted', ` / ${s.numPages}`),
-        h('button.btn.btn-icon', { title: '다음 쪽 (→)', onclick: () => go(1), disabled: st.page >= s.numPages - 1 }, icon('right')),
+        h('button.btn.btn-icon', { title: '다음 쪽 (→)', 'aria-label': '다음 쪽', onclick: () => go(1), disabled: st.page >= s.numPages - 1 }, icon('right')),
         h('span.tb-pagelabel', `${pageLabel(d, st.page)}`),
       ),
       h('div.tb-group',
@@ -164,10 +164,10 @@ export function createEditor(ctx) {
       ),
       h('div.tb-group.tb-right',
         h('button.btn.btn-small', { onclick: () => ctx.reanalyzePage(st.role, st.page), title: '이 쪽만 고해상도로 한 번 더, 앞뒤 쪽 번호에 맞춰 꼼꼼히 다시 찾아요 (이 쪽에서 직접 고친 내용은 바뀔 수 있어요)' }, icon('search'), '꼼꼼히 다시 찾기'),
-        h('button.btn.btn-small', { onclick: () => ctx.geminiPage(st.role, st.page), title: 'AI 로 이 쪽을 인식합니다 (설정에서 AI 키 필요)' }, icon('sparkle'), 'AI'),
-        h('button.btn.btn-icon.btn-ghost', { title: '축소', onclick: () => setZoom(st.zoom / 1.2) }, icon('zoomOut')),
+        h('button.btn.btn-small', { onclick: () => ctx.geminiPage(st.role, st.page), title: '이 쪽 정밀 인식 (설정에서 서비스 키 입력)' }, icon('scan'), '정밀 인식'),
+        h('button.btn.btn-icon.btn-ghost', { title: '축소', 'aria-label': '축소', onclick: () => setZoom(st.zoom / 1.2) }, icon('zoomOut')),
         h('span.muted.small.tb-zoom', `${Math.round(st.zoom * 100)}%`),
-        h('button.btn.btn-icon.btn-ghost', { title: '확대', onclick: () => setZoom(st.zoom * 1.2) }, icon('zoomIn')),
+        h('button.btn.btn-icon.btn-ghost', { title: '확대', 'aria-label': '확대', onclick: () => setZoom(st.zoom * 1.2) }, icon('zoomIn')),
       ),
     );
   }
@@ -180,7 +180,7 @@ export function createEditor(ctx) {
     const parts = [];
     if (!info?.analyzed) parts.push(h('span', '이 쪽은 아직 분석 전이에요.'));
     else {
-      const src = { text: 'PDF 글자', ocr: 'OCR(스캔 인식)', gemini: 'AI', manual: '직접 편집' }[info.source] || info.source;
+      const src = { text: 'PDF 글자', ocr: '스캔 인식', gemini: '정밀 인식', manual: '직접 편집' }[info.source] || info.source;
       parts.push(h('span.muted', `인식 방법: ${src}`));
       const miss = ctx.missing?.(st.role)?.get(st.page) || [];
       const why = [...(info.ok ? [] : info.flags || []), ...(miss.length ? [`빠진 번호 ${miss.map((m) => m.num).join(', ')}`] : [])];
@@ -485,11 +485,17 @@ export function createEditor(ctx) {
     return prev ? prev.num + 1 : 1;
   }
 
-  function deleteSelected() {
+  async function deleteSelected() {
     const it = selectedItem();
     if (!it) return;
     const d = doc();
     const ri = st.selected.rect;
+    const role = st.role;
+    const message = it.rects.length > 1
+      ? `${it.number}번 문항의 선택한 영역을 삭제할까요? 다른 영역은 남습니다.`
+      : `${it.number}번 문항 상자를 삭제할까요? 오답노트에서 고른 목록에서도 빠집니다. 원본 파일은 남습니다.`;
+    if (!(await confirmDialog(message, { title: '문항 영역 삭제', ok: '삭제', danger: true }))) return;
+    if (doc() !== d || st.role !== role || selectedItem() !== it || st.selected.rect !== ri) return;
     if (it.rects.length > 1) {
       it.rects.splice(ri, 1);
       it.source = 'manual';

@@ -30,7 +30,7 @@ export async function encodePhoto(url) {
 
 export async function importBookFiles(book, role, paths, add = false) {
   const release = holdBook(book);
-  const label = h('p', '파일을 가져오고 있어요…');
+  const label = h('p', '1. 파일 가져오는 중…');
   const dialog = jobDialog({ key: `import:${book.id}`, bookId: book.id, role,
     title: '사진과 파일 넣기', body: label });
   let imported;
@@ -42,7 +42,7 @@ export async function importBookFiles(book, role, paths, add = false) {
     for (const f of imported.files) {
       checkCancelled();
       if (f.kind === 'pdf') { files.push(f); continue; }
-      label.textContent = `사진 정리 중… ${done+1} / ${total}장`;
+      label.textContent = `2. 사진 정리 중… ${done+1} / ${total}장`;
       dialog.job.progress({ done, total, label: label.textContent });
       await new Promise((r) => setTimeout(r, 0));
       const photo = await encodePhoto(bookFileUrl(book.id, f.name));
@@ -55,10 +55,10 @@ export async function importBookFiles(book, role, paths, add = false) {
     const doc = add && book.docs[role] ? addFiles(structuredClone(book.docs[role]), result) : newDoc(role, result);
     const draft = { ...book, docs: { ...book.docs, [role]: doc }, updatedAt: Date.now() };
     if (!add) draft.answerOverrides = {};
-    label.textContent = '교재에 저장하고 있어요…';
+    label.textContent = '3. 교재에 저장 중…';
     await api.commitFileImport(imported.token, draft);
     Object.assign(book, draft);
-    dialog.finish({ message: '교재에 파일을 넣었어요.' });
+    dialog.finish({ message: '파일을 넣었습니다. 책 화면에서 분석을 시작하세요.' });
     return result;
   } finally {
     if (imported) await api.discardFileImport(imported.token).catch(() => {});

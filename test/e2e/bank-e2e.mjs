@@ -402,7 +402,7 @@ try {
   await win.click('.modal .btn-primary:has-text("다른 일 하면서 기다리기")');
   await win.waitForFunction(() => window.bankJob()?.done === 2 && window.bankSourceBlocked);
   await win.click(`.bank-book[data-book="${ids.english}"] button:has-text("진행 보기")`);
-  await win.getByRole('button', { name: '취소', exact: true }).click();
+  await win.locator('.modal-footer').getByRole('button', { name: '작업 취소', exact: true }).click();
   await win.waitForFunction(() => window.bankJob()?.cancelled);
   await win.evaluate(() => window.releaseBankSource());
   await win.waitForFunction(() => !window.bankJob());

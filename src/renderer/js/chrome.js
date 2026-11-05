@@ -49,14 +49,14 @@ const mathocrDl = { running: false, percent: 0, render: null };
  */
 function mathOcrCard() {
   const status = h('span.small.muted', '확인하는 중…');
-  const getBtn = h('button.btn.btn-small', { onclick: () => install() }, icon('download'), '모델 받기 (약 120MB)');
+  const getBtn = h('button.btn.btn-small', { onclick: () => install() }, icon('download'), '수식 인식 파일 받기 (약 120MB)');
   const cancelBtn = h('button.btn.btn-small.btn-ghost', { hidden: true, onclick: () => api.mathocrCancelInstall() }, '취소');
   const bar = h('div.progress-bar');
   const progress = h('div.progress.mathocr-progress', { hidden: true }, bar);
   const card = h(
     'section.set-card',
-    h('h4', icon('scan'), '스캔본 수식 인식 (AI 없이)'),
-    h('p.small.muted', '스캔본 문제를 AI 없이 이 컴퓨터에서 글자·한글 수식으로 옮겨요. 쓸지는 한글(HWPX)로 내보낼 때 고를 수 있어요.'),
+    h('h4', icon('scan'), '이 컴퓨터의 수식 인식'),
+    h('p.small.muted', '스캔본을 이 컴퓨터에서 글자·한글 수식으로 옮깁니다. 한글(HWPX) 저장 시 선택할 수 있습니다.'),
     h('div.field-row', getBtn, cancelBtn, status),
     progress,
   );
@@ -158,7 +158,7 @@ export async function openSettings() {
     ),
     ai.card,
     h('section.set-card',
-      h('h4', icon('scan'), '스캔본 글자 인식 (OCR)'),
+      h('h4', icon('scan'), '스캔본 글자 인식'),
       h('label.field', h('span', '언어'), ocrSelect),
     ),
     mathOcrCard(),

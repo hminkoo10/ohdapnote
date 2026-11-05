@@ -67,7 +67,7 @@ export function toast(message, { type = 'info', actions = [], timeout = actions.
           ),
         )
       : null,
-    h('button.toast-close', { onclick: () => close(), title: '닫기' }, icon('x')),
+    h('button.toast-close', { onclick: () => close(), title: '알림 닫기', 'aria-label': '알림 닫기' }, icon('x')),
   );
   let closed = false;
   const close = () => {
@@ -135,7 +135,7 @@ export function modal({ title, body, buttons = [], width = 460, onClose, beforeC
         ),
       ),
     );
-    const dialog = h(`div.modal${className ? `.${className}` : ''}`, { style: { width: `${width}px` } }, h('div.modal-header', h('h3', title), h('button.modal-x', { onclick: () => close(null), title: '닫기' }, icon('x'))), h('div.modal-body', body), buttons.length ? footer : null);
+    const dialog = h(`div.modal${className ? `.${className}` : ''}`, { role: 'dialog', 'aria-modal': 'true', 'aria-label': title, style: { width: `${width}px` } }, h('div.modal-header', h('h3', title), h('button.modal-x', { onclick: () => close(null), title: '닫기', 'aria-label': '닫기' }, icon('x'))), h('div.modal-body', body), buttons.length ? footer : null);
     const overlay = h('div.modal-overlay', { onmousedown: (e) => e.target === overlay && close(null) }, dialog);
     document.body.append(overlay);
     document.addEventListener('keydown', onKey, true);

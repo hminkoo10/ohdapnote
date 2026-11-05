@@ -49,9 +49,9 @@ const rosterNotice = () => h('div.readonly-banner.roster-notice', icon('warn'), 
 function heroText(key) {
   const { academy, purgeDays } = state.appInfo;
   if (key === 'bank') return ['문제은행', '교재의 문항을 한곳에 모아 찾고, 골라 담아 시험지를 만들어요. 학원 안에서만 함께 써요.'];
-  if (key === 'books') return ['책장', academy ? '내가 만든 책은 내 책장에, 다른 선생님이 학원에 공유한 책은 공유 책장에 있어요. 어느 책이든 학생 오답노트에 쓸 수 있어요.' : '문제집과 답지를 한 번만 올려 두면, 여러 학생 오답노트에서 같이 써요.'];
-  if (key === 'students') return ['학생 명단', academy ? `학원 사람 모두가 함께 쓰는 학생 명단이에요. 누구나 추가·고치기·지우기를 할 수 있고, 지운 학생은 ${purgeDays || 30}일 안에 되살릴 수 있어요.` : '학생을 적어 두면 오답노트를 만들 때 골라 쓸 수 있어요.'];
-  return ['학생 오답노트', '책장에 등록한 책에서 틀린 문제만 골라 시험지처럼 묶어 드려요.'];
+  if (key === 'books') return ['책장', academy ? '내 책장은 내가 등록한 책, 공유 책장은 다른 선생님이 공유한 책입니다. 1. 새 책 등록 → 2. 파일 넣고 분석 → 3. 결과 확인' : '1. 새 책 등록 → 2. 파일 넣고 분석 → 3. 인식 결과 확인'];
+  if (key === 'students') return ['학생 명단', academy ? `학원 공용 명단입니다. 학생 등록·수정·삭제가 가능하며, 삭제 후 ${purgeDays || 30}일 안에 복구할 수 있습니다.` : '학생을 등록하면 오답노트를 만들 때 명단에서 고를 수 있습니다.'];
+  return ['학생 오답노트', '1. 오답노트 만들기 → 2. 문항 고르기 → 3. 시험지 저장'];
 }
 
 export async function showHome({ tab } = {}) {
@@ -270,7 +270,7 @@ export async function showHome({ tab } = {}) {
       { onclick: () => createNote(books, { student }), style: { '--i': 0 } },
       h('div.new-plus', icon('plus')),
       h('div.cn-title', '새 오답노트'),
-      h('div.cn-sub', !books.length ? '먼저 책장에 책을 등록해 주세요' : student ? `${student.name} 학생으로 시작해요` : '학생 이름을 쓰고 책을 고르면 시작'),
+      h('div.cn-sub', !books.length ? '먼저 책장에 책을 등록해 주세요' : student ? `${student.name} 학생의 오답노트 만들기` : '학생과 사용할 책 선택'),
     );
   }
 
@@ -309,8 +309,8 @@ export async function showHome({ tab } = {}) {
       n.canEdit
         ? h(
             'div.card-actions',
-            h('button.btn.btn-ghost.btn-icon', { title: '이름 바꾸기', onclick: (e) => { e.stopPropagation(); renameNote(n); } }, icon('edit')),
-            h('button.btn.btn-ghost.btn-icon', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteNote(n); } }, icon('trash')),
+            h('button.btn.btn-ghost.btn-small', { title: '이름 바꾸기', onclick: (e) => { e.stopPropagation(); renameNote(n); } }, icon('edit'), '이름 변경'),
+            h('button.btn.btn-ghost.btn-small', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteNote(n); } }, icon('trash'), '삭제'),
           )
         : null,
     );
@@ -360,7 +360,7 @@ export async function showHome({ tab } = {}) {
           { onclick: () => editStudent(), style: { '--i': 0 } },
           h('div.new-plus', icon('plus')),
           h('div.cn-title', '새 학생'),
-          h('div.cn-sub', '이름·학교·학년을 적어 두면 오답노트를 만들 때 골라요'),
+          h('div.cn-sub', '이름·학교·학년 등록'),
         ),
         shown.map((st, i) => rosterCard(st, i + 1)),
       ),
@@ -388,8 +388,8 @@ export async function showHome({ tab } = {}) {
       st.canEdit
         ? h(
             'div.card-actions',
-            h('button.btn.btn-ghost.btn-icon', { title: '고치기', onclick: (e) => { e.stopPropagation(); edit(); } }, icon('edit')),
-            h('button.btn.btn-ghost.btn-icon', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteStudent(st); } }, icon('trash')),
+            h('button.btn.btn-ghost.btn-small', { title: '고치기', onclick: (e) => { e.stopPropagation(); edit(); } }, icon('edit'), '정보 수정'),
+            h('button.btn.btn-ghost.btn-small', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteStudent(st); } }, icon('trash'), '삭제'),
           )
         : null,
     );
@@ -464,7 +464,7 @@ export async function showHome({ tab } = {}) {
             { onclick: createBook, style: { '--i': 0 } },
             h('div.new-plus', icon('bookPlus')),
             h('div.cn-title', '새 책 등록'),
-            h('div.cn-sub', '문제집 PDF·사진과 답지를 올려 분석해요'),
+            h('div.cn-sub', '책 이름 등록 후 PDF·사진 넣기'),
           )
         : null,
       list.map((b, i) =>
@@ -509,10 +509,10 @@ export async function showHome({ tab } = {}) {
             : b.canEdit
             ? h(
                 'div.card-actions',
-                h('button.btn.btn-ghost.btn-icon', { title: '이름 바꾸기', onclick: (e) => { e.stopPropagation(); renameBook(b); } }, icon('edit')),
-                h('button.btn.btn-ghost.btn-icon', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteBook(b, notes); } }, icon('trash')),
+                h('button.btn.btn-ghost.btn-small', { title: '이름 바꾸기', onclick: (e) => { e.stopPropagation(); renameBook(b); } }, icon('edit'), '이름 변경'),
+                h('button.btn.btn-ghost.btn-small', { title: '삭제', onclick: (e) => { e.stopPropagation(); deleteBook(b, notes); } }, icon('trash'), '삭제'),
               )
-            : h('div.card-actions', h('button.btn.btn-ghost.btn-icon', { title: '내 책으로 복사', onclick: (e) => { e.stopPropagation(); copyBook(b, e.currentTarget); } }, icon('files'))),
+            : h('div.card-actions', h('button.btn.btn-ghost.btn-small', { title: '내 책으로 복사', onclick: (e) => { e.stopPropagation(); copyBook(b, e.currentTarget); } }, icon('files'), '내 책으로 복사')),
         ),
       ),
     );
@@ -921,7 +921,7 @@ async function deleteStudent(st) {
   if (!(await confirmDialog(msg, { title: '학생 삭제', ok: '삭제', danger: true }))) return;
   try {
     await api.deleteStudent(st.id);
-    if (cloud) toast(`"${st.name}" 학생을 지웠어요.`, { type: 'success', actions: [{ label: '되살리기', onClick: () => restoreStudent(st) }] });
+    if (cloud) toast(`"${st.name}" 학생을 지웠어요.`, { type: 'success', actions: [{ label: '되돌리기', onClick: () => restoreStudent(st) }] });
   } catch (err) {
     toast(`지우지 못했어요: ${errMsg(err)}`, { type: 'error' });
   }

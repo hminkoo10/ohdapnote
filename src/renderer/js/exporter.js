@@ -34,9 +34,9 @@ export const DEFAULT_EXPORT_OPTIONS = {
 
 /** 한글(HWPX)로 내보낼 때 스캔본을 글자·수식으로 옮기는 방법 (디지털 PDF 는 늘 PDF 글자 그대로) */
 export const CONVERT_MODES = {
-  mix: { label: '섞어서', hint: '이 컴퓨터에서 먼저 읽고, 미심쩍은 문항만 AI 에게 다시 맡겨요' },
-  ai: { label: 'AI만', hint: '모든 문항을 AI 로 옮겨요' },
-  ocr: { label: 'OCR만', hint: '이 컴퓨터에서만 읽어요 (AI 를 쓰지 않고, 수식 인식 모델이 있어야 해요)' },
+  mix: { label: '자동 선택', hint: '이 컴퓨터에서 먼저 읽고, 필요한 문항만 정밀 인식합니다' },
+  ai: { label: '정밀 인식만', hint: '모든 문항을 정밀 인식으로 옮깁니다' },
+  ocr: { label: '이 컴퓨터만', hint: '이 컴퓨터에서만 읽습니다 (수식 인식 파일 필요)' },
 };
 
 /** 원본 쪽 단위(pt)를 정규화: 비정상적으로 큰/작은 페이지(스캔 PDF 등)는 A4 폭으로 */

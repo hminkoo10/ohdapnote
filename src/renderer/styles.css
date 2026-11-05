@@ -367,7 +367,7 @@ textarea {
   box-shadow: 0 0 0 4px rgba(240, 122, 69, 0.14);
 }
 .input::placeholder {
-  color: var(--text-4);
+  color: #667382;
 }
 .input-small {
   height: 32px;
@@ -1418,13 +1418,11 @@ main.home {
   color: var(--text-3);
 }
 .card-actions {
-  position: absolute;
-  top: 10px;
-  right: 10px;
+  align-self: flex-end;
   display: flex;
   gap: 2px;
-  opacity: 0;
-  transform: translateY(-4px);
+  opacity: 1;
+  transform: none;
   transition:
     opacity var(--mid),
     transform var(--mid) var(--ease);
@@ -2276,6 +2274,7 @@ main.sheet {
 }
 
 .check-panel {
+  flex-shrink: 0;
   border-radius: var(--r);
   background: var(--warn-soft);
   border: 1px solid var(--warn-line);
@@ -4226,4 +4225,15 @@ main.sheet {
 }
 .topbar-crumb > .subject-badge {
   flex: 0 0 auto;
+}
+
+/* 설명 글만 대비 보완 — 글자 크기·기본 여백·상태 색은 유지 */
+.hero-text p, .cn-sub, .nc-student, .nc-date, .bc-date, .home-foot,
+.settings .muted, .export-hint, .empty-hint, .preview-empty,
+.doc-file.muted, .tabs-row > .muted {
+  color: #667382;
+}
+/* 글자 단추가 좁은 창에서도 서로 겹치지 않게 줄바꿈 */
+.tabs-row, .doc-head, .preview-head, .convert-row .seg {
+  flex-wrap: wrap;
 }

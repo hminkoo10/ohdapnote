@@ -99,7 +99,7 @@ export function aiSettingsCard(s) {
     say('muted', 'Codex CLI 를 찾는 중…');
     const r = await api.aiCodexStatus(codexPath.value.trim());
     const ver = r.version ? ` (${r.version})` : '';
-    if (!r.found) say('warn-text', 'Codex CLI 를 찾지 못했어요 — 설치한 뒤 "다시 확인"을 누르거나, 세부 설정에 codex 경로를 적어 주세요.');
+    if (!r.found) say('warn-text', 'Codex CLI 를 찾지 못했어요 — 설치한 뒤 "다시 확인"을 누르거나, 고급에 codex 경로를 적어 주세요.');
     else if (!r.loggedIn) say('warn-text', `Codex CLI 찾음${ver} · 로그인 안 됨 — 명령 프롬프트에서 codex login 으로 ChatGPT 계정에 로그인해 주세요.`);
     else if (r.method === 'apikey') say('warn-text', `Codex CLI 찾음${ver} · API 키로 로그인되어 있어서 구독이 아니라 API 요금으로 나가요. ChatGPT 계정으로 쓰려면 codex logout 후 codex login`);
     else say('ok-text', `Codex CLI 찾음${ver} · ChatGPT 계정으로 로그인됨`);
@@ -110,45 +110,29 @@ export function aiSettingsCard(s) {
       'div.ai-panel',
       h(
         'p.small.muted',
-        '자동 인식이 애매한 쪽을 골라서 AI에게 맡기고, 한글(HWPX)로 내보낼 때 문항을 글자·수식으로 옮겨요. 기본은 Google Gemini — 무료 Google AI Studio API 키면 됩니다. ',
+        '선택한 쪽을 다시 읽거나 한글 문서의 글자·수식으로 옮깁니다. ',
         link('API 키 받기', 'https://aistudio.google.com/apikey'),
-        ' · 무료 등급에서는 보낸 이미지가 Google 서비스 개선에 쓰일 수 있어요.',
+        ' · 무료 등급의 이미지는 Google 서비스 개선에 쓰일 수 있습니다.',
       ),
-      h('label.field', h('span', 'API 키'), gem.key),
-      gem.models.nodes,
-      rpmField(gem.rpm, '무료 한도를 넘지 않게 천천히 보내요'),
+      h('label.field', h('span', 'Gemini API 키'), gem.key),
     ),
     openai: h(
       'div.ai-panel',
-      h(
-        'p.small.muted',
-        'OpenAI 방식(Chat Completions)으로 받는 곳이면 어디든 돼요 — OpenAI, OpenRouter(https://openrouter.ai/api/v1), LiteLLM·Cloudflare AI Gateway 같은 게이트웨이. 그림을 읽을 수 있는 모델이어야 해요.',
-      ),
-      h(
-        'p.small.muted',
-        h('strong', '인터넷 없이 내 컴퓨터에서만: '),
-        'Ollama(http://localhost:11434/v1) · LM Studio(http://localhost:1234/v1) · llama.cpp 서버(http://localhost:8080/v1)에 그림을 읽는 모델(예: qwen2.5vl)을 띄우고 주소와 모델 이름만 적으세요. API 키는 비워 두면 되고, 문항 그림이 밖으로 나가지 않아요.',
-      ),
-      h('label.field', h('span', '주소'), oa.base),
-      h('label.field', h('span', 'API 키'), oa.key),
-      oa.models.nodes,
-      rpmField(oa.rpm, '서버 한도에 맞춰요 (로컬이면 크게 둬도 돼요)'),
+      h('p.small.muted', '연결할 서비스의 키를 입력하세요. 주소와 모델은 고급에서 정합니다.'),
+      h('label.field', h('span', '서비스 API 키'), oa.key),
     ),
     anthropic: h(
       'div.ai-panel',
       h('p.small.muted', 'Anthropic Claude API 키로 써요. 쓴 만큼 요금이 나가요. ', link('API 키 받기', 'https://console.anthropic.com/settings/keys'), ' · 모델은 바꿀 수 있어요.'),
       h('label.field', h('span', 'API 키'), cl.key),
-      cl.models.nodes,
-      rpmField(cl.rpm, '계정 한도에 맞춰요'),
     ),
     codex: h(
       'div.ai-panel',
       h(
         'p.small.muted',
-        'ChatGPT Plus/Pro 구독의 사용량으로 처리해요 (API 요금 따로 없음). 공식 Codex CLI 를 설치하고 명령 프롬프트에서 codex login 으로 ChatGPT 계정에 로그인해 두세요. 오답노트는 로그인 정보를 읽지 않고, codex 를 임시 폴더에서 읽기 전용으로 실행해 답만 받아요. 한 요청에 수십 초 걸릴 수 있어요.',
+        '이 컴퓨터에 연결한 ChatGPT 구독으로 정밀 인식을 사용합니다. 설치·로그인 안내는 고급에서 확인하세요.',
       ),
       h('div.field-row', cx.status, h('span.spacer'), h('button.btn.btn-small', { onclick: checkCodex }, icon('refresh'), '다시 확인')),
-      h('label.field', h('span', '모델'), cx.model),
     ),
   };
 
@@ -160,26 +144,34 @@ export function aiSettingsCard(s) {
   const concInput = h('input.input.input-tiny', { type: 'number', min: 1, max: 8, value: String(s.aiConcurrency || 3) });
   const batchInput = h('input.input.input-tiny', { type: 'number', min: 1, max: 8, value: String(s.aiBatch || 4) });
   const only = (id, ...nodes) => h('div.ai-only', { dataset: { provider: id } }, nodes);
-  const kindField = h('label.field', h('span', 'AI 종류'), select);
+  const kindField = h('label.field', h('span', '인식 서비스'), select);
   const adv = h(
     'details.set-adv',
-    { open: provider !== 'gemini' },
-    h('summary', icon('gear'), '세부 설정', h('span.small.muted', '다른 AI · 게이트웨이 · 속도')),
+    h('summary', icon('gear'), '고급', h('span.small.muted', '서비스·모델·연결 설정')),
     kindField,
     only(
       'gemini',
+      gem.models.nodes,
+      rpmField(gem.rpm, '무료 한도를 넘지 않게 천천히 보내요'),
       h('label.field', h('span', '게이트웨이 주소'), gemBase),
       h('p.small.muted', '비우면 Google 로 바로 보내요. Cloudflare AI Gateway 같은 게이트웨이를 쓰면 그 주소(/v1beta 앞까지)를 적어요.'),
     ),
-    only('anthropic', h('label.field', h('span', '게이트웨이 주소'), claudeBase), h('p.small.muted', '비우면 https://api.anthropic.com 으로 보내요.')),
-    only('codex', h('label.field', h('span', 'codex 경로'), codexPath)),
+    only('openai',
+      h('p.small.muted', 'OpenAI 방식(Chat Completions)으로 받는 서비스와 연결합니다. OpenAI, OpenRouter, LiteLLM 등의 주소와 그림을 읽을 수 있는 모델을 입력하세요.'),
+      h('p.small.muted', '내 컴퓨터에서만 쓰려면 Ollama(http://localhost:11434/v1) · LM Studio(http://localhost:1234/v1) 등의 서버를 실행하세요. 로컬 서버의 API 키는 비워 둘 수 있습니다.'),
+      h('label.field', h('span', '주소'), oa.base), oa.models.nodes,
+      rpmField(oa.rpm, '서버 한도에 맞춰요 (로컬이면 크게 둬도 돼요)')),
+    only('anthropic', cl.models.nodes, rpmField(cl.rpm, '계정 한도에 맞춰요'), h('label.field', h('span', '게이트웨이 주소'), claudeBase), h('p.small.muted', '비우면 https://api.anthropic.com 으로 보내요.')),
+    only('codex',
+      h('p.small.muted', '공식 Codex CLI 설치 후 명령 프롬프트에서 codex login 으로 로그인하세요. 오답노트는 임시 폴더에서 읽기 전용으로 실행합니다. 한 요청에 수십 초 걸릴 수 있습니다.'),
+      h('label.field', h('span', '모델'), cx.model), h('label.field', h('span', 'codex 경로'), codexPath)),
     h('label.field', h('span', '동시 요청 수'), h('div.field-row', concInput, h('span.small.muted', '요청 여러 개를 같이 보내요 (기본 3)'))),
     h('label.field', h('span', '묶음 크기'), h('div.field-row', batchInput, h('span.small.muted', '한글 내보내기에서 한 요청에 담는 문항 수 (기본 4, 1이면 하나씩)'))),
   );
 
   // 끄면 AI 를 전혀 쓰지 않음 (넣어 둔 키·모델은 그대로 남음)
   const onInput = h('input', { type: 'checkbox', checked: s.aiEnabled !== false });
-  const offNote = h('p.small.muted', 'AI 를 쓰지 않아요. 디지털 PDF 는 PDF 글자 그대로 옮기고, 스캔본 문항은 그림으로 넣어요. 넣어 둔 키·모델은 그대로 남아요.');
+  const offNote = h('p.small.muted', '정밀 인식 꺼짐. 저장한 키·모델은 유지됩니다. 스캔본을 옮기는 방법은 내보내기에서 선택하세요.');
 
   // 학원 AI / 내 키 (학원 공간에서만): 학원 AI 는 원장이 통합 클라우드에서 정하고, 키는 보이지 않음
   const academy = !!state.appInfo?.academy;
@@ -240,7 +232,7 @@ export function aiSettingsCard(s) {
     provider = select.value;
     show();
   });
-  const card = h('section.set-card', h('h4', icon('sparkle'), 'AI 보조 인식 (선택)', h('span.spacer'), h('label.switch.small', onInput, h('span.sw'), 'AI 쓰기')), offNote, sourceRow, Object.values(panels), adv);
+  const card = h('section.set-card', h('h4', icon('scan'), '정밀 인식 (AI 서비스 키)', h('span.spacer'), h('label.switch.small', onInput, h('span.sw'), '사용')), offNote, sourceRow, Object.values(panels), adv);
   show();
 
   return {

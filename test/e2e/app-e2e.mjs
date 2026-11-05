@@ -152,6 +152,11 @@ try {
   console.log('    boxes after draw:', before, '→', nBoxes);
   if (nBoxes !== before + 1) throw new Error('새 상자가 그려지지 않았습니다');
   await win.click('.editor-toolbar .btn >> text=삭제');
+  await win.click('.modal .btn:has-text("취소")');
+  if (await win.locator('.page-overlay .box').count() !== nBoxes) throw new Error('삭제 취소로 문항이 바뀌었습니다');
+  await win.click('.editor-toolbar .btn >> text=삭제');
+  await win.click('.modal .btn-danger');
+  if (await win.locator('.page-overlay .box').count() !== nBoxes - 1) throw new Error('삭제 확인 후 문항이 남았습니다');
   await win.waitForTimeout(200);
   // 원래 번호로 되돌림
   await win.locator('.page-overlay .box', { hasText: /^9$/ }).first().click();
@@ -271,12 +276,12 @@ try {
   await win.click('#settings-btn');
   await win.waitForSelector('.modal .settings');
   await win.fill('.settings input[type="password"]', 'test-key');
-  await win.fill('.settings input[type="number"]', '60');
-  // 세부 설정: 한 요청에 2문항씩 → 4문항이 요청 2개로 (분당 60개 = 1초 간격으로 시작, 응답은 1.5초 → 동시에 2개)
   await win.click('.settings .set-adv summary');
-  await win.fill('.settings .set-adv input[type="number"] >> nth=1', '2');
+  await win.fill('.settings .ai-only[data-provider="gemini"] input[type="number"]', '60');
+  // 세부 설정: 한 요청에 2문항씩 → 4문항이 요청 2개로 (분당 60개 = 1초 간격으로 시작, 응답은 1.5초 → 동시에 2개)
+  await win.fill('.settings .set-adv > .field:has-text("묶음 크기") input', '2');
   await win.click('.modal-footer .btn-primary');
-  await win.waitForSelector('.export-hint:has-text("모두 AI(Gemini)로")', { timeout: 10000 });
+  await win.waitForSelector('.export-hint:has-text("모두 정밀 인식으로")', { timeout: 10000 });
 
   // 뒤에서 옮기는 중에 오답노트를 고치고 다시 내보내면 앞 작업을 멈추고 고친 내용으로 새로 (예전에는 앞 창을 다시 보여 줘서 고친 게 빠졌음)
   step('한글: 뒤에서 옮기는 중에 문항 하나를 빼고 다시 → 고친 내용으로 새로 / [취소] 뒤 다시 → 새로');
@@ -333,12 +338,12 @@ try {
     await clearToasts();
   };
   await setAi(false);
-  await win.waitForSelector('.export-hint:has-text("AI 가 꺼져")', { timeout: 10000 });
+  await win.waitForSelector('.export-hint:has-text("정밀 인식이 꺼져")', { timeout: 10000 });
   const off = await exportHwpx('app-export-ai-off.hwpx');
   if (count(off, 'hp:equation') !== 0 || count(off, 'hp:pic') < 4) throw new Error('AI 를 껐는데 AI 결과가 들어갔습니다');
   if ((await app.evaluate(() => globalThis.gemCalls.length)) !== calls2) throw new Error('AI 를 껐는데 AI 를 불렀습니다');
   await setAi(true);
-  await win.waitForSelector('.export-hint:has-text("모두 AI(Gemini)로")', { timeout: 10000 });
+  await win.waitForSelector('.export-hint:has-text("모두 정밀 인식으로")', { timeout: 10000 });
 
   step('다른 AI: 세부 설정에서 Claude 로 바꿔 해설지 한글 내보내기 / OpenAI 호환 (내 컴퓨터의 가짜 서버로, 메인 프로세스·SDK 그대로)');
   const fakeSeen = [];
@@ -374,13 +379,13 @@ try {
     await win.click('.settings .set-adv summary');
     await win.selectOption('.settings .set-adv select', 'anthropic');
     await win.fill('.settings .ai-panel:not([hidden]) input[type="password"]', 'sk-ant-e2e');
-    await win.fill('.settings .ai-panel:not([hidden]) input[type="number"]', '600');
-    await win.fill('.settings .set-adv .ai-only:not([hidden]) input', fakeUrl);
+    await win.fill('.settings .ai-only[data-provider="anthropic"] input[type="number"]', '600');
+    await win.fill('.settings .set-adv .ai-only:not([hidden]) .field:has-text("게이트웨이 주소") input', fakeUrl);
     await shot('9-settings-claude');
     await win.click('.modal-footer .btn-primary');
     await waitToast('설정을 저장했어요', 10000);
     await clearToasts();
-    await win.waitForSelector('.export-hint:has-text("모두 AI(Claude)로")', { timeout: 10000 });
+    await win.waitForSelector('.export-hint:has-text("모두 정밀 인식으로")', { timeout: 10000 });
     const out = join(OUT, 'app-export-claude.hwpx');
     rmSync(out, { force: true });
     await stubSave(out);
@@ -414,8 +419,8 @@ try {
   await win.click('#settings-btn');
   await win.waitForSelector('.modal .settings');
   // 스캔본 수식 인식: 켜고 끄는 스위치 없이 모델 상태와 [모델 받기]만
-  await win.waitForSelector('.set-card:has-text("스캔본 수식 인식 (AI 없이)"):has-text("아직 받지 않았어요") button:has-text("모델 받기")', { timeout: 5000 });
-  if (await win.$('.set-card:has-text("스캔본 수식 인식") .switch')) throw new Error('수식 인식 카드에 스위치가 있습니다');
+  await win.waitForSelector('.set-card:has-text("이 컴퓨터의 수식 인식"):has-text("아직 받지 않았어요") button:has-text("수식 인식 파일 받기")', { timeout: 5000 });
+  if (await win.$('.set-card:has-text("이 컴퓨터의 수식 인식") .switch')) throw new Error('수식 인식 카드에 스위치가 있습니다');
   await win.waitForTimeout(500);
   await shot('9-settings');
   await win.fill('.settings .set-card >> nth=0 >> input >> nth=0', '기본학원');
@@ -489,8 +494,8 @@ try {
   for (const k of [0, 1, 2]) await chip(k).click();
   await win.click('.seg:has(input[name="format"]) label:has-text("한글")');
   await win.waitForSelector('.convert-row:not([hidden]) input[value="mix"]:checked', { state: 'attached' });
-  await win.click('.seg:has(input[name="convert"]) label:has-text("OCR만")');
-  await win.waitForSelector('.export-hint:has-text("AI 를 쓰지 않고")', { timeout: 10000 });
+  await win.click('.seg:has(input[name="convert"]) label:has-text("이 컴퓨터만")');
+  await win.waitForSelector('.export-hint:has-text("이 컴퓨터에서만")', { timeout: 10000 });
   const scanOcr = await exportHwpx('app-export-scan-ocr.hwpx');
   const mathCalls1 = await app.evaluate(() => globalThis.mathCalls);
   console.log(`    OCR만: 수식 인식 요청 ${mathCalls1.length}개 (수식 ${mathCalls1.map((c) => c.images).join('+')}개), AI 요청 ${(await app.evaluate(() => globalThis.aiCalls)).length}개`);
@@ -506,7 +511,7 @@ try {
 
   // 섞어서: 처음 보는 문항 셋, 그중 하나만 확신도가 낮게 → 그 문항만 AI 로 (AI 결과로 바뀜)
   for (const k of [0, 1, 2, 4, 5, 6]) await chip(k).click();
-  await win.click('.seg:has(input[name="convert"]) label:has-text("섞어서")');
+  await win.click('.seg:has(input[name="convert"]) label:has-text("자동 선택")');
   await app.evaluate(() => {
     globalThis.mathCalls = [];
     globalThis.mathLow = 1;
@@ -537,7 +542,7 @@ try {
       globalThis.aiCalls = [];
     });
     for (const k of [4, 5, 6, 7, 8, 9]) await chip(k).click(); // 처음 보는 문항 7·8·9
-    await win.click('.seg:has(input[name="convert"]) label:has-text("OCR만")');
+    await win.click('.seg:has(input[name="convert"]) label:has-text("이 컴퓨터만")');
     const t0 = Date.now();
     const real = await exportHwpx('app-export-scan-real.hwpx');
     const eqs = [...real.matchAll(/<hp:script>([^<]*)<\/hp:script>/g)].map((m) => m[1]);

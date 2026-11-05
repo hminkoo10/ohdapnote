@@ -137,11 +137,11 @@ function renderBank(root, summaries, books, entries, failed) {
     clear(intro);
     if (!bs.intro) return;
     intro.append(h('section.bank-intro',
-      h('div.bank-heading', h('h3', '처음이라면 이렇게 해 보세요'), h('button.btn.btn-ghost', { title: '안내 닫기', onclick: () => { bs.intro = false; writeLocal('ohdap.bankIntro', true); renderIntro(); } }, icon('x'))),
+      h('div.bank-heading', h('h3', '문제은행 사용 순서'), h('button.btn.btn-ghost', { title: '안내 닫기', onclick: () => { bs.intro = false; writeLocal('ohdap.bankIntro', true); renderIntro(); } }, icon('x'), '안내 닫기')),
       h('div.bank-steps', [
-        ['① 교재를 문제은행에 넣어요', '아래에서 교재를 골라 글자·수식으로 옮겨요.'],
-        ['② 찾아서 담아요', '쪽·번호·글자로 찾고 체크칸을 눌러 담아요.'],
-        ['③ 시험지로 만들어요', '오른쪽 바구니에서 PDF나 한글 문서로 저장해요.'],
+        ['1. 교재 넣기', '아래에서 교재를 골라 글자·수식으로 옮겨요.'],
+        ['2. 문항 찾아 담기', '쪽·번호·글자로 찾고 체크칸을 눌러 담아요.'],
+        ['3. 시험지 저장', '오른쪽 바구니에서 PDF나 한글 문서로 저장해요.'],
       ].map(([title, text]) => h('div', h('strong', title), h('p.small.muted', text))))));
   }
 

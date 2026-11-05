@@ -310,12 +310,12 @@ function render({ enter = false, tabAnim = null, thumbFrom = null } = {}) {
   // 보기만 하는 책은 페이지 검토(고치는 화면) 없이 인식 결과만
   const tabs = h('nav.seg-tabs', h('span.seg-thumb'), tab('result', 'list', '인식 결과', flaggedN ? h('span.seg-count.warn', String(flaggedN)) : null), ro ? null : tab('review', 'scan', '페이지 검토·수정'));
   root.append(
-    topbar(h('div.topbar-crumb', h('button.btn.btn-ghost.btn-round#back-btn', { onclick: () => nav.home({ tab: 'books' }), title: '책장으로' }, icon('back')), h('span.crumb-kind', icon('library'), '책장'), h('span.crumb-sep', '/'), nameInput, subjectEl, creator, share, ro ? null : h('span.save-status', ''))),
+    topbar(h('div.topbar-crumb', h('button.btn.btn-ghost.btn-small#back-btn', { onclick: () => nav.home({ tab: 'books' }), title: '책장으로' }, icon('back'), '책장'), h('span.crumb-kind', icon('library'), '책장'), h('span.crumb-sep', '/'), nameInput, subjectEl, creator, share, ro ? null : h('span.save-status', ''))),
     h(
       `main.sheet${enter ? '.view-enter' : ''}`,
       ro ? readonlyBanner(b) : null,
       h(`section.doc-row${bs.tab === 'review' ? '.compact' : ''}`, ROLES.map((role, i) => docCard(role, i))),
-      h('div.tabs-row', tabs),
+      h('div.tabs-row', tabs, h('span.small.muted', '1. 파일 넣기 → 2. 분석 → 3. 결과 확인·수정')),
       h(`section.tab-body${tabAnim ? `.enter-${tabAnim}` : ''}`, bs.tab === 'result' ? resultView() : reviewView()),
     ),
   );
@@ -399,7 +399,7 @@ function docCard(role, i) {
         'button.drop-zone',
         { onclick: pick, disabled: locked },
         h('span.dz-icon', icon('upload')),
-        h('div.dz-title', '파일을 끌어오거나 눌러서 고르기'),
+        h('div.dz-title', '파일 선택 (끌어 놓기도 가능)'),
         h('div.muted.small', 'PDF 한 개, 또는 사진(JPG·PNG) 여러 장'),
       ),
     );
@@ -495,7 +495,7 @@ function docCard(role, i) {
             missing ? h('button.sum-chip.warn', { onclick: () => showResult(role) }, `빠진 번호 ${missing}`) : null,
             h('span.muted.small', formatDate(doc.analyzedAt)),
           )
-        : h('div.doc-summary.muted', '아직 분석 전이에요.'),
+        : h('div.doc-summary.muted', '파일 준비 완료. 분석 단추를 누르세요.'),
       ro
         ? null
         : h(
@@ -526,7 +526,7 @@ async function importFiles(role, paths, { add = false } = {}) {
   }
   const old = b.docs[role];
   if (add && old) return addMoreFiles(role, paths);
-  if (old?.items?.length && !(await confirmDialog(`${ROLE_NAME[role]} 파일을 바꾸면 기존 분석 결과가 지워집니다. 계속할까요?`, { ok: '바꾸기', danger: true }))) return;
+  if (old && !(await confirmDialog(`${ROLE_NAME[role]} 파일을 바꾸면 기존 파일과 분석 결과가 교체됩니다. 계속할까요?`, { ok: '바꾸기', danger: true }))) return;
   const pdfs = paths.filter((x) => /\.pdf$/i.test(x));
   if (pdfs.length > 1 && !(await confirmDialog(`PDF ${pdfs.length}개를 이름 순서대로 이어 붙여 하나의 ${ROLE_NAME[role]}(으)로 씁니다. 계속할까요?`))) return;
   try {
@@ -678,7 +678,7 @@ async function analyzeRole(role, { only = null } = {}) {
     const sec = Math.round((Date.now() - t0) / 1000);
     const flagged = flaggedPages(doc).length;
     const miss = role === 'problem' ? missingCount(doc) : 0;
-    const msg = `${ROLE_NAME[role]}: ${only ? `새 쪽에서 ${res.items.length}개, 모두 ` : ''}${doc.items.length}개 인식 (${sec}초${res.ocrPages ? `, OCR ${res.ocrPages}쪽` : ''})${flagged ? ` · 확인할 쪽 ${flagged}` : ''}${miss ? ` · 빠진 번호 ${miss}` : ''}`;
+    const msg = `${ROLE_NAME[role]}: ${only ? `새 쪽에서 ${res.items.length}개, 모두 ` : ''}${doc.items.length}개 인식 (${sec}초${res.ocrPages ? `, 스캔 인식 ${res.ocrPages}쪽` : ''})${flagged ? ` · 확인할 쪽 ${flagged}` : ''}${miss ? ` · 빠진 번호 ${miss}` : ''}`;
     if (!job.finish({ message: `${b.name} · ${msg}`, actions: openAction })) toast(msg, { type: 'success', timeout: 6000 });
     if (onBook(b)) bs.role = role;
   } catch (err) {
@@ -801,7 +801,7 @@ function showPreview(role, it) {
       sources: { problem: bs.sources.answer },
       item: it,
       matches: null,
-      emptyText: ['번호 위에 마우스를 올리면', h('br'), '해설을 여기서 볼 수 있어요.'],
+      emptyText: ['번호를 누르면', h('br'), '해설을 여기서 볼 수 있어요.'],
       onShow: ro ? null : (_r, page, id) => switchTab('review', { role: 'answer', page, itemId: id }),
     });
     return;
@@ -835,10 +835,10 @@ function checkPanel(role, doc, pages, missing) {
     h('span.spacer'),
     ro ? null : h('button.btn.btn-small', { onclick: () => dismissPages(role, pages), title: '모두 이대로 괜찮다고 표시' }, icon('checkAll'), '모두 문제없음'),
   );
-  const gemBtn = h('button.btn.btn-small', { disabled: true, hidden: aiOff(), onclick: () => sendToGemini(role, [...picked]) }, icon('sparkle'), 'AI로 보내기');
+  const gemBtn = h('button.btn.btn-small', { disabled: true, hidden: aiOff(), onclick: () => sendToGemini(role, [...picked]) }, icon('scan'), '정밀 인식');
   const updateGem = () => {
     gemBtn.disabled = !picked.size;
-    gemBtn.lastChild.textContent = picked.size ? `고른 ${picked.size}쪽 AI로` : 'AI로 보내기';
+    gemBtn.lastChild.textContent = picked.size ? `고른 ${picked.size}쪽 정밀 인식` : '정밀 인식';
   };
   const list = h(
     'div.cp-list',
@@ -849,7 +849,7 @@ function checkPanel(role, doc, pages, missing) {
       return h(
         'div.cp-row',
         { style: { '--i': Math.min(i, 12) }, dataset: { page: String(p) } },
-        ro ? null : h('label.cp-pick', { title: 'AI로 보낼 쪽 고르기', hidden: aiOff() }, h('input', { type: 'checkbox', onchange: (e) => { if (e.target.checked) picked.add(p); else picked.delete(p); updateGem(); } })),
+        ro ? null : h('label.cp-pick', { title: '정밀 인식할 쪽 고르기', hidden: aiOff() }, h('input', { type: 'checkbox', onchange: (e) => { if (e.target.checked) picked.add(p); else picked.delete(p); updateGem(); } })),
         h('button.cp-page', { onclick: () => switchTab('review', { role, page: p }) }, pageLabel(doc, p)),
         h('span.cp-why', [...new Set(flags)].join(' · ')),
         ro
@@ -857,15 +857,15 @@ function checkPanel(role, doc, pages, missing) {
           : h(
               'div.cp-actions',
               h('button.btn.btn-small.btn-ghost', { onclick: () => switchTab('review', { role, page: p }), title: '페이지 검토에서 직접 보고 고치기' }, icon('eye'), '검토'),
-              h('button.btn.btn-small.btn-ghost', { onclick: () => deepPage(role, p), title: '이 쪽만 더 꼼꼼하게(고해상도 OCR + 앞뒤 번호에 맞춰) 다시 찾기' }, icon('search'), '꼼꼼히 다시 찾기'),
-              h('button.btn.btn-small.btn-ghost', { onclick: () => sendToGemini(role, [p]), title: 'AI로 이 쪽 인식', hidden: aiOff() }, icon('sparkle'), 'AI'),
+              h('button.btn.btn-small.btn-ghost', { onclick: () => deepPage(role, p), title: '이 쪽을 크게 읽고 앞뒤 번호에 맞춰 다시 찾기' }, icon('search'), '꼼꼼히 다시 찾기'),
+              h('button.btn.btn-small.btn-ghost', { onclick: () => sendToGemini(role, [p]), title: '이 쪽 정밀 인식', hidden: aiOff() }, icon('scan'), '정밀 인식'),
               h('button.btn.btn-small.btn-ok', { onclick: () => dismissPages(role, [p]), title: '이대로 괜찮아요' }, icon('check'), '문제없음'),
             ),
       );
     }),
   );
   panel.append(head, list);
-  if (!ro) panel.append(h('div.cp-foot', h('span.small.muted', geminiReady() ? '애매한 쪽은 골라서 AI에게 맡길 수 있어요.' : aiOff() ? 'AI 는 꺼져 있어요 (설정에서 켤 수 있어요).' : '설정에서 AI 키를 넣으면 애매한 쪽을 AI에게 맡길 수 있어요.'), h('span.spacer'), gemBtn));
+  if (!ro) panel.append(h('div.cp-foot', h('span.small.muted', geminiReady() ? '다시 읽을 쪽을 고른 뒤 [정밀 인식]을 누르세요.' : aiOff() ? '정밀 인식은 설정에서 켤 수 있습니다.' : '정밀 인식을 쓰려면 설정에서 서비스 키를 입력하세요.'), h('span.spacer'), gemBtn));
   return panel;
 }
 
@@ -920,11 +920,11 @@ async function deepPage(role, page) {
       if (!keep) return;
     }
     if (sameAsBefore) {
-      toast(`더 찾은 번호가 없어요 (${items.length}개 그대로). 페이지 검토에서 점선 후보를 눌러 추가하거나, AI로 보내 보세요.`, {
+      toast(`더 찾은 번호가 없어요 (${items.length}개 그대로). 페이지 검토에서 점선 후보를 눌러 추가하거나 정밀 인식을 사용하세요.`, {
         timeout: 9000,
         actions: [
           { label: '페이지 검토', onClick: () => switchTab('review', { role, page }) },
-          ...(geminiReady() ? [{ label: 'AI로', onClick: () => sendToGemini(role, [page]) }] : []),
+          ...(geminiReady() ? [{ label: '정밀 인식', onClick: () => sendToGemini(role, [page]) }] : []),
         ],
       });
       doc.pageInfo[page] = { ...(doc.pageInfo[page] || {}), ...meta };

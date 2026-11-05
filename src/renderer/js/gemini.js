@@ -180,7 +180,7 @@ async function generate(req, { provider = 'gemini', models, model, rpm, concurre
           onStatus?.(`${modelName(m)} 한도 초과 → ${modelName(ordered[mi + 1])} 로 바꿔서 시도`);
           break;
         }
-        if (daily || attempt > 2) throw new Error(`${P.label} 사용 한도를 초과했습니다. (${lastError}) 설정에서 2순위 모델을 정하거나 잠시 뒤에 다시 해 주세요.`);
+        if (daily || attempt > 2) throw new Error(`잠시 뒤 다시 시도하거나 설정의 고급에서 2순위 모델을 정하세요. 정밀 인식 사용 한도 초과 (${lastError})`);
         const delay = Math.min(65000, retryDelayMs(res) || 15000 * attempt);
         onStatus?.(`한도 초과 — ${Math.round(delay / 1000)}초 기다렸다가 다시 시도`);
         await sleep(delay, signal);
@@ -193,7 +193,7 @@ async function generate(req, { provider = 'gemini', models, model, rpm, concurre
           onStatus?.(`${modelName(m)} 사용 불가 → ${modelName(ordered[mi + 1])} 로 시도`);
           break;
         }
-        throw new Error(`${P.label} 오류: ${lastError}`);
+        throw new Error(`설정을 확인한 뒤 다시 시도하세요. 정밀 인식 오류: ${lastError}`);
       }
       const retriable = res.status >= 500 || res.status === 0;
       if (retriable && attempt <= 2) {
@@ -202,10 +202,10 @@ async function generate(req, { provider = 'gemini', models, model, rpm, concurre
       }
       lastError = `${modelName(m)}: ${res.error || res.status}`;
       if (!isLast) break;
-      throw new Error(`${P.label} 오류: ${lastError}`);
+      throw new Error(`설정을 확인한 뒤 다시 시도하세요. 정밀 인식 오류: ${lastError}`);
     }
   }
-  throw new Error(`${P.label} 오류: ${lastError || '알 수 없음'}`);
+  throw new Error(`설정을 확인한 뒤 다시 시도하세요. 정밀 인식 오류: ${lastError || '알 수 없음'}`);
 }
 
 /** AI 가 준 글자에서 JSON 꺼내기. 내용이 없으면 null */
@@ -227,7 +227,7 @@ export function parseJsonText(text) {
         /* 아래에서 */
       }
     }
-    throw new Error('AI 응답을 해석하지 못했습니다.');
+    throw new Error('다시 인식해 주세요. 정밀 인식 결과를 읽지 못했습니다.');
   }
 }
 

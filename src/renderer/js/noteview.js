@@ -176,7 +176,7 @@ function render({ enter = false } = {}) {
     topbar(
       h(
         'div.topbar-crumb',
-        h('button.btn.btn-ghost.btn-round#back-btn', { onclick: () => nav.home({ tab: 'notes' }), title: '오답노트 목록으로' }, icon('back')),
+        h('button.btn.btn-ghost.btn-small#back-btn', { onclick: () => nav.home({ tab: 'notes' }), title: '오답노트 목록으로' }, icon('back'), '목록'),
         h('span.crumb-kind', icon('notebook'), '오답노트'),
         h('span.crumb-sep', '/'),
         titleInput,
@@ -280,7 +280,7 @@ function bookBar() {
         h('span.bt-spine'),
         h('span.bt-name', b ? b.name : '볼 수 없는 교재'),
         h('span.bt-count', cnt ? String(cnt) : ''),
-        ns.readonly ? null : h('span.bt-x', { title: '이 오답노트에서 책 빼기', onclick: (e) => { e.stopPropagation(); removeBook(bid); } }, icon('x')),
+        ns.readonly ? null : h('span.bt-x', { title: '이 오답노트에서 책 빼기', 'aria-label': '이 오답노트에서 책 빼기', onclick: (e) => { e.stopPropagation(); removeBook(bid); } }, icon('x')),
       ),
     );
   });
@@ -347,7 +347,7 @@ async function removeBook(bid) {
   const n = ns.note;
   const b = ns.books.get(bid);
   const cnt = noteSelection(n, bid).length;
-  if (cnt && !(await confirmDialog(`"${b?.name || '볼 수 없는 교재'}"에서 고른 ${cnt}문항이 이 오답노트에서 빠져요. 계속할까요?`, { ok: '빼기', danger: true }))) return;
+  if (!(await confirmDialog(`"${b?.name || '볼 수 없는 교재'}"에서 고른 ${cnt}문항과 책을 이 오답노트에서 뺄까요? 책장의 원본은 남습니다.`, { ok: '빼기', danger: true }))) return;
   n.bookIds = n.bookIds.filter((x) => x !== bid);
   delete n.selected[bid];
   if (ns.active === bid) ns.active = n.bookIds[0] || null;
@@ -701,12 +701,12 @@ function exportPanel() {
     h('button.export-btn', { onclick: () => doExport(mode), dataset: { mode }, disabled, title: tip }, h('span.xb-icon', icon('download')), h('span.xb-text', h('b', title), sub ? h('small', sub) : null));
   return h(
     'div.export-panel',
-    h('div.export-head', h('h3', '시험지로 내보내기'), h('div.sel-count')),
+    h('div.export-head', h('h3', '3. 시험지 저장'), h('div.sel-count')),
     h('div.export-summary'),
     h(
       'details.exam-box',
       { open: true },
-      h('summary', icon('school'), '시험지 머리', h('span.small.muted', '이 시험지에 쓸 이름을 정해요')),
+      h('summary', icon('school'), '시험지 머리', h('span.small.muted', '제목·학생·학원·선생님 확인')),
       h('div.exam-mock'),
       h(
         'div.exam-fields',
@@ -783,12 +783,12 @@ function setFormatHint(el) {
   el.hidden = o?.format !== 'hwpx';
   const mode = CONVERT_MODES[o?.convert] ? o.convert : 'mix';
   const ai = geminiReady();
-  const noAi = aiOff() ? '설정에서 AI 가 꺼져 있어' : 'AI 를 설정하지 않아';
+  const noAi = aiOff() ? '설정에서 정밀 인식이 꺼져 있어' : '정밀 인식을 설정하지 않아';
   const noModel = ocrInstalled === false;
   const now =
     mode === 'ai'
       ? ai
-        ? ` (${aiLabel()})`
+        ? ''
         : ` — 지금은 ${noAi} 그림으로 들어가요`
       : mode === 'ocr'
         ? noModel
@@ -797,7 +797,7 @@ function setFormatHint(el) {
         : noModel && !ai
           ? ` — 지금은 수식 인식 모델이 없고 ${noAi} 그림으로 들어가요`
           : noModel
-            ? ` — 수식 인식 모델이 없어 지금은 모두 AI(${aiLabel()})로`
+            ? ` — 수식 인식 모델이 없어 지금은 모두 정밀 인식으로`
             : !ai
               ? ` — ${noAi} 지금은 이 컴퓨터에서만`
               : '';
@@ -872,7 +872,7 @@ function renderExportSummary() {
   const closedCount = n.bookIds.filter((bid) => subjectClosed(ns.books.get(bid))).reduce((sum, bid) => sum + noteSelection(n, bid).length, 0);
   if (closedCount) el.append(h('p.warn-text.small', icon('warn'), `학원 계약에 없는 과목 교재에서 고른 ${closedCount}문항은 빼고 내보내요`));
   if (!entries.length) {
-    el.append(h('p.empty-hint', '왼쪽 표에서 틀린 번호를 골라 주세요.'));
+    el.append(h('p.empty-hint', '1. 왼쪽에서 문항 선택 → 2. 파일·배치 선택 → 3. 아래 저장 단추 선택'));
     return;
   }
   const noAns = entries.filter((e) => e.bookObj.docs.answer?.items?.length && !e.answer && !answerContent(e.bookObj.$answers?.items[e.problem.id])).length;
@@ -902,12 +902,19 @@ function renderExportSummary() {
           ns.readonly ? null : h(
             'button.sel-x',
             {
-              title: '빼기',
+              title: '선택에서 빼기', 'aria-label': '선택에서 빼기',
               onclick: (ev) => {
                 ev.stopPropagation();
                 const n = ns.note;
                 setNoteSelection(n, e.bookId, noteSelection(n, e.bookId).filter((x) => x !== e.problem.id));
                 markDirty();
+                toast('선택에서 뺐습니다.', { actions: [{ label: '되돌리기', onClick: () => {
+                  if (ns.note !== n || ns.readonly || !n.bookIds.includes(e.bookId) || !ns.books.get(e.bookId)?.docs.problem?.items.some((it) => it.id === e.problem.id)) return;
+                  const ids = noteSelection(n, e.bookId);
+                  if (!ids.includes(e.problem.id)) setNoteSelection(n, e.bookId, [...ids, e.problem.id]);
+                  markDirty();
+                  render();
+                } }] });
                 document.querySelector(`.qtable .chip[data-id="${CSS.escape(e.problem.id)}"]`)?.classList.remove('on');
                 const chipEl = ev.currentTarget.closest('.sel-chip');
                 animateOut(chipEl, 'leave-pop', 180).then(() => {

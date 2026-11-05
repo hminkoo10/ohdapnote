@@ -59,6 +59,7 @@ try {
   await win.waitForTimeout(700);
   await win.locator('.page-overlay .box', { hasText: /^116$/ }).first().click();
   await win.keyboard.press('Delete');
+  await win.click('.modal .btn-danger');
   await win.waitForTimeout(300);
   await win.click('.tabs-row .seg-tab[data-tab="result"]');
   await win.waitForSelector('.check-panel .cp-row', { timeout: 5000 });
@@ -75,8 +76,9 @@ try {
   await win.waitForSelector('.modal .settings');
   const panel = win.locator('.settings .ai-panel:not([hidden])');
   await panel.locator('input[type="password"]').fill('test-key');
-  await panel.locator('input[list="ai-models-gemini"]').nth(0).fill('model-a');
-  await panel.locator('input[list="ai-models-gemini"]').nth(1).fill('model-b');
+  await win.click('.settings .set-adv summary');
+  await win.locator('.settings .set-adv input[list="ai-models-gemini"]').nth(0).fill('model-a');
+  await win.locator('.settings .set-adv input[list="ai-models-gemini"]').nth(1).fill('model-b');
   await win.click('.modal-footer .btn-primary');
   await win.waitForTimeout(300);
 
@@ -132,7 +134,7 @@ try {
   await win.click('.tabs-row .seg-tab[data-tab="review"]');
   await win.waitForSelector('.editor-toolbar');
   await win.waitForTimeout(500);
-  await win.click('.editor-toolbar .btn:has-text("AI")');
+  await win.click('.editor-toolbar .btn:has-text("정밀 인식")');
   await win.waitForSelector('.gem-row[data-state="run"]', { timeout: 10000 });
   // 분당 요청 수 제한 때문에 잠깐 기다렸다가 실제 요청이 나간 뒤에 취소
   for (let i = 0; i < 100 && !(await app.evaluate(() => globalThis.__started)); i++) await win.waitForTimeout(200);
@@ -140,7 +142,7 @@ try {
   const t0 = Date.now();
   await win.click('.gem-modal .modal-footer .btn');
   await win.waitForSelector('.gem-modal', { state: 'detached', timeout: 3000 });
-  await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('멈췄어요')), null, { timeout: 3000 });
+  await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('멈췄습니다')), null, { timeout: 3000 });
   const ms = Date.now() - t0;
   const aborted = await app.evaluate(() => globalThis.__aborted);
   console.log(`    취소까지 ${ms}ms, 메인에서 요청 끊음: ${aborted}회`);
@@ -151,6 +153,7 @@ try {
   await win.waitForTimeout(600);
   await win.locator('.page-overlay .box', { hasText: /^101$/ }).first().click();
   await win.keyboard.press('Delete');
+  await win.click('.modal .btn-danger');
   await win.waitForTimeout(300);
   await win.click('.tabs-row .seg-tab[data-tab="result"]');
   await win.waitForSelector('.cp-row', { timeout: 5000 });
