@@ -1,10 +1,12 @@
 import { h, clear } from './ui.js';
 import { moveLow } from './lowconf.js';
 import { eqToText } from './hwpeqview.js';
+import { REVIEW_HELP, reviewSource } from './review-ui.js';
 
 // 사람의 해설에는 저장하지 않는 편집 중 표시. 글을 감싸지 않아 입력 위치를 건드리지 않는다.
-export function answerReview(editor, readDocument, changed) {
+export function answerReview(editor, readDocument, changed, getStack) {
   const controls = h('div.answer-review');
+  const source = reviewSource(getStack, () => editor.clientWidth || 540);
   let selected = 0;
   let entries = [];
   const original = (node) => {
@@ -34,7 +36,8 @@ export function answerReview(editor, readDocument, changed) {
       try { low = node.dataset.eq !== undefined ? JSON.parse(node.dataset.reviewLow || '[]') : original(node).reviewLow || []; } catch { low = []; }
       const parts = logicalParts(node);
       for (const [index, mark] of low.entries()) {
-        entries.push({ node, index, mark });
+        const entry = { node, index, mark };
+        entries.push(entry);
         if (node.dataset.eq !== undefined) { node.classList.add('answer-review-math'); continue; }
         const covered = parts.filter((p) => p.end > mark.start && p.start < mark.end);
         if (!covered.length) continue;
@@ -46,25 +49,44 @@ export function answerReview(editor, readDocument, changed) {
         if (last.math) range.setEndAfter(last.node);
         else range.setEnd(last.node, Math.min(last.node.length, mark.end - last.start));
         ranges.push(range);
+        entry.range = range;
         for (const p of covered) if (p.math) p.node.classList.add('answer-review-math');
       }
     }
     CSS.highlights.set('answer-review', new Highlight(...ranges));
     selected = Math.min(selected, Math.max(0, entries.length - 1));
     clear(controls);
+    source.element.hidden = !entries.length;
     if (!entries.length) return;
-    controls.append(h('p.review-help', '노란 밑줄과 테두리는 원본과 비교해 주세요. 고치거나 [맞아요]를 누르면 표시가 사라져요.'),
-      h('div.review-toolbar', h('strong', `확인할 곳 ${entries.length}개`),
-        h('button.btn', { onclick: () => { selected = (selected + 1) % entries.length; update(); entries[selected].node.scrollIntoView({ block: 'nearest' }); } }, '다음 확인할 곳'),
+    controls.append(h('p.small.muted.review-help', REVIEW_HELP),
+      h('strong.small', `확인이 필요한 곳 ${entries.length}군데`),
+      h('div.review-toolbar',
+        h('button.btn.btn-small', { onclick: () => select(selected + 1), title: 'F8' }, '다음 확인할 곳'),
+        h('button.btn.btn-small', { onclick: () => select(selected - 1), title: 'Shift+F8' }, '이전'),
         h('span', `${selected + 1}/${entries.length}`),
-        h('button.btn.btn-primary', { onclick: () => {
+        h('button.btn.btn-small', { onclick: () => source.show(entries[selected].mark) }, '원본 보기'),
+        h('button.btn.btn-small.btn-primary', { onclick: () => {
           const { node, index } = entries[selected];
           if (node.dataset.eq !== undefined) node.dataset.reviewLow = JSON.stringify(JSON.parse(node.dataset.reviewLow).filter((_, i) => i !== index));
           else { const b = original(node); b.reviewLow = b.reviewLow.filter((_, i) => i !== index); node.dataset.original = JSON.stringify(b); }
           changed(); update();
-        } }, '맞아요')));
+        } }, '맞아요')),
+      h('div.review-mark-buttons', entries.map(({ node, mark }, index) => h('button.btn.btn-small.review-mark-button', { onclick: () => select(index) }, `확인: ${node.dataset.eq !== undefined ? '수식' : node.textContent.slice(mark.start, mark.end).slice(0, 22) || '수식'}`))));
+    source.show(entries[selected].mark);
   };
-  return { element: controls, update,
+  const select = (index) => {
+    if (!entries.length) return;
+    selected = (index + entries.length) % entries.length;
+    update();
+    entries[selected].node.scrollIntoView({ block: 'nearest' });
+  };
+  const point = (event) => {
+    const index = entries.findIndex(({ node, range }) => [...(range ? range.getClientRects() : node.getClientRects())].some((r) => event.clientX >= r.left && event.clientX <= r.right && event.clientY >= r.top && event.clientY <= r.bottom));
+    if (index >= 0) select(index);
+  };
+  editor.addEventListener('click', point);
+  return { element: controls, reference: source.element, update,
+    keydown(event) { if (event.key !== 'F8' || !entries.length) return false; select(selected + (event.shiftKey ? -1 : 1)); return true; },
     sync() {
       for (const node of editor.querySelectorAll('[data-original]')) {
         const before = original(node);
@@ -76,7 +98,7 @@ export function answerReview(editor, readDocument, changed) {
         node.dataset.original = JSON.stringify(after);
       }
     },
-    close() { CSS.highlights.delete('answer-review'); },
+    close() { source.close(); editor.removeEventListener('click', point); CSS.highlights.delete('answer-review'); },
   };
 }
 

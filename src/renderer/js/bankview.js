@@ -41,7 +41,7 @@ const open = (e) => e.open && subjectOpen(e.bookObj, state.appInfo);
 const fail = (err) => toast(err.message || String(err), { type: 'error', timeout: 10000 });
 const attempt = (fn) => Promise.resolve().then(fn).catch(fail);
 const changed = () => { if (active?.isConnected) refresh(); };
-const pathName = { edit: '고침', ai: 'AI', ocr: 'OCR', pdf: 'PDF' };
+const pathName = { edit: '고침', ai: '정밀 인식', ocr: '글자 인식', pdf: 'PDF' };
 // 검색용 열쇠만 만들 때는 파일 이름만 필요. 실제 그림·옮기기·내보내기의 src는 항상 getSources의 원본
 const lookupBlock = (e, item = e.item) => ({ kind: 'problem', role: 'problem', item, stem: null, src: { files: e.bookObj.docs.problem.files } });
 const result = (e, item = e.item) => bestTranscript(e.bookId, lookupBlock(e, item));
@@ -160,7 +160,7 @@ function renderBank(root, summaries, books, entries, failed) {
         h('div.bank-heading', h('strong', s.name), h('span.tag.soft', subjectName(s.subject))),
         h('div.progress', h('div.progress-bar', { style: { width: `${job?.total ? job.done * 100 / job.total : total ? n * 100 / total : 0}%` } })),
         h('p.small.muted', job ? job.label || '파일을 준비하는 중…' : `옮긴 문항 ${n} / 전체 ${total}`));
-      if (low) card.append(h('span.bank-review-count', `확인할 곳 ${low}개`));
+      if (low) card.append(h('span.small.bank-review-count', `확인이 필요한 곳 ${low}군데`));
       if (locked) card.append(h('p.small.muted', '학원 계약에 없는 과목 · 보기만'));
       else if (job) card.append(h('button.btn', { onclick: () => job.open() }, '넣는 중 · 진행 보기'));
       else if (!s.problemAnalyzed && !total) card.append(h('p.small.muted', '책장에서 먼저 분석해 주세요'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
@@ -184,7 +184,7 @@ function renderBank(root, summaries, books, entries, failed) {
     ...(subjects.length > 1 ? [selectFilter('subject', '과목', [['', '모든 과목'], ...subjects.map((s) => [s.code, s.name])])] : []),
     selectFilter('bookId', '책', [['', '모든 교재'], ...summaries.map((b) => [b.id, b.name])]),
     field('page', '쪽', '예: 12 또는 12-15'), field('number', '번호', '예: 3 또는 3-7'), field('text', '글자로 찾기', '예: 이차함수, 빈칸'),
-    h('label.bank-check', h('input', { type: 'checkbox', checked: bs.filters.review, dataset: { bankFocus: 'review' }, onchange: (ev) => { bs.filters.review = ev.target.checked; updateFilter.flush(); } }), '확인할 곳 있는 문항만'),
+    h('label.bank-check', h('input', { type: 'checkbox', checked: bs.filters.review, dataset: { bankFocus: 'review' }, onchange: (ev) => { bs.filters.review = ev.target.checked; updateFilter.flush(); } }), '확인이 필요한 문항만'),
     h('button.btn', { onclick: () => { Object.keys(bs.filters).forEach((k) => { bs.filters[k] = k === 'review' ? false : ''; }); filters.querySelectorAll('input, select').forEach((el) => { if (el.type === 'checkbox') el.checked = false; else el.value = ''; }); updateFilter.flush(); } }, '지우기'));
 
   function renderList() {
@@ -228,7 +228,7 @@ function renderBank(root, summaries, books, entries, failed) {
       h('label.bank-check', { title: open(e) ? '시험지 바구니에 담기' : '학원 계약에 없는 과목 · 보기만', onclick: (ev) => ev.stopPropagation() },
         h('input', { type: 'checkbox', checked: selected(e), disabled: !open(e), 'aria-label': `${itemName(e.item)} 담기`, onchange: (ev) => pick(e, ev.target.checked) })),
       h('div.bank-row-text', h('strong', `${pageLabel(e.bookObj.docs.problem, e.item.page)} · ${itemName(e.item)}`),
-        reviewCount(e) ? h('span.bank-review-count', `확인할 곳 ${reviewCount(e)}개`) : null,
+        reviewCount(e) ? h('span.small.bank-review-count', `확인이 필요한 곳 ${reviewCount(e)}군데`) : null,
         h(`span.bank-snippet${r ? '' : '.muted'}`, blocksToText(r?.entry.blocks) || '아직 글자로 옮기지 않았어요')),
       r ? h('span.tag.soft.bank-path', pathName[r.path]) : null);
       (e.stemKey ? setBox : bookGroup).append(row);
@@ -314,7 +314,7 @@ async function editTranscript(e, block) {
   const fields = h('div.bank-edit-fields');
   const release = holdSource(e.bookObj, block.role);
   let stack;
-  const review = reviewPanel(blocks, () => (stack ||= renderStack(blockSegs(block), TRANSCRIBE_WIDTH)));
+  const review = reviewPanel(blocks, () => (stack ||= renderStack(blockSegs(block), TRANSCRIBE_WIDTH)), () => draw());
   const draw = () => {
     review.resetFields();
     clear(fields);
@@ -350,7 +350,7 @@ async function editTranscript(e, block) {
   await modal({ title: `${itemName(block.item)} · 글 고치기`, width: 980, className: 'review-modal',
     onKeyDown: review.keydown,
     onClose: () => { review.close(); release(); stack = null; },
-    body: h('div.bank-editor', h('p.review-help', REVIEW_HELP), review.toolbar,
+    body: h('div.bank-editor', h('p.small.muted.review-help', REVIEW_HELP), review.toolbar,
       h('div.review-layout', h('section', fields,
         h('div.bank-heading', h('button.btn', { onclick: () => { blocks.push({ type: 'para', text: '' }); draw(); } }, '글 칸 더하기'), h('button.btn', { onclick: () => { blocks.push({ type: 'math', latex: '' }); draw(); } }, '수식 칸 더하기'))), review.aside),
       h('p.small.muted', '고친 글은 한글(HWPX) 내보내기에 쓰여요. PDF는 원본 그림 그대로예요.')),
@@ -451,7 +451,7 @@ async function buildBankExport(mode, all) {
       const entry = entries.find((e) => e.src?.[block.role] === block.src);
       return sum + (block.answerBlocks || !entry || !block.item ? 0 : countLow(bestTranscript(entry.bookId, block)?.entry.blocks));
     }, 0);
-    const reviewNote = () => remaining ? ` 확인할 곳 ${remaining}개가 남아 있어요. 원본과 비교해 주세요.` : '';
+    const reviewNote = () => remaining ? ` 확인이 필요한 곳 ${remaining}군데가 남아 있습니다. 원본과 비교해 주세요.` : '';
     const sig = JSON.stringify({ mode, opts, info, blocks: blocks.map((b) => [b.item?.id, b.item?.rects, b.num, b.source, b.answerBlocks]) });
     const modeName = { problems: '문제지', answers: '해설지', 'both-inline': '문제+해설', 'both-end': '문제+해설(해설 뒤)' }[mode];
     const d = new Date();

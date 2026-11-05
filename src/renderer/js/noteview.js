@@ -998,7 +998,7 @@ async function buildExport(mode) {
       const bytes = await exportHwpx(blocks, entries, opts, { ...info, subtitle: sub }, { key: jobKey, sig });
       closeToast();
       if (bytes.stats?.picture && bytes.stats?.text) note = ` (그림으로 넣은 문항 ${bytes.stats.picture}개)`;
-      if (bytes.reviewCount) note += ` 확인할 곳 ${bytes.reviewCount}개가 남아 있어요. 원본과 비교해 주세요.`;
+      if (bytes.reviewCount) note += ` 확인이 필요한 곳 ${bytes.reviewCount}군데가 남아 있습니다. 원본과 비교해 주세요.`;
       const save = () => api.saveFile({ defaultName: `${fname}.hwpx`, data: bytes, filters: [{ name: '한글 문서', extensions: ['hwpx'] }], title: '한글 문서 저장' });
       // 옮기기를 뒤로 보내 둔 채 끝났으면 저장 창을 바로 띄우지 않고 알림의 [저장하기]로 (다른 화면을 보고 있을 수 있음)
       if (bytes.job?.finish({ message: `${info.student ? `${info.student} · ` : ''}${modeName} 한글 문서가 준비됐어요${note}`, actions: [{ label: '저장하기', onClick: async () => saved(await save()) }] })) {

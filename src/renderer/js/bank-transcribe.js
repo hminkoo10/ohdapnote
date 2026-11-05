@@ -21,9 +21,9 @@ export async function putBank(book, { item = null, onChange = () => {} } = {}) {
     const ok = await modal({
       title: '문제은행에 넣기',
       body: h('div.bank-start',
-        h('p', `이 교재의 문항 ${count}개를 글자·수식으로 옮겨 문제은행에 넣어요. 이 컴퓨터에서 글자 인식(OCR)으로 옮겨서 인터넷·AI 를 쓰지 않아요. 한 문항에 몇 초쯤 걸리고, 옮기는 동안 다른 일을 해도 돼요.`),
-        h('label.bank-ai', { title: geminiReady() ? '' : '설정에서 AI를 켜고 API 키·모델을 먼저 정해 주세요.' }, ai, h('span', 'AI 도 쓰기 — 글자 인식 결과가 미덥지 않은 문항만 AI 에게 보내요')),
-        !geminiReady() ? h('p.small.muted', 'AI를 쓰려면 설정에서 AI를 먼저 준비해 주세요. 기본 옮기기는 AI 없이 할 수 있어요.') : null,
+        h('p', `이 교재의 문항 ${count}개를 글자·수식으로 옮겨 문제은행에 넣습니다. 기본 글자 인식은 이 컴퓨터에서 처리합니다. 한 문항에 몇 초 정도 걸리며, 옮기는 동안 다른 작업을 할 수 있습니다.`),
+        h('label.bank-ai', { title: geminiReady() ? '' : '설정에서 API 키·모델을 먼저 정해 주세요.' }, ai, h('span', '정밀 인식도 사용 — 확인이 필요한 문항만 외부 서비스로 보냅니다')),
+        !geminiReady() ? h('p.small.muted', '정밀 인식은 설정에서 준비할 수 있습니다. 기본 글자 인식은 별도 설정 없이 사용할 수 있습니다.') : null,
         book.$canEdit === false ? h('p.readonly-banner', `${book.createdBy?.name || '다른'} 선생님이 만든 책이라 옮긴 글은 나에게만 저장돼요. 만든 선생님이 넣으면 학원 모두가 함께 써요.`) : null),
       buttons: [{ label: '취소', value: false }, { label: '넣기 시작', value: true, primary: true }],
     });
@@ -88,7 +88,7 @@ async function runBank(book, { item, useAi, onChange }) {
               warned = true;
               const next = await modal({ title: '수식 인식 모델이 필요해요',
                 body: h('p', '스캔본이나 일반 글꼴 수학 PDF는 설정에서 수식 인식 모델을 먼저 받아 주세요. 이미 옮긴 글은 남아요. 글자를 안전하게 읽을 수 있는 PDF는 모델 없이도 옮길 수 있어요.'),
-                buttons: [{ label: '설정 열기', value: 'settings' }, { label: useAi ? 'PDF·AI로 계속' : 'PDF만 계속', value: 'continue', primary: true }] });
+                buttons: [{ label: '설정 열기', value: 'settings' }, { label: useAi ? 'PDF·정밀 인식으로 계속' : 'PDF만 계속', value: 'continue', primary: true }] });
               if (next !== 'continue') {
                 if (next === 'settings') nav.settings();
                 throw new DOMException('멈춤', 'AbortError');
@@ -117,7 +117,7 @@ async function runBank(book, { item, useAi, onChange }) {
       while (next < pendingAi.length) {
         check();
         const group = pendingAi.slice(next, next += batch);
-        current.textContent = '확인이 필요한 문항만 AI로 옮기는 중…';
+        current.textContent = '확인이 필요한 문항만 정밀 인식 중…';
         try {
           const images = [];
           for (const b of group) {
@@ -131,7 +131,7 @@ async function runBank(book, { item, useAi, onChange }) {
           });
         } catch (err) {
           if (err.name === 'AbortError' || abort.signal.aborted) throw err;
-          current.textContent = `AI로 옮기지 못했어요: ${err.message}. 읽어 둔 OCR 결과는 남아요.`;
+          current.textContent = `정밀 인식으로 옮기지 못했습니다: ${err.message}. 읽어 둔 글자 인식 결과는 유지됩니다.`;
         }
         converted += group.length;
         update();
@@ -147,7 +147,7 @@ async function runBank(book, { item, useAi, onChange }) {
     stored = await saveTranscripts();
     const stopped = failure?.name === 'AbortError' || abort.signal.aborted;
     const remaining = targets.reduce((sum, b) => sum + countLow(bestTranscript(book.id, b)?.entry.blocks), 0);
-    const note = remaining ? ` 확인할 곳 ${remaining}개가 있어요. 원본과 비교해 고쳐 주세요.` : '';
+    const note = remaining ? ` 확인이 필요한 곳 ${remaining}군데가 있습니다. 원본과 비교해 고쳐 주세요.` : '';
     const message = (!stored ? '옮긴 글을 저장하지 못했어요. 앱을 끄지 말고 다시 넣기를 눌러 주세요.' : stopped ? '넣기를 멈췄어요. 옮긴 글은 남아 있어요.' : failure ? `넣지 못했어요: ${failure.message}` : `${book.name} · 문제은행에 넣기를 마쳤어요.`) + note;
     status.textContent = message;
     const bad = !stored || (failure && !stopped);
