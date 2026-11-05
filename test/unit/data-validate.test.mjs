@@ -84,8 +84,9 @@ test('데이터 보존 회귀: 책의 새 문항 필드·전사 블록 타입은
   writeJson(path.join(dir, 'book.json'), book);
   writeJson(path.join(dir, 'transcripts.json'), transcripts);
   const loaded = await m.handlers.get('books:get')(null, book.id);
-  const { $canEdit, $shared, $subjectOpen, ...data } = loaded;
+  const { $canEdit, $shared, $subjectOpen, $answers, ...data } = loaded;
   assert.equal($subjectOpen, true);
+  assert.deepEqual($answers, { version: 1, items: {} });
   assert.deepEqual(data, book);
   await m.handlers.get('books:save')(null, loaded);
   assert.deepEqual(JSON.parse(readFileSync(path.join(dir, 'book.json'), 'utf8')), book);
