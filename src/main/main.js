@@ -917,7 +917,7 @@ async function importLegacy() {
 }
 
 function sanitizeTranscripts(v) {
-  return sanitizeData(v);
+  return require('./transcript-review').sanitizeTranscripts(v);
 }
 
 /** 책의 수식 변환 결과 + 내가 따로 만든 것 */
@@ -1438,6 +1438,7 @@ function registerIpc() {
   // 남의 책이면 책에 있는 것과 다른 것만 내 폴더(members/<나>/transcripts/<책 id>.json)에 — 읽을 때 합침
   handle('books:getTranscripts', async (_e, id) => mergedTranscripts(id));
   handle('books:saveTranscripts', async (_e, { bookId, data } = {}) => {
+    data = sanitizeTranscripts(data) || {};
     const { dir, place } = locateBook(bookId);
     if (!fs.existsSync(dir)) return false; // 그 사이 지워진 책
     const cur = readJsonSync(path.join(dir, 'book.json'), null, sanitizeBook);

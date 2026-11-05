@@ -52,7 +52,7 @@ export async function scanTranscribe(canvas, { number = '', signal, onStatus, ap
   // normalizeLatex 는 짝 없는 ")" 를 지우므로, 글로 옮길 괄호·쉼표는 먼저 떼어 두었다가 다시 붙임
   const parts = results.map((x) => trimLatex(x?.latex || ''));
   const latex = parts.map((p) => normalizeLatex(p.latex));
-  const blocks = assembleBlocks(plan, (i) => (latex[i] ? `${parts[i].before}${latex[i]}${parts[i].after}` : ''));
+  const blocks = assembleBlocks(plan, (i) => (latex[i] ? `${parts[i].before}${latex[i]}${parts[i].after}` : ''), results);
   const reasons = judgeScan(plan, results, latex);
   return { blocks, reliable: !reasons.length, reasons, formulas: plan.formulas.length };
 }

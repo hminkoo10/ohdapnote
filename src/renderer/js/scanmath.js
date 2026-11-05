@@ -7,6 +7,8 @@
 //
 // 좌표는 모두 문항 그림(renderStack) 픽셀, 상자는 {x0, y0, x1, y1} (x1·y1 은 끝 다음 칸)
 
+import { LOW_CONF, textLow, mathLow, relativeBox } from './lowconf.js';
+
 const HANGUL = /^[가-힣]$/;
 const JAMO_ITEM = /^[ㄱ-ㅎ]$/; // <보기>의 ㄱ. ㄴ. ㄷ.
 const PUNCT_AFTER = /^[,.?!:;)\]」』·…%]$/; // 한글 바로 뒤에 붙는 부호 (따옴표는 뺌: 위첨자·프라임을 따옴표로 읽음)
@@ -28,8 +30,8 @@ export const T = {
   spaceGap: 0.22, // 이보다 넓은 틈은 띄어쓰기
   pad: 0.12, // 수식 그림 둘레 흰 여백 (h 대비)
   // 믿을 만한지 (judgeScan) — GT 수식 126개로 맞춤
-  confMean: 0.93, // 수식 토큰 확률 기하평균 (GT 126개로 고름: 이보다 낮으면 섞어서에서 AI 로)
-  confMin: 0.3, // 가장 낮은 토큰 확률 (0.4 로 올리면 틀린 문항 하나 더 잡고 멀쩡한 문항 셋을 더 보냄)
+  confMean: LOW_CONF.confMean,
+  confMin: LOW_CONF.confMin,
   textConf: 80, // 한글 크기 OCR 글자 평균 확신도
 };
 
@@ -620,9 +622,16 @@ export function splitLine(comps, texts, h) {
     if (p.t === 'math') out.push(p);
     else if (last?.t === 'text') {
       const gap = (inkX.get(p.s) || p.s).x0 - (inkX.get(prev) || prev).x1;
-      last.s += (gap > T.spaceGap * h && !PUNCT_AFTER.test(p.s.str) && !PUNCT_BEFORE.test(last.s.slice(-1)) ? ' ' : '') + p.s.str;
+      const sep = gap > T.spaceGap * h && !PUNCT_AFTER.test(p.s.str) && !PUNCT_BEFORE.test(last.s.slice(-1)) ? ' ' : '';
+      const offset = last.s.length + sep.length;
+      const low = textLow(p.s).map((mark) => ({ ...mark, start: mark.start + offset, end: mark.end + offset }));
+      if (low.length) last.low = [...(last.low || []), ...low];
+      last.s += sep + p.s.str;
       last.x1 = Math.max(last.x1, p.s.x1);
-    } else out.push({ t: 'text', s: p.s.str, x0: p.s.x0, x1: p.s.x1 });
+    } else {
+      const low = textLow(p.s);
+      out.push({ t: 'text', s: p.s.str, x0: p.s.x0, x1: p.s.x1, ...(low.length ? { low } : {}) });
+    }
     if (p.t !== 'math') prev = p.s;
   }
   return { tokens: out };
@@ -815,7 +824,7 @@ export function trimLatex(latex) {
  * 계획 + 수식 LaTeX → transcribe 블록 [{type:'para', text} | {type:'choices', items} | {type:'figure', box}]
  * @param latexOf(i) → LaTeX 문자열 (못 읽었으면 '' / null — 그 수식은 빠짐)
  */
-export function assembleBlocks(plan, latexOf) {
+export function assembleBlocks(plan, latexOf, results = []) {
   const { h, W, H } = plan;
   const mathText = (t) => {
     const raw = latexOf(t.f);
@@ -826,6 +835,7 @@ export function assembleBlocks(plan, latexOf) {
   /** 토큰들 → 한 줄 글 (수식은 $…$) */
   const lineText = (tokens) => {
     let s = '';
+    let low = [];
     let prev = null;
     for (const t of tokens) {
       const piece = t.t === 'math' ? mathText(t) : t.s;
@@ -837,10 +847,20 @@ export function assembleBlocks(plan, latexOf) {
         // 쉼표 뒤 수식은 붙어 보여도 띄움 ("(단, a>0)")
         if (!glue && (gap > T.spaceGap * h || (t.t === 'math' && /,$/.test(s)))) s += ' ';
       }
+      const offset = s.length;
+      if (t.t === 'math') {
+        const mark = mathLow(results[t.f]?.conf);
+        if (mark) low.push({ ...mark, start: offset, end: offset + piece.length, box: relativeBox(t.box, W, H) });
+      } else {
+        low.push(...(t.low || []).map((mark) => ({ ...mark, start: offset + mark.start, end: offset + mark.end, box: relativeBox(mark.box, W, H) })));
+      }
       s += piece;
       prev = { t: t.t, x1: t.t === 'math' ? t.box.x1 : t.x1 };
     }
-    return s.trim();
+    const trim = s.length - s.trimStart().length;
+    const text = s.trim();
+    low = low.map((mark) => ({ ...mark, start: Math.max(0, mark.start - trim), end: Math.min(text.length, mark.end - trim) })).filter((mark) => mark.end > mark.start);
+    return { text, low };
   };
 
   // 줄 오른쪽 끝: 오른쪽에 그림이 있으면 그림 앞까지, 아니면 영역의 가장 긴 줄
@@ -856,16 +876,18 @@ export function assembleBlocks(plan, latexOf) {
   const blocks = [];
   let para = null; // {text, line, cond}
   let choices = null;
+  let choiceLow = [];
   let figs = []; // 문단 도중에 끝나는 그림 (옆에 놓인 그림): 문장을 끊지 않게 그 문단 뒤에
   const flush = () => {
-    if (para?.text) blocks.push({ type: 'para', text: para.text });
+    if (para?.text) blocks.push({ type: 'para', text: para.text, ...(para.low.length ? { low: para.low } : {}) });
     para = null;
     blocks.push(...figs);
     figs = [];
   };
   const flushChoices = () => {
-    if (choices?.length) blocks.push({ type: 'choices', items: choices });
+    if (choices?.length) blocks.push({ type: 'choices', items: choices, ...(choiceLow.length ? { low: choiceLow } : {}) });
     choices = null;
+    choiceLow = [];
   };
   for (const e of elems) {
     if (e.kind === 'figure') {
@@ -881,11 +903,15 @@ export function assembleBlocks(plan, latexOf) {
     if (e.kind === 'choice') {
       flush();
       choices ||= [];
-      for (const it of l.items) choices.push(lineText(it));
+      for (const it of l.items) {
+        const line = lineText(it);
+        choiceLow.push(...line.low.map((mark) => ({ ...mark, item: choices.length })));
+        choices.push(line.text);
+      }
       continue;
     }
     flushChoices();
-    const text = lineText(l.tokens);
+    const { text, low } = lineText(l.tokens);
     if (!text) continue;
     const first = l.tokens[0];
     const cond = first.t === 'text' && /^\(\s*단\s*[,.]?/.test(first.s);
@@ -894,7 +920,7 @@ export function assembleBlocks(plan, latexOf) {
     const newPara = !para || prev.seg !== l.seg || cond || jamo || para.cond || prev.x1 < availRight(prev) - 1.5 * h;
     if (newPara) {
       flush();
-      para = { text, line: l, cond };
+      para = { text, low, line: l, cond };
       continue;
     }
     // 줄바꿈 잇기: 끝·첫 글자에 따라 띄어쓰기
@@ -904,6 +930,8 @@ export function assembleBlocks(plan, latexOf) {
     let sep = ' ';
     if (endsHangul && startsHangul) sep = WORD_END.has(para.text.slice(-1)) ? ' ' : '';
     else if (lastTok?.t === 'math' && startsHangul && PARTICLE.has(text[0])) sep = '';
+    const offset = para.text.length + sep.length;
+    para.low.push(...low.map((mark) => ({ ...mark, start: mark.start + offset, end: mark.end + offset })));
     para.text += sep + text;
     para.line = l;
   }
