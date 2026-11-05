@@ -79,7 +79,7 @@ async function exportFromUi(where, format) {
   const name = where === 'bank' ? 'bank-format' : 'format';
   await win.locator(`.seg label:has(input[name="${name}"][value="${format}"])`).click();
   await win.locator('.export-btn[data-mode="answers"]').click();
-  await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((el) => el.textContent.includes('저장했어요')), null, { timeout: 60000 });
+  await win.waitForFunction((message) => [...document.querySelectorAll('.toast')].some((el) => el.textContent.includes(message)), where === 'bank' ? '저장 완료' : '저장했어요', { timeout: 60000 });
   assert.ok(existsSync(dest));
   const bytes = readFileSync(dest);
   if (format === 'hwpx') assert.match(sectionXml(bytes), /<hp:script>\{a\} over \{b\}<\/hp:script>/);
@@ -229,7 +229,7 @@ try {
   await call('saveBook', changedBook);
   await call('saveAnswer', id, item.id, entry);
   await openEditor();
-  assert.match(await win.locator('.answer-reference').innerText(), /답지 파일이 없어도/);
+  assert.match(await win.locator('.answer-reference').innerText(), /답지 없음 · 직접 작성 가능/);
   await win.locator('.answer-input').fill('12');
   await closeEditor();
   assert.equal((await call('getAnswers', id)).items[item.id].answer, '12');

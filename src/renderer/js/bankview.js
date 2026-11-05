@@ -366,10 +366,15 @@ function exportOptions(picked, entries) {
   const seg = (key, values, onChange = () => {}) => h('div.seg', values.map(([v, text, tip]) => h('label', { title: tip },
     h('input', { type: 'radio', name: `bank-${key}`, value: v, checked: String(o[key]) === String(v), onchange: () => { set(key, v); onChange(); } }), h('span', text))));
   const hint = h('p.small.muted');
-  const convert = h('div.opt-row', h('span.opt-label', '스캔본'), seg('convert', Object.entries(CONVERT_MODES).map(([k, v]) => [k, v.label, v.hint]), () => formatHint()));
+  const convertText = {
+    mix: ['자동 선택', '확인할 문항만 외부 서비스로 전송'],
+    ai: ['정밀 인식', '문항을 외부 서비스로 전송'],
+    ocr: ['글자 인식', '이 컴퓨터에서 인식'],
+  };
+  const convert = h('div.opt-row', h('span.opt-label', '스캔본'), seg('convert', Object.keys(CONVERT_MODES).map((key) => [key, ...convertText[key]]), () => formatHint()));
   const formatHint = () => {
     convert.hidden = hint.hidden = o.format !== 'hwpx';
-    hint.textContent = `디지털 PDF는 PDF 글자 그대로 옮겨요. ${CONVERT_MODES[o.convert]?.hint || CONVERT_MODES.ocr.hint}. 고친 글이 있으면 가장 먼저 써요.`;
+    hint.textContent = (convertText[o.convert] || convertText.ocr)[1];
   };
   formatHint();
   const anyAnswers = picked.some((e) => open(e) && (e.answer || answerContent(e.bookObj.$answers?.items[e.item.id])));

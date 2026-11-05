@@ -174,6 +174,10 @@ try {
     const dest = join(tmp, `review.${format}`);
     await app.evaluate(({ dialog }, path) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: path }); }, dest);
     await win.locator(`.seg label:has(input[name="bank-format"][value="${format}"])`).click();
+    if (format === 'hwpx') {
+      assert.doesNotMatch(await win.locator('.bank-export').innerText(), /AI|OCR/);
+      assert.ok(await win.locator('.bank-export').getByText('이 컴퓨터에서 인식', { exact: true }).isVisible());
+    }
     await win.locator('.export-btn[data-mode="problems"]').click();
     await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((el) => el.textContent.includes('저장 완료') && el.textContent.includes('확인 필요 4군데')), null, { timeout: 60000 });
     assert.equal(await win.locator('.toast-msg').last().innerText(), '저장 완료 · 확인 필요 4군데');
@@ -208,6 +212,7 @@ try {
     openAnswerEditor({ book: b, item: b.docs.problem.items[0] });
   }, id);
   await win.waitForSelector('.answer-editor-modal');
+  assert.ok(await win.locator('.answer-editor-modal').getByText('자동 저장', { exact: true }).isVisible());
   await win.getByRole('button', { name: '답지 인식 결과 불러오기', exact: true }).click();
   await win.waitForFunction(() => document.querySelector('.answer-review')?.textContent.includes('확인 필요 3군데'));
   assert.equal(await win.locator('.answer-review .review-help').innerText(), hint);

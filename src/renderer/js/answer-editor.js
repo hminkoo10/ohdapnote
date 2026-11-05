@@ -299,13 +299,13 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
   });
   const toolbar = h('div.answer-toolbar', h('button.btn.btn-small', { disabled: !editable, onmousedown: (e) => { e.preventDefault(); rememberSelection(); }, onclick: () => equation().catch(fail) }, '수식'), undo, redo,
     answerItem ? h('button.btn.btn-small', { disabled: !editable, onclick: () => recognized().catch(fail) }, '답지 인식 결과 불러오기') : null);
-  const reference = h('aside.answer-reference', review.reference, h('h4', '답지 그림'), h('p.small.muted', answerItem ? '그림을 보며 고쳐 주세요.' : '답지 파일이 없어도 정답·해설을 쓸 수 있어요.'));
+  const reference = h('aside.answer-reference', review.reference, h('h4', '답지 그림'), !answerItem ? h('p.small.muted', '답지 없음 · 직접 작성 가능') : null);
   if (answerItem) itemImage(sources.answer, answerItem, 700).then((url) => { if (url) reference.append(h('img', { src: url, alt: '짝 해설 원본' })); }).catch(fail);
   draw();
   await api.setEditorShortcutScope('answer');
   await modal({ title: `정답·해설 · ${item.number || item.num || ''}번`, width: 980, className: 'answer-editor-modal',
     onKeyDown: review.keydown,
-    body: h('div', h('p.small.muted', editable ? '글은 그냥 쓰고, 수식은 [수식] 단추를 눌러 넣어요. 저장은 저절로 돼요.' : '만든 사람과 원장만 고칠 수 있어요. 지금은 보기만 해요.'),
+    body: h('div', h('p.small.muted', editable ? '자동 저장' : '만든 사람·원장만 수정 가능'),
       h('div.answer-heading', h('label', '정답', answer), editable ? h('div.answer-choices', [...'①②③④⑤'].map((v) => h('button.btn.btn-small', { onclick: () => { if (editable) { answer.value = v; capture(); } } }, v))) : null, status),
       h('div.answer-layout', h('section.answer-writing', toolbar, review.element, editor), reference)),
     beforeClose: flush,
