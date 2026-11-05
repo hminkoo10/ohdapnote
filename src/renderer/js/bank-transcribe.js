@@ -60,7 +60,7 @@ async function runBank(book, { item, useAi, onChange }) {
   };
   try {
     const ready = await api.ensureBookFiles(book.id);
-    if (!ready?.ok) throw new Error(ready?.error || '교재 원본을 받지 못했어요. 책장에서 파일을 확인해 주세요.');
+    if (!ready?.ok) throw new Error(ready?.error || '교재 원본을 받지 못했어요. 책장에서 파일을 확인하세요.');
     check();
     const src = await getSources(book);
     if (!src.problem) throw new Error('문제집 파일을 열지 못했어요.');

@@ -157,7 +157,7 @@ export function createEditor(ctx) {
         h('span.tb-pagelabel', `${pageLabel(d, st.page)}`),
       ),
       h('div.tb-group',
-        h(`button.btn.btn-small${st.mode === 'draw' ? '.btn-active' : ''}`, { onclick: () => setMode(st.mode === 'draw' ? 'select' : 'draw'), title: '빈 곳을 끌어 문항 영역을 그려요' }, icon('plus'), '문항 추가'),
+        h(`button.btn.btn-small${st.mode === 'draw' ? '.btn-active' : ''}`, { onclick: () => setMode(st.mode === 'draw' ? 'select' : 'draw'), title: '빈 곳을 끌어 문항 영역을 그리세요' }, icon('plus'), '문항 추가'),
         h(`button.btn.btn-small${st.mode === 'addRect' ? '.btn-active' : ''}`, { onclick: () => setMode(st.mode === 'addRect' ? 'select' : 'addRect'), disabled: !it, title: '다음 단·쪽에 이어지는 영역을 그려요' }, icon('box'), '영역 추가'),
         h('button.btn.btn-small', { onclick: deleteSelected, disabled: !it, title: '선택한 영역 삭제 (Delete)' }, icon('trash'), '삭제'),
         h('label.tb-num', '번호', numInput),
@@ -201,9 +201,9 @@ export function createEditor(ctx) {
       if (why.length && ghostCands().length) parts.push(h('span.muted', '점선 번호를 누르면 그 자리에 문항이 추가돼요.'));
     }
     const modeHint = {
-      select: '상자를 끌어 이동하고, 모서리로 크기를 바꿔요.',
-      draw: '빈 곳을 끌어 영역을 그리고 번호를 적어요.',
-      addRect: '이어지는 영역을 끌어 그려요. 다른 쪽도 가능해요.',
+      select: '상자를 끌어 이동하고, 모서리로 크기를 바꾸세요.',
+      draw: '빈 곳을 끌어 영역을 그리고 번호를 입력하세요.',
+      addRect: '이어지는 영역은 끌어 그리세요. 다른 쪽에도 그릴 수 있어요.',
     }[st.mode];
     parts.push(h('span.muted', modeHint));
     hint.append(...parts);
@@ -344,7 +344,7 @@ export function createEditor(ctx) {
     if (!item.prefix) delete item.prefix;
     d.items.push(item);
     commit(item);
-    toast(`${c.prefix ? `${c.prefix} ` : ''}${c.digits}번을 추가했어요. 영역이 맞는지 확인해 주세요.`);
+    toast(`${c.prefix ? `${c.prefix} ` : ''}${c.digits}번을 추가했어요. 영역이 맞는지 확인하세요.`);
   }
 
   const pct = (v) => `${(v * 100).toFixed(3)}%`;

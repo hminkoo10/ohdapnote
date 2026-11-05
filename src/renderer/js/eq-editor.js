@@ -25,7 +25,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
   const paint = () => {
     preview.innerHTML = eqToMathML(script.value, { display: true, sourceMap: true });
     const errors = parseEq(script.value).errors;
-    warning.textContent = errors.length ? '괄호·명령을 확인해요. 현재 모양으로도 넣어요.' : '';
+    warning.textContent = errors.length ? '괄호·명령을 확인하세요. 현재 모양으로도 입력돼요.' : '';
     preview.classList.toggle('eq-has-warning', errors.length > 0);
   };
   const apply = (result) => {
@@ -137,7 +137,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
     showPanel('글자·파일', h('div', h('div.eq-extra-tools', [['로만체', 'rm'], ['기울임', 'it'], ['굵은 기울임', 'bold'], ['굵은 로만체', 'rmbold']].map(([name, cmd]) => button(name, '', () => { put(`${cmd} {}`); closePanel(); }))),
       h('div.eq-extra-tools', h('label', '미리보기 글꼴 ', font), color, button('글자 색 넣기', '', () => {
         const rgb = color.value.slice(1).match(/../g).map((v) => parseInt(v, 16)).join(','); put(`COLOR {${rgb}}{}`); closePanel();
-      })), h('p.small.muted', '글꼴·확대는 이 창의 보기만 바꿔요. 글자 크기·줄 맞춤 도구의 공식 동작은 확인 필요해요.'),
+      })), h('p.small.muted', '글꼴·확대는 이 창의 보기만 바꿔요. 글자 크기·줄 맞춤 도구의 공식 동작은 확인이 필요해요.'),
       h('div.eq-extra-tools', button('MathML 저장', '', async () => {
         try {
           const doc = new DOMParser().parseFromString(eqToMathML(cleanScript(script.value), { display: centered.checked }), 'application/xml');
@@ -161,7 +161,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
     await modal({ title: '수식 단축키·문법', width: 800, className: 'eq-help-modal', body: h('div',
       h('p', '한글 공식 단축키 22개입니다. 본문 키는 해설 편집기에서, 나머지는 수식 창에서 써요.'),
       table(['번호', '키', '하는 일 · 공식 문맥'], EQUATION_SHORTCUTS),
-      h('p.small', '우리 화면: Enter는 스크립트에 #를 넣어요. Esc는 열린 목록부터 닫고, 목록이 없으면 취소 확인을 해요. P는 선택한 수식을 고치는 창을 열어요. Tab은 다음 칸으로, 마지막 칸에서는 틀 밖으로 나가요.'),
+      h('p.small', '우리 화면: Enter는 스크립트에 #를 넣어요. Esc는 열린 목록부터 닫고, 목록이 없으면 취소를 확인해요. P는 선택한 수식을 고치는 창을 열어요. Tab은 다음 칸으로 이동하고, 마지막 칸에서는 틀 밖으로 나가요.'),
       h('h4', '자주 쓰는 문법'), table(['입력', '하는 일'], [
         ['{a} over {b}', '분수'], ['sqrt {x} / root {n} of {x}', '제곱근 / n제곱근'], ['x^2 / x_1 / x_1^2', '위 / 아래 / 양쪽 첨자'],
         ['sum _{k=1}^{n} / int _{a}^{b}', '합 / 적분'], ['lim _{x -> a}', '극한'], ['matrix {a & b # c & d}', '행렬: &는 다음 칸, #는 다음 줄'],
@@ -186,7 +186,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
   paint();
   await api.setEditorShortcutScope('equation');
   const result = modal({ title: eq ? '수식 고치기' : '수식 넣기', width: 900, className: 'answer-equation-modal',
-    body: h('div.eq-editor', h('p.eq-guide', '틀의 빈칸에 적어요. Tab은 다음 칸, 수식을 누르면 수정해요.'),
+    body: h('div.eq-editor', h('p.eq-guide', '틀의 빈칸에 입력하세요. Tab은 다음 칸으로 이동하고, 수식을 누르면 수정해요.'),
       h('strong', '바로 보이는 수식'), preview, warning, toolbar, panel, extra, h('label', '한글 수식 스크립트', script), h('label.check', centered, '가운데 수식으로 넣기')),
     onKeyDown: (event) => {
       if (composing || event.isComposing) return false;

@@ -164,7 +164,7 @@ function renderBank(root, summaries, books, entries, failed) {
       if (locked) card.append(h('p.small.muted', '학원 계약에 없는 과목 · 보기만'));
       else if (job) card.append(h('button.btn', { onclick: () => job.open() }, '넣는 중 · 진행 보기'));
       else if (!s.problemAnalyzed && !total) card.append(h('p.small.muted', '책 분석이 필요해요'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
-      else if (!book) card.append(h('p.small.warn-text', '교재를 읽지 못했어요. 책장에서 확인해 주세요.'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
+      else if (!book) card.append(h('p.small.warn-text', '교재를 읽지 못했어요. 책장에서 확인하세요.'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
       else if (total && n === total) card.append(h('strong.bank-complete', icon('check'), '다 넣었어요'));
       else card.append(h('button.btn.btn-primary', { onclick: () => attempt(() => putBank(book, { onChange: changed })) }, n || bankTargets(book).some((b) => bestTranscript(book.id, { ...b, src: { files: book.docs.problem.files } })) ? '이어서 넣기' : '문제은행에 넣기'));
       bookList.append(card);
@@ -247,7 +247,7 @@ function renderBank(root, summaries, books, entries, failed) {
     const releases = ['problem', 'answer'].map((role) => holdSource(e.bookObj, role));
     try {
       const ready = await api.ensureBookFiles(e.bookId);
-      if (!ready?.ok) throw new Error('교재 파일을 받지 못했어요. 책장에서 확인해 주세요.');
+      if (!ready?.ok) throw new Error('교재 파일을 받지 못했어요. 책장에서 확인하세요.');
       const src = await getSources(e.bookObj);
       const [problem, answer] = await Promise.all([itemImage(src.problem, e.item, 700, { stem: e.item.stem }), e.answer ? itemImage(src.answer, e.answer, 700) : null]);
       if (run !== previewRun || !root.isConnected) return;

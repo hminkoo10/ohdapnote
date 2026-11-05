@@ -58,7 +58,7 @@ export async function importBookFiles(book, role, paths, add = false) {
     label.textContent = '3. 교재에 저장 중…';
     await api.commitFileImport(imported.token, draft);
     Object.assign(book, draft);
-    dialog.finish({ message: '파일을 넣었어요. [분석]을 눌러요.' });
+    dialog.finish({ message: '파일을 넣었어요. [분석]을 누르세요.' });
     return result;
   } finally {
     if (imported) await api.discardFileImport(imported.token).catch(() => {});

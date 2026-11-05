@@ -227,7 +227,7 @@ export function parseJsonText(text) {
         /* 아래에서 */
       }
     }
-    throw new Error('다시 인식해 주세요. 정밀 인식 결과를 읽지 못했습니다.');
+    throw new Error('정밀 인식 결과를 읽지 못했어요. 다시 인식하세요.');
   }
 }
 

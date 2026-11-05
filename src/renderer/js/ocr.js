@@ -23,7 +23,7 @@ function createSlot(lang) {
     cacheMethod: 'none',
   }).catch((err) => {
     slots = slots.filter((s) => s !== slot);
-    throw new Error(`프로그램을 다시 실행해 주세요. 글자 인식을 시작하지 못했습니다: ${err?.message || err}`);
+    throw new Error(`프로그램을 다시 실행하세요. 글자 인식을 시작하지 못했습니다: ${err?.message || err}`);
   });
   slots.push(slot);
   return slot;

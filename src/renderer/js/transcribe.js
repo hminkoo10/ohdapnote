@@ -78,14 +78,14 @@ export async function setEditedTranscript(bookId, block, blocks) {
   const { id = '', name = '' } = state.appInfo.user || {};
   store.items[`${transcriptKey(block)}|edit`] = { blocks, model: 'edit', at: Date.now(), by: { id, name } };
   store.dirty = true;
-  if (!(await saveTranscripts())) throw new Error('고친 글을 저장하지 못했어요. 다시 저장해 주세요.');
+  if (!(await saveTranscripts())) throw new Error('고친 글을 저장하지 못했어요. 다시 저장하세요.');
 }
 
 export async function clearEditedTranscript(bookId, block) {
   const store = await loadTranscripts(bookId);
   delete store.items[`${transcriptKey(block)}|edit`];
   store.dirty = true;
-  if (!(await saveTranscripts())) throw new Error('원래대로 저장하지 못했어요. 다시 시도해 주세요.');
+  if (!(await saveTranscripts())) throw new Error('원래대로 저장하지 못했어요. 다시 시도하세요.');
 }
 
 /**

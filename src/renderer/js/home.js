@@ -43,7 +43,7 @@ function purgeText(st) {
 }
 
 /** 통합 클라우드가 낮은 버전이라 학원 명단을 못 받음 */
-const rosterNotice = () => h('div.readonly-banner.roster-notice', icon('warn'), h('span', '학생 명단을 받으려면 통합 클라우드를 업데이트해요.'));
+const rosterNotice = () => h('div.readonly-banner.roster-notice', icon('warn'), h('span', '학생 명단을 받으려면 통합 클라우드를 업데이트하세요.'));
 
 /** 탭마다 위쪽 제목·설명 */
 function heroText(key) {
@@ -541,7 +541,7 @@ async function createBook() {
   if (!allowed.length) {
     await modal({
       title: '새 책 등록',
-      body: h('p.modal-text', '원장님께 계약 과목을 확인해요. 계약한 과목이 없어 등록할 수 없어요.'),
+      body: h('p.modal-text', '계약한 과목이 없어 등록할 수 없어요. 원장님께 계약 과목을 확인하세요.'),
       buttons: [{ label: '확인', value: null, primary: true }],
     });
     return;
@@ -632,7 +632,7 @@ export async function createNote(allBooks, { student: preset = null } = {}) {
   if (!books.length && allBooks.length) {
     await modal({
       title: '쓸 수 있는 교재가 없어요',
-      body: h('p.modal-text', '계약한 과목의 교재를 등록해요. 현재 교재는 계약에 없는 과목이에요.'),
+      body: h('p.modal-text', '현재 교재는 계약에 없는 과목이에요. 계약한 과목의 교재를 등록하세요.'),
       buttons: [{ label: '확인', value: null, primary: true }],
     });
     return;

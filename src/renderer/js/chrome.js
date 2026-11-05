@@ -152,7 +152,7 @@ export async function openSettings() {
     'div.settings',
     h('section.set-card',
       h('h4', icon('school'), '내보내기 기본값'),
-      h('p.small.muted', '시험지 머리에 써요. 명단 학생은 담당 선생님 이름을 우선해요.'),
+      h('p.small.muted', '시험지 머리에 입력하세요. 명단 학생은 담당 선생님 이름이 먼저 들어가요.'),
       h('label.field', h('span', '학원 이름'), academyInput),
       h('label.field', h('span', '시험지에 쓸 선생님 이름(기본값)'), teacherInput),
     ),

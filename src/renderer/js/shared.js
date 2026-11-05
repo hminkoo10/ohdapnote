@@ -105,7 +105,7 @@ export async function getSource(book, role) {
     book.docs[role].pageCount = src.numPages;
     return src;
   } catch (err) {
-    toast('인터넷 연결을 확인하고 책을 다시 열어요.', { type: 'error', timeout: 8000 });
+    toast('인터넷 연결을 확인하고 책을 다시 여세요.', { type: 'error', timeout: 8000 });
     return null;
   }
 }

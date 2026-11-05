@@ -99,8 +99,8 @@ export function aiSettingsCard(s) {
     say('muted', 'Codex CLI 를 찾는 중…');
     const r = await api.aiCodexStatus(codexPath.value.trim());
     const ver = r.version ? ` (${r.version})` : '';
-    if (!r.found) say('warn-text', 'Codex CLI 설치 후 [다시 확인], 또는 고급에 경로를 적어요.');
-    else if (!r.loggedIn) say('warn-text', `codex login으로 ChatGPT 계정에 로그인해요. CLI${ver} 확인됨`);
+    if (!r.found) say('warn-text', 'Codex CLI 설치 후 [다시 확인]을 누르거나 고급에 경로를 입력하세요.');
+    else if (!r.loggedIn) say('warn-text', `codex login으로 ChatGPT 계정에 로그인하세요. CLI${ver} 확인됨`);
     else if (r.method === 'apikey') say('warn-text', `Codex CLI 찾음${ver} · API 키로 로그인되어 있어서 구독이 아니라 API 요금으로 나가요. ChatGPT 계정으로 쓰려면 codex logout 후 codex login`);
     else say('ok-text', `Codex CLI 찾음${ver} · ChatGPT 계정으로 로그인됨`);
   };
@@ -118,7 +118,7 @@ export function aiSettingsCard(s) {
     ),
     openai: h(
       'div.ai-panel',
-      h('p.small.muted', '주소·모델은 고급에서 정해요.'),
+      h('p.small.muted', '주소·모델은 고급에서 설정하세요.'),
       h('label.field', h('span', '서비스 API 키'), oa.key),
     ),
     anthropic: h(
@@ -130,7 +130,7 @@ export function aiSettingsCard(s) {
       'div.ai-panel',
       h(
         'p.small.muted',
-        '연결한 ChatGPT 구독을 써요. 설치·로그인은 고급에서 확인해요.',
+        '연결한 ChatGPT 구독을 써요. 설치·로그인은 고급에서 확인하세요.',
       ),
       h('div.field-row', cx.status, h('span.spacer'), h('button.btn.btn-small', { onclick: checkCodex }, icon('refresh'), '다시 확인')),
     ),
@@ -154,11 +154,11 @@ export function aiSettingsCard(s) {
       gem.models.nodes,
       rpmField(gem.rpm, '무료 한도에 맞춰요'),
       h('label.field', h('span', '게이트웨이 주소'), gemBase),
-      h('p.small.muted', '비우면 Google로 보내요. 게이트웨이 주소는 /v1beta 앞까지 적어요.'),
+      h('p.small.muted', '비워 두면 Google로 보내요. 게이트웨이 주소는 /v1beta 앞까지 입력하세요.'),
     ),
     only('openai',
-      h('p.small.muted', 'OpenAI 호환 주소·이미지 인식 모델을 적어요.'),
-      h('p.small.muted', '로컬 서버는 실행 후 연결해요. API 키는 비워도 돼요.'),
+      h('p.small.muted', 'OpenAI 호환 주소·이미지 인식 모델을 입력하세요.'),
+      h('p.small.muted', '로컬 서버는 실행 후 연결하세요. API 키는 비워도 돼요.'),
       h('label.field', h('span', '주소'), oa.base), oa.models.nodes,
       rpmField(oa.rpm, '서버 한도에 맞춰요')),
     only('anthropic', cl.models.nodes, rpmField(cl.rpm, '계정 한도에 맞춰요'), h('label.field', h('span', '게이트웨이 주소'), claudeBase), h('p.small.muted', '비우면 https://api.anthropic.com 으로 보내요.')),
@@ -212,7 +212,7 @@ export function aiSettingsCard(s) {
     clear(sourceNote);
     if (source === 'personal') sourceNote.append('');
     else if (a) sourceNote.append(`학원 AI: ${PROVIDERS[a.provider]?.label || a.provider}${a.model ? ` · ${a.model}` : ''}. `, cloudBtn());
-    else sourceNote.append(`학원 AI 미설정: 내 설정을 써요. ${state.appInfo?.manager ? '통합 클라우드에서 설정해요.' : '설정은 원장님께 요청해요.'} `, cloudBtn());
+    else sourceNote.append(`학원 AI 미설정: 내 설정을 써요. ${state.appInfo?.manager ? '통합 클라우드에서 설정하세요.' : '설정은 원장님께 요청하세요.'} `, cloudBtn());
   };
 
   const show = () => {

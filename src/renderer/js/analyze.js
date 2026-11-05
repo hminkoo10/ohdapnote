@@ -68,7 +68,7 @@ export function parsePageRange(text, numPages) {
       const p = parseInt(part, 10);
       if (p >= 1 && p <= numPages) set.add(p - 1);
     } else {
-      throw new Error(`쪽 범위를 3-10, 15처럼 입력해 주세요: "${part}"`);
+      throw new Error(`쪽 범위를 3-10, 15처럼 입력하세요: "${part}"`);
     }
   }
   return [...set].sort((a, b) => a - b);

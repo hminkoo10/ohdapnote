@@ -155,7 +155,7 @@ export async function openBook(id, { tab, role, page, itemId } = {}) {
 /** 보기만 하는 책: 누가 만들었는지 + 내 책으로 복사 (계약에서 빠진 과목은 그 이유만) */
 function readonlyBanner(b) {
   if (b.$subjectOpen === false) {
-    return h('div.readonly-banner.subject-closed', icon('eye'), h('span', `${subjectName(subjectOf(b))} 계약 없음: 보기만 가능해요. 계약은 원장님께 확인해요.`));
+    return h('div.readonly-banner.subject-closed', icon('eye'), h('span', `${subjectName(subjectOf(b))} 계약 없음: 보기만 가능해요. 계약은 원장님께 확인하세요.`));
   }
   return h(
     'div.readonly-banner',
@@ -187,7 +187,7 @@ async function toggleShared(b, input) {
   const on = input.checked;
   input.checked = !on; // 바뀌기 전까지는 그대로
   if (bookBusy(b)) {
-    toast('이 책의 작업이 끝난 뒤 바꿔요.');
+    toast('이 책의 작업이 끝난 뒤 바꿀 수 있어요.');
     return;
   }
   const msg = '학원 공유를 끄면 이 책은 나만 보기가 돼요 (원장은 볼 수 있어요).\n다른 선생님 책장에서 사라지고, 이 책을 쓰는 학생 오답노트를 다른 선생님이 열면 ‘볼 수 없는 교재’로 보여요 (고른 문항은 그대로 남아요).\n다시 켜면 그대로 돌아와요.';
@@ -299,7 +299,7 @@ function render({ enter = false, tabAnim = null, thumbFrom = null } = {}) {
     state.appInfo?.academy && b.createdBy?.id && b.createdBy.id === state.appInfo.user?.id
       ? h(
           'label.switch.small.share-switch',
-          { title: b.$shared ? '학원 선생님 모두가 이 책을 보고 오답노트에 써요' : '나만 봐요 (원장은 볼 수 있어요)' },
+          { title: b.$shared ? '학원 선생님 모두가 이 책을 보고 오답노트에 써요' : '나만 봐요 (원장도 볼 수 있어요)' },
           h('input', { type: 'checkbox', checked: !!b.$shared, onchange: (e) => toggleShared(b, e.target) }),
           h('span.sw'),
           '학원 공유',
@@ -310,7 +310,7 @@ function render({ enter = false, tabAnim = null, thumbFrom = null } = {}) {
   // 보기만 하는 책은 페이지 검토(고치는 화면) 없이 인식 결과만
   const tabs = h('nav.seg-tabs', h('span.seg-thumb'), tab('result', 'list', '인식 결과', flaggedN ? h('span.seg-count.warn', String(flaggedN)) : null), ro ? null : tab('review', 'scan', '페이지 검토·수정'));
   root.append(
-    topbar(h('div.topbar-crumb', h('button.btn.btn-ghost.btn-small#back-btn', { onclick: () => nav.home({ tab: 'books' }), title: '' }, icon('back'), '책장'), h('span.crumb-kind', icon('library'), '책장'), h('span.crumb-sep', '/'), nameInput, subjectEl, creator, share, ro ? null : h('span.save-status', ''))),
+    topbar(h('div.topbar-crumb', h('button.btn.btn-ghost.btn-small#back-btn', { onclick: () => nav.home({ tab: 'books' }), title: '' }, icon('back'), '책장'), nameInput, subjectEl, creator, share, ro ? null : h('span.save-status', ''))),
     h(
       `main.sheet${enter ? '.view-enter' : ''}`,
       ro ? readonlyBanner(b) : null,
@@ -387,7 +387,7 @@ function docCard(role, i) {
       'div.doc-head',
       h('span.doc-icon', icon(role === 'problem' ? 'book' : 'bookCheck')),
       h('div.doc-titles', h('div.doc-title', ROLE_NAME[role]), doc ? h('div.doc-file', { title: doc.originalName }, doc.originalName, h('span.muted', src ? ` · ${src.numPages}쪽` : ' · 여는 중…')) : h('div.doc-file.muted', '아직 파일이 없어요')),
-      doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pickMore, disabled: locked, title: '기존 파일·분석 결과는 유지해요' }, icon('plus'), '파일 추가') : null,
+      doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pickMore, disabled: locked, title: '기존 파일·분석 결과는 그대로 남아요' }, icon('plus'), '파일 추가') : null,
       doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pick, disabled: locked }, icon('refresh'), '파일 바꾸기') : null,
     ),
   );
@@ -608,7 +608,7 @@ async function analyzeRole(role, { only = null } = {}) {
     return;
   }
   if (!pages.length) {
-    toast('쪽 범위를 확인해요. 분석할 쪽이 없어요.', { type: 'error' });
+    toast('분석할 쪽이 없어요. 쪽 범위를 확인하세요.', { type: 'error' });
     return;
   }
   // 화면을 떠나도 계속 돌고(위쪽 막대에 표시), 결과는 이 책(b)에만 씀
@@ -741,7 +741,7 @@ function resultView() {
   left.append(h('div.result-toolbar', roleSeg, h('span.spacer'), h('span.small.muted', '번호를 누르면 미리보기가 열려요')));
 
   if (!doc.analyzedAt) {
-    left.append(h('div.empty-state', h('div.empty-art', icon('scan')), h('h3', '아직 분석 전이에요'), h('p.muted', bs.readonly ? '만든 사람이 분석해야 해요.' : `[${ROLE_NAME[role]} 분석]을 눌러요.`)));
+    left.append(h('div.empty-state', h('div.empty-art', icon('scan')), h('h3', '아직 분석 전이에요'), h('p.muted', bs.readonly ? '만든 사람이 분석해야 해요.' : `[${ROLE_NAME[role]} 분석]을 누르세요.`)));
     return view;
   }
 
@@ -831,7 +831,7 @@ function checkPanel(role, doc, pages, missing) {
   const head = h(
     'div.cp-head',
     h('span.cp-icon', icon('warn')),
-    h('div', h('strong', `확인이 필요한 쪽 ${pages.length}곳`), h('div.small.muted', ro ? '번호가 건너뛰었거나 인식이 애매한 쪽이에요.' : '번호가 건너뛰었거나 인식이 애매한 쪽이에요. 직접 보고 판단해 주세요.')),
+    h('div', h('strong', `확인이 필요한 쪽 ${pages.length}곳`), h('div.small.muted', ro ? '번호가 건너뛰었거나 인식이 애매한 쪽이에요.' : '번호가 건너뛰었거나 인식이 애매한 쪽이에요. 직접 보고 판단하세요.')),
     h('span.spacer'),
     ro ? null : h('button.btn.btn-small', { onclick: () => dismissPages(role, pages), title: '모두 이대로 괜찮다고 표시' }, icon('checkAll'), '모두 문제없음'),
   );
@@ -865,7 +865,7 @@ function checkPanel(role, doc, pages, missing) {
     }),
   );
   panel.append(head, list);
-  if (!ro) panel.append(h('div.cp-foot', h('span.small.muted', geminiReady() ? '' : aiOff() ? '설정에서 정밀 인식을 켜요.' : '설정에서 서비스 키를 입력해요.'), h('span.spacer'), gemBtn));
+  if (!ro) panel.append(h('div.cp-foot', h('span.small.muted', geminiReady() ? '' : aiOff() ? '설정에서 정밀 인식을 켜세요.' : '설정에서 서비스 키를 입력하세요.'), h('span.spacer'), gemBtn));
   return panel;
 }
 
@@ -920,7 +920,7 @@ async function deepPage(role, page) {
       if (!keep) return;
     }
     if (sameAsBefore) {
-      toast(`페이지 검토·정밀 인식으로 확인해요. 더 찾은 번호는 없어요 (${items.length}개).`, {
+      toast(`페이지 검토·정밀 인식으로 확인하세요. 더 찾은 번호는 없어요 (${items.length}개).`, {
         timeout: 9000,
         actions: [
           { label: '페이지 검토', onClick: () => switchTab('review', { role, page }) },

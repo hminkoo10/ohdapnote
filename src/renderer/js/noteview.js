@@ -177,8 +177,6 @@ function render({ enter = false } = {}) {
       h(
         'div.topbar-crumb',
         h('button.btn.btn-ghost.btn-small#back-btn', { onclick: () => nav.home({ tab: 'notes' }), title: '오답노트 목록으로' }, icon('back'), '목록'),
-        h('span.crumb-kind', icon('notebook'), '오답노트'),
-        h('span.crumb-sep', '/'),
         titleInput,
         studentChip,
         ro ? null : h('span.save-status', ''),
@@ -383,7 +381,7 @@ function noteBody() {
         ),
       );
     } else if (ro) left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '아직 책이 없어요')));
-    else left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '책을 추가해 주세요'), h('p.muted', '')));
+    else left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '책을 추가하세요'), h('p.muted', '')));
     setTimeout(renderExportSummary, 0);
     return view;
   }
@@ -393,7 +391,7 @@ function noteBody() {
         'div.empty-state',
         h('div.empty-art', icon('scan')),
         h('h3', doc ? '이 책은 아직 분석 전이에요' : '이 책에는 문제집 파일이 없어요'),
-        h('p.muted', '책 화면에서 파일을 넣고 분석해요.'),
+        h('p.muted', '책 화면에서 파일을 넣고 분석하세요.'),
         h('button.btn.btn-primary', { onclick: () => nav.book(b.id) }, icon('arrowRight'), '책 화면으로'),
       ),
     );
@@ -650,7 +648,7 @@ function examTeacherField() {
   }
   return h('div.exam-field.exam-teacher',
     h('span.ef-label', icon('user'), '선생님'), select, input,
-    members.length ? h('span.small.muted', '목록에 없으면 직접 적어요.') : null,
+    members.length ? h('span.small.muted', '목록에 없으면 직접 입력하세요.') : null,
   );
 }
 
