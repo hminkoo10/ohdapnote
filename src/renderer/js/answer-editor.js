@@ -275,7 +275,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
       editable = writable(freshBook); editor.contentEditable = String(editable); answer.readOnly = !editable;
       toolbar.querySelectorAll('button').forEach((b) => { b.disabled = !editable; });
       const remote = (await api.getAnswers(book.id)).items[item.id] || { answer: '', blocks: [] };
-      if (!pending() && JSON.stringify(remote) !== JSON.stringify(saved)) {
+      if (!pending() && !composing && JSON.stringify(remote) !== JSON.stringify(saved)) {
         await loadImages(book.id, remote.blocks, images);
         saved = remote; draft = { answer: remote.answer, blocks: remote.blocks }; history = createAnswerHistory(draft); draw();
       }

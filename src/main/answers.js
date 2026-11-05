@@ -4,7 +4,7 @@ const { isObj, key } = require('./data-validate');
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const imageFile = (v) => typeof v === 'string' && /^answer-images\/[a-f0-9]{16}\.png$/.test(v);
-const text = (v, max) => typeof v === 'string' && v.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(v);
+const text = (v, max) => typeof v === 'string' && v.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\uD800-\uDFFF\uFFFE\uFFFF]/u.test(v);
 
 function sanitizeAnswer(v) {
   if (!isObj(v) || !text(v.answer, 200) || /[\r\n]/.test(v.answer) || !Array.isArray(v.blocks) || v.blocks.length > 500) return null;
@@ -60,6 +60,25 @@ function imageBytes(value) {
   const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   const jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
   if (!png && !jpeg) throw new Error('PNG 또는 JPEG 그림만 넣을 수 있어요.');
+  // 압축을 풀기 전에 큰 해상도를 거른다. 손상 여부는 실제 그림 읽기에서도 확인한다.
+  let width = 0;
+  let height = 0;
+  if (png && bytes.length >= 24) { width = bytes.readUInt32BE(16); height = bytes.readUInt32BE(20); }
+  if (jpeg) {
+    let at = 2;
+    while (at + 4 <= bytes.length && bytes[at] === 255) {
+      const marker = bytes[at + 1];
+      if (marker === 255) { at++; continue; }
+      if (marker === 218 || marker === 217) break;
+      const length = bytes.readUInt16BE(at + 2);
+      if (length < 2 || at + length + 2 > bytes.length) break;
+      if ([192, 193, 194, 195, 197, 198, 199, 201, 202, 203, 205, 206, 207].includes(marker) && length >= 7) {
+        height = bytes.readUInt16BE(at + 5); width = bytes.readUInt16BE(at + 7); break;
+      }
+      at += length + 2;
+    }
+  }
+  if (width > 20000 || height > 20000 || width * height > 32000000) throw new Error('그림 해상도가 너무 커요. 크기를 줄여 주세요.');
   return bytes;
 }
 

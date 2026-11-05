@@ -21,7 +21,7 @@ const cloud = require('./magoedu-cloud');
 const { createUpdateMonitor } = require('./update-restart');
 const { createPhotoImports } = require('./photo-import');
 const datasign = require('./datasign');
-const { isObj, line, model, int, url, codexPath, sanitizeData, relativePath, invalidJson, cleanJson: cleanValue } = require('./data-validate');
+const { isObj, key, line, model, int, url, codexPath, sanitizeData, relativePath, invalidJson, cleanJson: cleanValue } = require('./data-validate');
 const { sanitizeStudent } = cloud;
 const { mergeNote } = require('./notemerge');
 const subjects = require('./subjects');
@@ -1033,12 +1033,14 @@ function registerIpc() {
   const answersFile = (id) => path.join(bookDir(id), 'answers.json');
   const readAnswers = (id) => readJsonSync(answersFile(id), { version: 1, items: {} }, sanitizeAnswers);
   const saveAnswer = ({ bookId, itemId, data } = {}) => {
+    if (!key(itemId, 200)) throw new Error('잘못된 문항 번호예요.');
     const book = checkBookWrite(bookId);
     if (!book?.docs?.problem?.items?.some((item) => item.id === itemId)) throw new Error('문항이 없어졌어요. 책을 다시 열어 주세요.');
     const entry = sanitizeAnswer(data);
     if (!entry) throw new Error('정답·해설의 길이나 그림 경로를 확인해 주세요.');
     const all = readAnswers(bookId);
     all.items[itemId] = { ...entry, updatedAt: Date.now(), by: createdByMe() };
+    if (Object.keys(all.items).length > 20000) throw new Error('한 책에는 정답·해설을 2만 문항까지 저장할 수 있어요.');
     if (Buffer.byteLength(JSON.stringify(all)) > 16 * 1024 * 1024) throw new Error('해설 용량이 너무 커요. 그림이나 긴 글을 줄여 주세요.');
     writeJsonAtomicSync(answersFile(bookId), all);
     send('data:changed', { books: [bookId], notes: [], answers: true });

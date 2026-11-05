@@ -24,4 +24,17 @@ test('그림 바이트 검사: 형식·8MB 제한', () => {
   assert.throws(() => imageBytes(new Uint8Array(MAX_IMAGE_BYTES + 1)), /8MB/);
   assert.throws(() => imageBytes('data:image/png'), /그림/);
   assert.equal(imageBytes(Uint8Array.from([255, 216, 255, 1])).length, 4);
+  const png = Buffer.alloc(24); Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
+  png.writeUInt32BE(100000, 16); png.writeUInt32BE(100000, 20);
+  assert.throws(() => imageBytes(png), /해상도/);
+  const jpeg = Buffer.from([255, 216, 255, 192, 0, 7, 8, 255, 255, 255, 255]);
+  assert.throws(() => imageBytes(jpeg), /해상도/);
+});
+
+test('전체 글 크기·XML 불가 문자와 메타데이터 검사', () => {
+  assert.equal(sanitizeAnswer({ answer: '', blocks: Array.from({ length: 20 }, () => ({ type: 'para', text: '가'.repeat(20000) })) }), null);
+  for (const answer of ['\uD800', '\uFFFF', '\u0000']) assert.equal(sanitizeAnswer({ answer, blocks: [] }), null);
+  assert.equal(sanitizeAnswer({ answer: '😀', blocks: [] }).answer, '😀');
+  assert.deepEqual(sanitizeAnswer({ answer: '', blocks: [], updatedAt: -1, by: { id: '__proto__', name: '이름' } }), { answer: '', blocks: [] });
+  assert.deepEqual(sanitizeAnswers({ version: 2, items: { x: entry } }), { version: 1, items: {} });
 });
