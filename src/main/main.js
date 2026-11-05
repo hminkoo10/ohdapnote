@@ -9,7 +9,7 @@
 // - 수식 인식(선택 기능, AI 없이 내 컴퓨터에서): Pix2Text MFR — src/main/mathocr.js 를 utilityProcess(mathocr-worker.js)에서
 // - 업데이트는 통합 클라우드가 받아 둠 → 종료 코드 75 로 끝내면 새 버전으로 다시 켜짐
 
-const { app, BrowserWindow, protocol, ipcMain, dialog, shell, Menu, net, utilityProcess } = require('electron');
+const { app, BrowserWindow, protocol, ipcMain, dialog, shell, Menu, net, utilityProcess, nativeImage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
@@ -25,6 +25,7 @@ const { isObj, line, model, int, url, codexPath, sanitizeData, relativePath, inv
 const { sanitizeStudent } = cloud;
 const { mergeNote } = require('./notemerge');
 const subjects = require('./subjects');
+const { sanitizeAnswer, sanitizeAnswers, imageFile, imageBytes, MAX_IMAGE_BYTES } = require('./answers');
 
 log.initialize();
 log.transports.file.level = 'info';
@@ -1029,6 +1030,57 @@ function registerIpc() {
     return cur;
   }
   const toSave = (book, cur) => ({ ...stripMeta(book), createdBy: cur?.createdBy || book.createdBy || createdByMe() });
+  const answersFile = (id) => path.join(bookDir(id), 'answers.json');
+  const readAnswers = (id) => readJsonSync(answersFile(id), { version: 1, items: {} }, sanitizeAnswers);
+  const saveAnswer = ({ bookId, itemId, data } = {}) => {
+    const book = checkBookWrite(bookId);
+    if (!book?.docs?.problem?.items?.some((item) => item.id === itemId)) throw new Error('문항이 없어졌어요. 책을 다시 열어 주세요.');
+    const entry = sanitizeAnswer(data);
+    if (!entry) throw new Error('정답·해설의 길이나 그림 경로를 확인해 주세요.');
+    const all = readAnswers(bookId);
+    all.items[itemId] = { ...entry, updatedAt: Date.now(), by: createdByMe() };
+    if (Buffer.byteLength(JSON.stringify(all)) > 16 * 1024 * 1024) throw new Error('해설 용량이 너무 커요. 그림이나 긴 글을 줄여 주세요.');
+    writeJsonAtomicSync(answersFile(bookId), all);
+    send('data:changed', { books: [bookId], notes: [], answers: true });
+    return all.items[itemId];
+  };
+  handle('answers:get', (_e, id) => readAnswers(id));
+  handle('answers:save', (_e, args) => saveAnswer(args));
+  ipcMain.on('answers:saveSync', (event, args) => {
+    try { event.returnValue = saveAnswer(args); }
+    catch (err) { log.warn('[answers:saveSync]', err.message); event.returnValue = false; }
+  });
+  const answerImagePath = (id, file) => {
+    if (!imageFile(file)) throw new Error('잘못된 그림 경로예요.');
+    const dir = path.join(bookDir(id), 'answer-images');
+    const dest = path.join(bookDir(id), file);
+    for (const p of [dir, dest]) {
+      if (fs.existsSync(p) && fs.lstatSync(p).isSymbolicLink()) throw new Error('연결된 그림 경로는 사용할 수 없어요.');
+    }
+    return dest;
+  };
+  handle('answers:putImage', (_e, { bookId, data } = {}) => {
+    if (!checkBookWrite(bookId)) throw new Error('책을 찾을 수 없어요.');
+    const bytes = imageBytes(data);
+    const img = nativeImage.createFromBuffer(bytes);
+    const { width, height } = img.getSize();
+    if (img.isEmpty() || width * height > 32000000 || width > 20000 || height > 20000) throw new Error('그림이 손상되었거나 너무 커요.');
+    const png = img.toPNG();
+    if (png.length > MAX_IMAGE_BYTES) throw new Error('변환된 그림이 8MB를 넘어요. 크기를 줄여 주세요.');
+    const file = `answer-images/${crypto.createHash('sha256').update(png).digest('hex').slice(0, 16)}.png`;
+    const dest = answerImagePath(bookId, file);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    if (!fs.existsSync(dest)) { markOwn(dest); fs.writeFileSync(dest, png); }
+    return file;
+  });
+  handle('answers:getImage', async (_e, { bookId, file } = {}) => {
+    let dest = answerImagePath(bookId, file);
+    if (!fs.existsSync(dest)) await fetchBookFiles(bookId, [file]);
+    dest = answerImagePath(bookId, file);
+    if (fs.statSync(dest).size > MAX_IMAGE_BYTES) throw new Error('그림이 너무 커요.');
+    const bytes = imageBytes(fs.readFileSync(dest));
+    return `data:image/png;base64,${bytes.toString('base64')}`;
+  });
   photoImports = createPhotoImports({ readBook: checkBookWrite, dirFor: bookDir, markOwn, removeRemoteOnly, log,
     saveBook: (book, cur) => writeJsonAtomicSync(bookFile(book.id), toSave(book, cur)) });
 

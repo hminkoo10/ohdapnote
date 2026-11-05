@@ -78,6 +78,11 @@ contextBridge.exposeInMainWorld('ohdap', {
   saveFile: ({ defaultName, data, filters, title }) => ipcRenderer.invoke('files:saveFile', { defaultName, data, filters, title }),
   getTranscripts: (bookId) => ipcRenderer.invoke('books:getTranscripts', bookId),
   saveTranscripts: (bookId, data) => ipcRenderer.invoke('books:saveTranscripts', { bookId, data }),
+  getAnswers: (bookId) => ipcRenderer.invoke('answers:get', bookId),
+  saveAnswer: (bookId, itemId, data) => ipcRenderer.invoke('answers:save', { bookId, itemId, data }),
+  saveAnswerSync: (bookId, itemId, data) => ipcRenderer.sendSync('answers:saveSync', { bookId, itemId, data }),
+  putAnswerImage: (bookId, data) => ipcRenderer.invoke('answers:putImage', { bookId, data }),
+  getAnswerImage: (bookId, file) => ipcRenderer.invoke('answers:getImage', { bookId, file }),
 
   openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
   showItemInFolder: (p) => ipcRenderer.invoke('shell:showItem', p),
