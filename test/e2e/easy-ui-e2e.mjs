@@ -141,7 +141,7 @@ try {
   await seedTranscripts();
   await nav('home', { tab: 'bank' });
   await win.waitForSelector('.bank-intro');
-  assert.equal(await win.locator('.bank-path').first().textContent(), 'AI'); passed++;
+  assert.equal(await win.locator('.bank-path').first().textContent(), '정밀 인식'); passed++;
   await capture('문제은행', '.bank-heading .btn, .bank-intro .btn', async () => {
     await win.locator('main.home').evaluate((el) => el.scrollTop = 0);
   });
