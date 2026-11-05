@@ -328,6 +328,9 @@ try {
     if ((await win.isChecked('.settings h4 .switch input')) !== on) await win.click('.settings h4 .switch');
     if ((await win.isVisible('.settings .set-adv')) !== on) throw new Error('AI 를 끄고 켤 때 세부 설정이 숨거나 보이지 않습니다');
     await win.click('.modal-footer .btn-primary');
+    // '설정을 저장했어요' 알림이 내보내기의 '저장했어요' 기다림에 잡히지 않게
+    await waitToast('설정을 저장했어요', 10000);
+    await clearToasts();
   };
   await setAi(false);
   await win.waitForSelector('.export-hint:has-text("AI 가 꺼져")', { timeout: 10000 });

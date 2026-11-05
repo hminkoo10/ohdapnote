@@ -148,7 +148,7 @@ try {
   assert.ok(await win.$('.bank-intro'));
   await win.click('button[title="안내 닫기"]');
   assert.equal(await win.locator('.bank-intro').count(), 0);
-  await win.getByRole('button', { name: '도움말', exact: true }).click();
+  await win.getByRole('button', { name: '처음 안내 다시 보기', exact: true }).click();
   assert.ok(await win.$('.bank-intro'));
 
   step('일반 글꼴 수학 PDF는 OCR 모델 필요 → 설정 열기 → 넣기 멈춤');

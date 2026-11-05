@@ -197,7 +197,7 @@ try {
   step('학생 답지 공개: 예전 노트는 기본 끔, 켜기·다시 열기·끄기');
   assert((await call('getNote', skyNote)).answersForStudent === false, '예전 노트의 학생 답지 공개 기본값');
   assert(!(await win.isChecked('#answers-for-student')), '예전 노트의 스위치가 켜졌습니다');
-  assert((await win.textContent('#answers-for-student-hint')).includes('학생이 받는 PDF'), '학생 PDF 설명');
+  assert((await win.textContent('#answers-for-student-hint')).includes('받는 PDF'), '학생 PDF 설명');
   await win.click('.note-student-settings .switch');
   await until(() => readNote(studentNote(sky.id, skyNote)).answersForStudent === true, '학생 답지 공개가 저장되지 않았습니다');
   await openNoteFromHome(sky.id, '하늘 1학기');

@@ -277,7 +277,7 @@ function renderBank(root, summaries, books, entries, failed) {
 
   refreshJobs = renderBooks;
   refresh = () => { renderBooks(); renderList(); renderPreview(); renderBasket(); };
-  root.append(h('div.bank-heading', h('h2', '찾아서 시험지로'), h('button.btn', { onclick: () => { bs.intro = true; writeLocal('ohdap.bankIntro', false); renderIntro(); } }, icon('help'), '도움말')),
+  root.append(h('div.bank-heading', h('h2', '찾아서 시험지로'), h('button.btn', { onclick: () => { bs.intro = true; writeLocal('ohdap.bankIntro', false); renderIntro(); } }, icon('help'), '처음 안내 다시 보기')),
     intro, intake, ...failed.map((s) => h('p.warn-text', s)),
     h('div.bank-columns', h('section.bank-main', filters, h('div.bank-heading', h('h3', '문항 목록'), count), list), h('aside.bank-side', preview, basket)));
   renderIntro();
