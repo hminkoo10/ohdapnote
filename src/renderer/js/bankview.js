@@ -9,6 +9,7 @@ import { loadTranscripts, bestTranscript, setEditedTranscript, clearEditedTransc
 import { putBank } from './bank-transcribe.js';
 import { answerEditorButton, showAnswerPreview } from './answer-editor.js';
 import { attachAnswers } from './answers.js';
+import { answerContent } from './answer-model.js';
 
 const readLocal = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
@@ -67,6 +68,7 @@ export function bankView(summaries) {
           cache.set(summary.id, cached);
         }
         Object.assign(cached.book, { subjectOpen: summary.subjectOpen, $subjectOpen: summary.subjectOpen, $canEdit: summary.canEdit, subject: summary.subject, name: summary.name });
+        cached.book.$answers = await api.getAnswers(summary.id);
         await loadTranscripts(summary.id, { reload: true });
         books.push(cached.book);
       } catch (err) {
@@ -348,7 +350,7 @@ function exportOptions(picked, entries) {
     hint.textContent = `디지털 PDF는 PDF 글자 그대로 옮겨요. ${CONVERT_MODES[o.convert]?.hint || CONVERT_MODES.ocr.hint}. 고친 글이 있으면 가장 먼저 써요.`;
   };
   formatHint();
-  const anyAnswers = picked.some((e) => open(e) && e.answer);
+  const anyAnswers = picked.some((e) => open(e) && (e.answer || answerContent(e.bookObj.$answers?.items[e.item.id])));
   return h('div.bank-export',
     h('details.exam-box', { open: true }, h('summary', icon('school'), '시험지 머리'),
       h('div.exam-fields', [['title', '제목'], ['student', '학생'], ['academy', '학원'], ['teacher', '선생님'], ['date', '날짜']].map(([key, name]) => h('label.exam-field',
@@ -362,7 +364,7 @@ function exportOptions(picked, entries) {
         h('input', { type: 'checkbox', checked: o[key], onchange: (ev) => set(key, ev.target.checked) }), h('span.sw'), label))), hint),
     h('div.export-buttons', [['problems', '문제지', '고른 문제만'], ['answers', '해설지', '고른 해설만'], ['both-inline', '문제 + 해설', '문제마다 바로 뒤에'], ['both-end', '문제 + 해설', '해설은 맨 뒤에']].map(([mode, title, sub]) => h('button.export-btn', {
       dataset: { mode }, disabled: !picked.length || mode !== 'problems' && !anyAnswers,
-      title: !picked.length ? '먼저 문항을 담아 주세요.' : mode !== 'problems' && !anyAnswers ? '책에 답지를 올리고 분석하면 쓸 수 있어요.' : sub,
+      title: !picked.length ? '먼저 문항을 담아 주세요.' : mode !== 'problems' && !anyAnswers ? '정답·해설을 직접 쓰거나 답지를 올려 주세요.' : sub,
       onclick: () => attempt(() => restartGuard.track('export', () => exportBank(mode, entries))),
     }, h('span.xb-icon', icon('download')), h('span.xb-text', h('b', title), h('small', sub))))));
 }

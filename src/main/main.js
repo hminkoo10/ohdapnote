@@ -21,7 +21,8 @@ const cloud = require('./magoedu-cloud');
 const { createUpdateMonitor } = require('./update-restart');
 const { createPhotoImports } = require('./photo-import');
 const datasign = require('./datasign');
-const { isObj, key, line, model, int, url, codexPath, sanitizeData, relativePath, invalidJson, cleanJson: cleanValue } = require('./data-validate');
+const { isObj, line, model, int, url, codexPath, sanitizeData, relativePath, invalidJson, cleanJson: cleanValue } = require('./data-validate');
+const { key } = require('./data-validate');
 const { sanitizeStudent } = cloud;
 const { mergeNote } = require('./notemerge');
 const subjects = require('./subjects');
@@ -1018,7 +1019,7 @@ function registerIpc() {
     const { dir, place } = locateBook(id);
     const book = await readJson(path.join(dir, 'book.json'), null, sanitizeBook);
     if (!book) throw new Error('책을 찾을 수 없습니다.');
-    return { ...book, $canEdit: canEditBook(book, place), $shared: academyMode() && place === 'shared', $subjectOpen: subjectOpen(book) };
+    return { ...book, $canEdit: canEditBook(book, place), $shared: academyMode() && place === 'shared', $subjectOpen: subjectOpen(book), $answers: readAnswers(id) };
   });
 
   /** 지금 저장된 책을 고칠 수 있는지 (만든 사람은 바뀌지 않음) → 저장된 책 */

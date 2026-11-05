@@ -407,7 +407,8 @@ try {
   await win.waitForFunction(() => document.querySelectorAll('.bank-row').length === 1);
   await win.locator('.bank-row').click();
   await win.waitForSelector('.bank-preview .readonly-banner');
-  assert.equal(await win.locator('.bank-preview button').count(), 0);
+  assert.equal(await win.locator('.bank-preview button:not(.answer-open)').count(), 0);
+  assert.equal(await win.locator('.bank-preview .answer-open').innerText(), '정답·해설 보기');
   assert.doesNotMatch(await win.textContent('.bank-transcript'), /null|undefined|문제은행에 넣기/);
   await clearToasts();
   await win.screenshot({ path: join(OUT, 'bank-1040.png') });

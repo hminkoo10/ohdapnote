@@ -244,7 +244,7 @@ async function reloadBook(change) {
     return;
   }
   // 저장된 내용이 그대로면(원본 파일만 받았거나 옮긴 결과만 바뀜) 다시 그리지 않음
-  if (fresh.updatedAt === b.updatedAt && fresh.$canEdit === b.$canEdit && fresh.$shared === b.$shared && fresh.$subjectOpen === b.$subjectOpen) return;
+  if (fresh.updatedAt === b.updatedAt && fresh.$canEdit === b.$canEdit && fresh.$shared === b.$shared && fresh.$subjectOpen === b.$subjectOpen && JSON.stringify(fresh.$answers) === JSON.stringify(b.$answers)) return;
   fresh.docs ||= { problem: null, answer: null };
   fresh.answerOverrides ||= {};
   const sources = await getSources(fresh);

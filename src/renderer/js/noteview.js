@@ -3,6 +3,7 @@
 import { h, clear, toast, modal, confirmDialog, icon, animateOut, countUp } from './ui.js';
 import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS, CONVERT_MODES } from './exporter.js';
 import { attachAnswers } from './answers.js';
+import { answerContent } from './answer-model.js';
 import { exportHwpx } from './transcribe.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiLabel, findJob, restartGuard, restartPendingChecks } from './shared.js';
@@ -94,7 +95,7 @@ async function loadBooks(ids) {
       matches.delete(bid);
       continue;
     }
-    if (old && old.updatedAt === b.updatedAt && old.$canEdit === b.$canEdit && old.$subjectOpen === b.$subjectOpen) continue;
+    if (old && old.updatedAt === b.updatedAt && old.$canEdit === b.$canEdit && old.$subjectOpen === b.$subjectOpen && JSON.stringify(old.$answers) === JSON.stringify(b.$answers)) continue;
     books.set(bid, b);
     matches.set(bid, m);
     sources.delete(bid); // 파일을 바꿨을 수 있음 → 볼 때 다시 엶 (같은 파일이면 열어 둔 것을 씀)
@@ -694,8 +695,8 @@ function exportPanel() {
         },
       }),
     );
-  const anyAnswers = [...ns.books.values()].some((b) => b.docs.answer?.items?.length);
-  const needAns = anyAnswers ? '' : '책에 답지를 올리고 분석하면 쓸 수 있어요';
+  const anyAnswers = [...ns.books.values()].some((b) => b.docs.answer?.items?.length || b.docs.problem?.items?.some((item) => answerContent(b.$answers?.items[item.id])));
+  const needAns = anyAnswers ? '' : '정답·해설을 직접 쓰거나 답지를 올려 주세요';
   const exportBtn = (mode, title, sub, tip, disabled) =>
     h('button.export-btn', { onclick: () => doExport(mode), dataset: { mode }, disabled, title: tip }, h('span.xb-icon', icon('download')), h('span.xb-text', h('b', title), sub ? h('small', sub) : null));
   return h(
@@ -874,7 +875,7 @@ function renderExportSummary() {
     el.append(h('p.empty-hint', '왼쪽 표에서 틀린 번호를 골라 주세요.'));
     return;
   }
-  const noAns = entries.filter((e) => e.bookObj.docs.answer?.items?.length && !e.answer).length;
+  const noAns = entries.filter((e) => e.bookObj.docs.answer?.items?.length && !e.answer && !answerContent(e.bookObj.$answers?.items[e.problem.id])).length;
   if (noAns) el.append(h('p.warn-text.small', icon('warn'), `해설 짝이 없는 문항 ${noAns}개`));
   el.append(
     h(

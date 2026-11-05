@@ -33,7 +33,7 @@ export function renderAnswerDocument(root, blocks, images = new Map()) {
       root.append(h('div.answer-figure', { contenteditable: 'false', draggable: true, tabindex: '0', dataset: { block: 'figure', file: b.file, w: b.w, h: b.h } }, h('img', { src: images.get(b.file) || '', alt: '해설 그림' })));
     } else {
       const p = h('p', { dataset: { original: JSON.stringify(b.original) } });
-      for (const run of b.runs) p.append(run.eq !== undefined ? mathNode(run.eq) : document.createTextNode(run.text));
+      for (const run of b.runs) if (run.eq !== undefined || run.text) p.append(run.eq !== undefined ? mathNode(run.eq) : document.createTextNode(run.text));
       if (!p.textContent && !p.querySelector('[data-eq]')) p.append(h('br'));
       root.append(p);
     }
@@ -94,7 +94,10 @@ export async function showAnswerPreview(root, bookId, itemId) {
 }
 
 export async function openAnswerEditor({ book, item, sources, answerItem, onChange }) {
+  const sourceBook = book;
   book = await api.getBook(book.id);
+  item = book.docs?.problem?.items?.find((current) => current.id === item.id);
+  if (!item) throw new Error('문항이 바뀌었어요. 책을 다시 열어 주세요.');
   let editable = writable(book);
   let saved = (await api.getAnswers(book.id)).items[item.id] || { answer: '', blocks: [] };
   let draft = { answer: saved.answer, blocks: saved.blocks };
@@ -296,7 +299,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
       closed = true; stop(); saver.cancel();
       document.removeEventListener('selectionchange', rememberSelection); window.removeEventListener('beforeunload', unload);
       restartSaveHooks.delete(flush); restartPendingChecks.delete(pending); leaveHooks.delete(flush);
-      onChange?.();
+      api.getAnswers(book.id).then((data) => { sourceBook.$answers = data; onChange?.(); }).catch(fail);
     }, buttons: [{ label: '닫기', value: true }],
   });
 }
