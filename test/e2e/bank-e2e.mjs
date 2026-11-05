@@ -384,8 +384,15 @@ try {
     store.dirty = true;
     await saveTranscripts();
     const original = src.problem.getMathLayer.bind(src.problem);
-    window.restoreBankSource = () => { src.problem.getMathLayer = original; };
-    src.problem.getMathLayer = async (p) => { await new Promise((r) => setTimeout(r, 3000)); return original(p); };
+    window.restoreBankSource = () => { window.releaseBankSource?.(); src.problem.getMathLayer = original; };
+    src.problem.getMathLayer = async (p) => {
+      // 마지막 문항은 취소를 누를 때까지 대기해 화면 응답 속도에 영향을 받지 않게 한다.
+      if (window.bankJob()?.done === 2) {
+        window.bankSourceBlocked = true;
+        await new Promise((resolve) => { window.releaseBankSource = resolve; });
+      }
+      return original(p);
+    };
     const { showHome } = await import('./js/home.js');
     await showHome();
   }, ids.english);
@@ -393,9 +400,11 @@ try {
   await win.click(`.bank-book[data-book="${ids.english}"] button`);
   await win.click('.modal .btn-primary:has-text("넣기 시작")');
   await win.click('.modal .btn-primary:has-text("다른 일 하면서 기다리기")');
-  await win.waitForFunction(() => window.bankJob()?.done === 2);
+  await win.waitForFunction(() => window.bankJob()?.done === 2 && window.bankSourceBlocked);
   await win.click(`.bank-book[data-book="${ids.english}"] button:has-text("진행 보기")`);
   await win.getByRole('button', { name: '취소', exact: true }).click();
+  await win.waitForFunction(() => window.bankJob()?.cancelled);
+  await win.evaluate(() => window.releaseBankSource());
   await win.waitForFunction(() => !window.bankJob());
   assert.equal(Object.keys(JSON.parse(readFileSync(ownTranscripts, 'utf8')).items).length, 2, '지문·첫 문항을 중간 저장');
   await win.evaluate(() => window.restoreBankSource());
@@ -431,6 +440,7 @@ try {
   process.exitCode = 1;
 } finally {
   if (win) await win.evaluate(async () => {
+    window.restoreBankSource?.();
     document.querySelectorAll('.modal').forEach((m) => m.close?.('cancel'));
     const { stopJobs } = await import('./js/shared.js');
     await stopJobs();
