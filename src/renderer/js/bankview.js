@@ -10,6 +10,9 @@ import { putBank } from './bank-transcribe.js';
 import { answerEditorButton, showAnswerPreview } from './answer-editor.js';
 import { attachAnswers } from './answers.js';
 import { answerContent } from './answer-model.js';
+import { blockSegs, renderStack } from './hwpx.js';
+import { TRANSCRIBE_WIDTH } from './transcribe.js';
+import { REVIEW_HELP, reviewPanel } from './review-ui.js';
 
 const readLocal = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
@@ -297,21 +300,25 @@ async function editTranscript(e, block) {
   const found = bestTranscript(e.bookId, block);
   const blocks = JSON.parse(JSON.stringify(found?.entry.blocks || [{ type: 'para', text: '' }]));
   const fields = h('div.bank-edit-fields');
+  const release = holdSource(e.bookObj, block.role);
+  let stack;
+  const review = reviewPanel(blocks, () => (stack ||= renderStack(blockSegs(block), TRANSCRIBE_WIDTH)));
   const draw = () => {
+    review.resetFields();
     clear(fields);
     blocks.forEach((b, i) => {
-      const input = (tag, value, update) => h(tag, { value, 'aria-label': `${i + 1}번째 ${b.type === 'math' ? '수식' : b.type === 'choices' ? '보기' : '글'} 칸`, oninput: (ev) => update(ev.target.value) });
       const move = (d) => { [blocks[i], blocks[i + d]] = [blocks[i + d], blocks[i]]; draw(); };
       fields.append(h('section.bank-edit-block',
         h('div.bank-heading', h('strong', `${i + 1}. ${{ para: '글', math: '수식', choices: '보기', figure: '그림' }[b.type]}`),
           h('button.btn.btn-small', { disabled: !i, onclick: () => move(-1) }, '위로'),
           h('button.btn.btn-small', { disabled: i === blocks.length - 1, onclick: () => move(1) }, '아래로'),
           h('button.btn.btn-small', { onclick: () => { blocks.splice(i, 1); draw(); } }, '빼기')),
-        b.type === 'para' ? input('textarea.input', b.text, (v) => { b.text = v; })
-          : b.type === 'math' ? h('div', input('input.input', b.latex, (v) => { b.latex = v; }), h('p.small.muted', '수식은 LaTeX 로 적어요. 예: \\frac{1}{2}'))
-            : b.type === 'choices' ? h('div.bank-edit-choices', b.items.map((v, j) => h('label', choiceMark(j), input('input.input', v, (s) => { b.items[j] = s; }))))
+        b.type === 'para' ? review.field(i)
+          : b.type === 'math' ? h('div', review.field(i), h('p.small.muted', '수식은 LaTeX 로 적어요. 예: \\frac{1}{2}'))
+            : b.type === 'choices' ? h('div.bank-edit-choices', b.items.map((v, j) => h('div', choiceMark(j), review.field(i, j))))
               : h('p', '[그림]')));
     });
+    review.update();
   };
   draw();
   let busy = false;
@@ -328,9 +335,13 @@ async function editTranscript(e, block) {
       return true;
     } catch (err) { fail(err); return false; } finally { busy = false; }
   };
-  await modal({ title: `${itemName(block.item)} · 글 고치기`, width: 680,
-    body: h('div.bank-editor', h('p.small.muted', '고친 글은 한글(HWPX) 내보내기에 쓰여요. PDF는 원본 그림 그대로예요.'), fields,
-      h('div.bank-heading', h('button.btn', { onclick: () => { blocks.push({ type: 'para', text: '' }); draw(); } }, '글 칸 더하기'), h('button.btn', { onclick: () => { blocks.push({ type: 'math', latex: '' }); draw(); } }, '수식 칸 더하기'))),
+  await modal({ title: `${itemName(block.item)} · 글 고치기`, width: 980, className: 'review-modal',
+    onKeyDown: review.keydown,
+    onClose: () => { review.close(); release(); stack = null; },
+    body: h('div.bank-editor', h('p.review-help', REVIEW_HELP), review.toolbar,
+      h('div.review-layout', h('section', fields,
+        h('div.bank-heading', h('button.btn', { onclick: () => { blocks.push({ type: 'para', text: '' }); draw(); } }, '글 칸 더하기'), h('button.btn', { onclick: () => { blocks.push({ type: 'math', latex: '' }); draw(); } }, '수식 칸 더하기'))), review.aside),
+      h('p.small.muted', '고친 글은 한글(HWPX) 내보내기에 쓰여요. PDF는 원본 그림 그대로예요.')),
     buttons: [{ label: '취소', value: false }, ...(found?.path === 'edit' ? [{ label: '원래대로', onClick: () => store(true) }] : []), { label: '저장', primary: true, onClick: () => store(false) }],
   });
 }

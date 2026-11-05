@@ -1217,6 +1217,91 @@ select.input {
   align-items: center;
   margin: 6px 0;
 }
+.review-help {
+  font-size: 16px;
+  line-height: 1.7;
+}
+.review-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface, #fff);
+  padding: 10px 0;
+  margin-bottom: 12px;
+}
+.review-toolbar .btn,
+.review-modal .modal-footer .btn {
+  min-height: 44px;
+  font-size: 18px;
+}
+.review-count { min-width: 50px; font-size: 18px; }
+.review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.55fr);
+  gap: 16px;
+  align-items: start;
+}
+.review-reference {
+  position: sticky;
+  top: 76px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: #fff;
+  color: #222;
+}
+.review-reference h4 { margin: 0 0 12px; font-size: 18px; }
+.review-zoom { overflow: auto; max-height: 380px; font-size: 16px; }
+.review-zoom canvas { display: block; max-width: none; }
+.review-field { min-width: 0; width: 100%; }
+.review-input { position: relative; background: #fff; border-radius: var(--r); }
+.review-input .review-text,
+.review-ink {
+  padding: 12px;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.8;
+  letter-spacing: normal;
+  tab-size: 8;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  box-sizing: border-box;
+}
+.review-input .review-text {
+  display: block;
+  position: relative;
+  width: 100%;
+  margin: 0;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: #222;
+  resize: vertical;
+}
+.review-backdrop {
+  position: absolute;
+  inset: 1px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.review-ink { color: transparent; min-height: 100%; }
+.review-mark {
+  background: linear-gradient(transparent 72%, #efc337 72%, #efc337 94%, transparent 94%);
+  border-radius: 2px;
+}
+.review-math { outline: 2px solid #b47b00; outline-offset: 1px; background: #fff3c6; }
+.review-mark-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.review-mark-button { font-size: 16px; min-height: 38px; border-bottom: 3px solid #d5a800; white-space: normal; text-align: left; }
+.bank-review-count { color: #705000; background: #fff3c6; font-size: 16px; padding: 4px 8px; border-radius: 4px; }
+@media (max-width: 760px) {
+  .review-layout { grid-template-columns: minmax(0, 1fr); }
+  .review-reference { position: static; grid-row: 1; }
+}
 @media (max-width: 1100px) {
   .bank-books { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bank-columns { grid-template-columns: minmax(0, 1fr) minmax(340px, 0.9fr); }
