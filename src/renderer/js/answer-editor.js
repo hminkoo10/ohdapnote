@@ -172,7 +172,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
   async function equation(node) {
     if (!editable) return;
     rememberSelection(); history.boundary();
-    const result = await openEquationEditor({ eq: node?.dataset.eq || '', display: node?.dataset.block === 'math' });
+    const result = await openEquationEditor({ eq: node?.dataset.eq || '', display: node?.dataset.block === 'math', returnScope: 'answer' });
     if (!result || !editable) return;
     const next = mathNode(result.eq, result.display);
     if (node?.isConnected && (node.dataset.block === 'math') === result.display) { node.replaceWith(next); capture(); }
@@ -224,9 +224,15 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
   };
   let chord = 0;
   const keys = (e) => {
-    if (!editable || e.isComposing) return;
-    if (e.ctrlKey && e.code === 'KeyN') { e.preventDefault(); chord = Date.now(); return; }
-    if (e.code === 'KeyM' && Date.now() - chord < 1500) { e.preventDefault(); chord = 0; equation().catch(fail); return; }
+    if (!editable || composing || e.isComposing) return;
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.code === 'KeyN') { e.preventDefault(); chord = Date.now(); return; }
+    if (!e.altKey && !e.metaKey && e.code === 'KeyM' && Date.now() - chord < 1500) { e.preventDefault(); chord = 0; equation().catch(fail); return; }
+    chord = 0;
+    if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === 'KeyP') {
+      const range = window.getSelection()?.rangeCount ? window.getSelection().getRangeAt(0) : null;
+      const selected = e.target.closest?.('[data-eq]') || (range && range.startContainer === range.endContainer && range.endOffset === range.startOffset + 1 ? range.startContainer.childNodes[range.startOffset] : null);
+      if (selected?.dataset?.eq !== undefined && editor.contains(selected)) { e.preventDefault(); equation(selected).catch(fail); return; }
+    }
     if (e.ctrlKey && ['KeyZ', 'KeyY'].includes(e.code)) { e.preventDefault(); travel(e.code === 'KeyY' || e.shiftKey); }
     if (e.target.matches?.('[data-eq], [data-block="figure"]') && ['Backspace', 'Delete'].includes(e.key)) { e.preventDefault(); e.target.remove(); capture(); }
   };
@@ -282,6 +288,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
   const reference = h('aside.answer-reference', h('h4', '답지 그림'), h('p.small.muted', answerItem ? '그림을 보며 고쳐 주세요.' : '답지 파일이 없어도 정답·해설을 쓸 수 있어요.'));
   if (answerItem) itemImage(sources.answer, answerItem, 700).then((url) => { if (url) reference.append(h('img', { src: url, alt: '짝 해설 원본' })); }).catch(fail);
   draw();
+  await api.setEditorShortcutScope('answer');
   await modal({ title: `정답·해설 · ${item.number || item.num || ''}번`, width: 980, className: 'answer-editor-modal',
     body: h('div', h('p.small.muted', editable ? '글은 그냥 쓰고, 수식은 [수식] 단추를 눌러 넣어요. 저장은 저절로 돼요.' : '만든 사람과 원장만 고칠 수 있어요. 지금은 보기만 해요.'),
       h('div.answer-heading', h('label', '정답', answer), editable ? h('div.answer-choices', [...'①②③④⑤'].map((v) => h('button.btn.btn-small', { onclick: () => { if (editable) { answer.value = v; capture(); } } }, v))) : null, status),
@@ -289,6 +296,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
     beforeClose: flush,
     onClose: () => {
       closed = true; stop(); saver.cancel();
+      api.setEditorShortcutScope('');
       document.removeEventListener('selectionchange', rememberSelection); window.removeEventListener('beforeunload', unload);
       restartSaveHooks.delete(flush); restartPendingChecks.delete(pending); leaveHooks.delete(flush);
       api.getAnswers(book.id).then((data) => { sourceBook.$answers = data; onChange?.(); }).catch(fail);

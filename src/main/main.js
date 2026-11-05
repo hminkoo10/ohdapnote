@@ -20,6 +20,7 @@ const mathocr = require('./mathocr');
 const cloud = require('./magoedu-cloud');
 const { createUpdateMonitor } = require('./update-restart');
 const { createPhotoImports } = require('./photo-import');
+const { editorShortcut } = require('./editor-shortcuts');
 const datasign = require('./datasign');
 const { isObj, line, model, int, url, codexPath, sanitizeData, relativePath, invalidJson, cleanJson: cleanValue } = require('./data-validate');
 const { key } = require('./data-validate');
@@ -498,6 +499,12 @@ async function copyBookFiles(from, to) {
 // ---------------------------------------------------------------------------
 
 let mainWindow = null;
+let editorShortcutScope = '';
+ipcMain.handle('editor:shortcut-scope', (event, scope) => {
+  if (event.sender !== mainWindow?.webContents || !['', 'answer', 'equation'].includes(scope)) return;
+  editorShortcutScope = scope;
+  event.sender.setIgnoreMenuShortcuts(false);
+});
 let photoImports;
 const updateMonitor = createUpdateMonitor({
   app, ipcMain, cloud, session, isSmokeTest,
@@ -535,11 +542,20 @@ function createWindow() {
     if (!url.startsWith('app://bundle/')) event.preventDefault();
   });
   mainWindow.webContents.on('before-input-event', (event, input) => {
+    mainWindow.webContents.setIgnoreMenuShortcuts(editorShortcut(editorShortcutScope, input));
+    if (input.isComposing) return;
     if (devTools && input.type === 'keyDown' && (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i'))) {
       mainWindow.webContents.toggleDevTools();
       event.preventDefault();
     }
   });
+
+  const clearEditorShortcuts = () => {
+    editorShortcutScope = '';
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.setIgnoreMenuShortcuts(false);
+  };
+  mainWindow.webContents.on('did-start-navigation', (_event, _url, inPlace, isMainFrame) => { if (isMainFrame && !inPlace) clearEditorShortcuts(); });
+  mainWindow.webContents.on('render-process-gone', clearEditorShortcuts);
 
   mainWindow.loadURL('app://bundle/index.html');
   mainWindow.on('closed', () => {

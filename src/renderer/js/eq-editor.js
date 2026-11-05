@@ -2,6 +2,7 @@ import { h, modal, confirmDialog, toast } from './ui.js';
 import { api } from './shared.js';
 import { eqToMathML, parseEq } from './hwpeqview.js';
 import { TEMPLATE_GROUPS, SYMBOL_GROUPS, matrixTemplate, insertTemplate, moveSlot, cleanScript } from './eq-templates.js';
+import { EQUATION_SHORTCUTS, TEMPLATE_KEYS } from './eq-shortcuts.js';
 
 const MAX_LENGTH = 8000;
 const macroKey = 'equation-macros';
@@ -9,7 +10,7 @@ const warn = (error) => toast(error.message || String(error), { type: 'error' })
 const button = (name, key, onclick, attrs = {}) => h('button.btn.btn-small', { type: 'button', title: `${name}${key ? ` · ${key}` : ''}`, onclick, ...attrs }, name);
 
 /** 본문은 확정할 때만 바꿉니다. 미리보기와 고르기 목록은 이 창의 초안만 다룹니다. */
-export async function openEquationEditor({ eq = '', display = false } = {}) {
+export async function openEquationEditor({ eq = '', display = false, returnScope = '' } = {}) {
   const script = h('textarea.input.answer-equation-script', { rows: 4, maxlength: MAX_LENGTH, value: eq, spellcheck: false, 'aria-label': '한글 수식 스크립트' });
   const preview = h('div.answer-equation-preview', { tabindex: '0', 'aria-label': '바로 보이는 수식' });
   const warning = h('p.small.warn-text', { role: 'status' });
@@ -49,7 +50,8 @@ export async function openEquationEditor({ eq = '', display = false } = {}) {
     const rows = h('input.input', { type: 'number', min: 1, max: 10, value: 2, 'aria-label': '행렬 줄 수' });
     const columns = h('input.input', { type: 'number', min: 1, max: 10, value: 2, 'aria-label': '행렬 칸 수' });
     const grid = h('div.eq-template-grid', group.items.map((item) => {
-      const b = button(item.name, group.key, () => {
+      const key = group.id === 'script' ? ({ '위 첨자': 'Shift+6', '아래 첨자': 'Shift+-' })[item.name] : group.key;
+      const b = button(item.name, key, () => {
         try {
           const template = group.id === 'matrix' ? matrixTemplate(item.script, +rows.value, +columns.value) : item.script;
           if (put(template, true)) closePanel();
@@ -144,8 +146,24 @@ export async function openEquationEditor({ eq = '', display = false } = {}) {
         if (put(source.textContent)) closePanel();
       }))), h('p.small.muted', 'MathML 불러오기는 이 편집기에서 저장한 파일만 지원해요.')));
   };
+  const help = async () => {
+    closePanel();
+    const table = (heads, rows) => h('table.eq-help-table', h('thead', h('tr', heads.map((text) => h('th', text)))), h('tbody', rows.map((row) => h('tr', row.map((text) => h('td', text))))));
+    await modal({ title: '수식 단축키·문법', width: 800, className: 'eq-help-modal', body: h('div',
+      h('p', '한글 공식 단축키 22개입니다. 본문 키는 해설 편집기에서, 나머지는 수식 창에서 써요.'),
+      table(['번호', '키', '하는 일 · 공식 문맥'], EQUATION_SHORTCUTS),
+      h('p.small', '우리 화면: Enter는 스크립트에 #를 넣어요. Esc는 열린 목록부터 닫고, 목록이 없으면 취소 확인을 해요. P는 선택한 수식을 고치는 창을 열어요. Tab은 다음 칸으로, 마지막 칸에서는 틀 밖으로 나가요.'),
+      h('h4', '자주 쓰는 문법'), table(['입력', '하는 일'], [
+        ['{a} over {b}', '분수'], ['sqrt {x} / root {n} of {x}', '제곱근 / n제곱근'], ['x^2 / x_1 / x_1^2', '위 / 아래 / 양쪽 첨자'],
+        ['sum _{k=1}^{n} / int _{a}^{b}', '합 / 적분'], ['lim _{x -> a}', '극한'], ['matrix {a & b # c & d}', '행렬: &는 다음 칸, #는 다음 줄'],
+        ['cases {식 & 조건 # 식 & 조건}', '경우 나누기'], ['hat {x} / bar {AB}', '모자 / 윗줄'], ['rm / it / bold / rmbold', '글자 모양 전환'],
+        ['{여러 항} / "여러 글자"', '한 덩어리로 묶기 / 공백까지 그대로 쓰기'], ['~ / `', '보이는 공백 / 작은 공백'],
+      ]), h('p.small.muted', '미확인 키와 명령은 싣지 않았어요. 괄호 도구는 조사표의 모듈용 틀이며, 한글의 실제 삽입 문자열까지 같다는 뜻은 아니에요.')),
+    buttons: [{ label: '닫기', value: true }] });
+    focus();
+  };
   const toolbar = h('div.eq-toolbar', { role: 'toolbar', 'aria-label': '수식 도구' }, TEMPLATE_GROUPS.map((group) => button(group.name, group.key, () => pickGroup(group), { dataset: { group: group.id }, onmousedown: (e) => e.preventDefault() })),
-    button('기호·문자표', '', pickSymbols), button('명령어', '\\', commandPanel), button('자주 쓰는 수식', '', macros), button('글자·파일', '', formatPanel));
+    button('기호·문자표', '', pickSymbols), button('명령어', '\\', commandPanel), button('자주 쓰는 수식', '', macros), button('글자·파일', '', formatPanel), button('단축키', 'F1', help));
   const zoom = h('select.input', { 'aria-label': '수식 보기 확대', onchange: () => { preview.style.fontSize = `${32 * +zoom.value}px`; } },
     [['1', '100%'], ['1.25', '125%'], ['1.5', '150%'], ['2', '200%']].map(([value, name]) => h('option', { value }, name)));
   const extra = h('div.eq-extra-tools', button('이전 칸', 'Shift+Tab', () => move(true)), button('다음 칸', 'Tab', () => move(false)), button('줄 바꿈', 'Enter', () => { put('#'); closePanel(); }), h('label', '보기 확대 ', zoom));
@@ -157,13 +175,22 @@ export async function openEquationEditor({ eq = '', display = false } = {}) {
     if (node) focus(+node.dataset.eqStart, +node.dataset.eqEnd);
   });
   paint();
+  await api.setEditorShortcutScope('equation');
   const result = modal({ title: eq ? '수식 고치기' : '수식 넣기', width: 900, className: 'answer-equation-modal',
     body: h('div.eq-editor', h('p.eq-guide', '틀을 고르고 빈칸에 써 보세요. Tab으로 다음 칸, 위 수식을 누르면 그 부분을 고쳐요.'),
       h('strong', '바로 보이는 수식'), preview, warning, toolbar, panel, extra, h('label', '한글 수식 스크립트', script), h('label.check', centered, '가운데 수식으로 넣기')),
     onKeyDown: (event) => {
       if (composing || event.isComposing) return false;
+      if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+        const group = TEMPLATE_GROUPS.find((group) => group.id === TEMPLATE_KEYS[event.code]);
+        if (group) { pickGroup(group, true); return true; }
+        if (event.code === 'KeyN') return true;
+      }
+      if (event.key === 'F1') { help(); return true; }
+      if (event.key === 'Escape' && event.shiftKey) { dialog.close({ eq: cleanScript(script.value), display: centered.checked }); return true; }
       if (event.key === 'Escape' && !panel.hidden) { closePanel(); focus(); return true; }
       if (event.key === 'Tab' && event.target === script) { move(event.shiftKey); return true; }
+      if (event.key === 'Enter' && event.target === script) { put('#'); closePanel(); return true; }
       if (event.key === '\\' && event.target === preview) { commandPanel(); return true; }
       return false;
     },
@@ -176,6 +203,8 @@ export async function openEquationEditor({ eq = '', display = false } = {}) {
     buttons: [{ label: '취소', value: null }, { label: '넣기', primary: true, onClick: () => ({ eq: cleanScript(script.value), display: centered.checked }) }],
   });
   dialog = script.closest('.modal');
+  dialog.querySelector('.btn-primary').title = '넣기 · Shift+Esc';
+  dialog.querySelector('.modal-footer button').title = '취소 · Esc';
   focus();
-  return result;
+  return result.finally(() => api.setEditorShortcutScope(returnScope));
 }

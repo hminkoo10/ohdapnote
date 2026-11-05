@@ -25,7 +25,7 @@
 .answer-readonly .answer-math { cursor: default; }
 .answer-editor-modal .modal-body { overflow-y: auto; }
 .preview-head.ans { flex-wrap: wrap; }
-.answer-equation-modal .modal-body {
+.answer-equation-modal .modal-body, .eq-help-modal .modal-body {
   overflow: auto;
 }
 .eq-editor {

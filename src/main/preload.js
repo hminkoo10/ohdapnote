@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('ohdap', {
   appInfo: () => ipcRenderer.invoke('app:info'),
+  setEditorShortcutScope: (scope) => ipcRenderer.invoke('editor:shortcut-scope', scope),
   requestUpdateRestart: () => ipcRenderer.invoke('app:restart-for-update'),
   updateRestartReady: (state) => ipcRenderer.invoke('app:restart-ready', state),
   finishUpdateRestart: (result) => ipcRenderer.invoke('app:finish-update-restart', result),
