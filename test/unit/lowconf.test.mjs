@@ -41,18 +41,25 @@ test('수식 전체·보기 일부 수정, 세기·지우기·앞뒤 순환과 �
   assert.deepEqual(moveLow(blocks[1].low, 'x', 'y'), []);
 });
 
-test('표시 기준은 기존 수식 판정과 같고 경계 점수는 표시하지 않음', () => {
-  assert.equal(T.confMean, LOW_CONF.confMean);
-  assert.equal(T.confMin, LOW_CONF.confMin);
-  assert.deepEqual(textLow({ str: '가', conf: 70 }), []);
-  assert.equal(textLow({ str: '가', conf: 69 })[0].reason, 'ocr');
+test('표시 기준은 기존 수식 판정과 독립적이며 경계 점수는 표시하지 않음', () => {
+  assert.deepEqual(LOW_CONF, { text: 80, confMean: 0.90, confMin: 0.50 });
+  assert.equal(T.confMean, 0.93);
+  assert.equal(T.confMin, 0.3);
+  assert.deepEqual(textLow({ str: '가', conf: 80 }), []);
+  assert.equal(textLow({ str: '가', conf: 79.9 })[0].reason, 'ocr');
+  assert.equal(textLow({ str: '가', conf: 75 })[0].conf, 0.75);
+  assert.deepEqual(textLow({ str: '가', conf: 99, wordConf: 80 }), []);
+  assert.equal(textLow({ str: '가', conf: 99, wordConf: 79 })[0].conf, 0.79);
   assert.equal(textLow({ str: '가나', conf: 98, wordConf: 60 })[0].conf, 0.6);
   assert.equal(textLow({ str: '가', conf: 99, check: true })[0].reason, 'disagree');
-  assert.equal(mathLow({ mean: 0.93, min: 0.3 }), null);
-  assert.equal(mathLow({ mean: 0.92, min: 0.5 }).reason, 'math');
-  assert.equal(mathLow({ mean: 0.99, min: 0.29 }).conf, 0.29);
+  assert.equal(mathLow({ mean: 0.90, min: 0.50 }), null);
+  assert.equal(mathLow({ mean: 0.92, min: 0.5 }), null);
+  assert.equal(mathLow({ mean: 0.899, min: 0.5 }).reason, 'math');
+  assert.equal(mathLow({ mean: 0.99, min: 0.499 }).conf, 0.499);
+  assert.equal(mathLow({ mean: 0.99, min: 0.4 }).reason, 'math');
   assert.equal(mathLow(undefined), null);
-  assert.equal(mathLow({ mean: 0.9 }).conf, 0.9);
+  assert.equal(mathLow({ mean: 0.9 }), null);
+  assert.equal(mathLow({ mean: 0.89 }).conf, 0.89);
   assert.deepEqual(relativeBox({ x0: -10, y0: 20, x1: 120, y1: 50 }, 100, 100), { x: 0, y: 0.2, w: 1, h: 0.3 });
 });
 

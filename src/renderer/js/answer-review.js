@@ -1,7 +1,7 @@
 import { h, clear } from './ui.js';
 import { moveLow } from './lowconf.js';
 import { eqToText } from './hwpeqview.js';
-import { REVIEW_HELP, reviewSource } from './review-ui.js';
+import { REVIEW_HELP, reviewSource, reviewHelpButton } from './review-ui.js';
 
 // 사람의 해설에는 저장하지 않는 편집 중 표시. 글을 감싸지 않아 입력 위치를 건드리지 않는다.
 export function answerReview(editor, readDocument, changed, getStack) {
@@ -59,7 +59,7 @@ export function answerReview(editor, readDocument, changed, getStack) {
     source.element.hidden = !entries.length;
     if (!entries.length) return;
     controls.append(h('p.small.muted.review-help', REVIEW_HELP),
-      h('strong.small', `확인이 필요한 곳 ${entries.length}군데`),
+      h('strong.small', `확인 필요 ${entries.length}군데`),
       h('div.review-toolbar',
         h('button.btn.btn-small', { onclick: () => select(selected + 1), title: 'F8' }, '다음 확인할 곳'),
         h('button.btn.btn-small', { onclick: () => select(selected - 1), title: 'Shift+F8' }, '이전'),
@@ -70,7 +70,7 @@ export function answerReview(editor, readDocument, changed, getStack) {
           if (node.dataset.eq !== undefined) node.dataset.reviewLow = JSON.stringify(JSON.parse(node.dataset.reviewLow).filter((_, i) => i !== index));
           else { const b = original(node); b.reviewLow = b.reviewLow.filter((_, i) => i !== index); node.dataset.original = JSON.stringify(b); }
           changed(); update();
-        } }, '맞아요')),
+        } }, '맞아요'), reviewHelpButton()),
       h('div.review-mark-buttons', entries.map(({ node, mark }, index) => h('button.btn.btn-small.review-mark-button', { onclick: () => select(index) }, `확인: ${node.dataset.eq !== undefined ? '수식' : node.textContent.slice(mark.start, mark.end).slice(0, 22) || '수식'}`))));
     source.show(entries[selected].mark);
   };

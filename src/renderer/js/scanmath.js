@@ -7,7 +7,7 @@
 //
 // 좌표는 모두 문항 그림(renderStack) 픽셀, 상자는 {x0, y0, x1, y1} (x1·y1 은 끝 다음 칸)
 
-import { LOW_CONF, textLow, mathLow, relativeBox } from './lowconf.js';
+import { textLow, mathLow, relativeBox } from './lowconf.js';
 
 const HANGUL = /^[가-힣]$/;
 const JAMO_ITEM = /^[ㄱ-ㅎ]$/; // <보기>의 ㄱ. ㄴ. ㄷ.
@@ -30,8 +30,8 @@ export const T = {
   spaceGap: 0.22, // 이보다 넓은 틈은 띄어쓰기
   pad: 0.12, // 수식 그림 둘레 흰 여백 (h 대비)
   // 믿을 만한지 (judgeScan) — GT 수식 126개로 맞춤
-  confMean: LOW_CONF.confMean,
-  confMin: LOW_CONF.confMin,
+  confMean: 0.93,
+  confMin: 0.3,
   textConf: 80, // 한글 크기 OCR 글자 평균 확신도
 };
 

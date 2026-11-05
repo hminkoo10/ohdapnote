@@ -184,7 +184,7 @@ try {
   const pdfOut = join(tmp, '시험지.pdf');
   await stubSave(pdfOut);
   await win.click('.bank-basket .export-btn[data-mode="problems"]');
-  await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((x) => x.textContent.includes('저장했어요')), null, { timeout: 120000 });
+  await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((x) => x.textContent.includes('저장 완료')), null, { timeout: 120000 });
   assert.ok((await PDFDocument.load(readFileSync(pdfOut))).getPageCount() > 0);
   await clearToasts();
   const hwpxOut = join(tmp, '시험지.hwpx');
@@ -192,7 +192,7 @@ try {
   await win.click('.bank-basket .seg label:has(input[name="bank-format"][value="hwpx"])');
   assert.ok(await win.isChecked('input[name="bank-convert"][value="ocr"]'), '한글 기본 옮기기는 OCR');
   await win.click('.bank-basket .export-btn[data-mode="both-end"]');
-  await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((x) => x.textContent.includes('저장했어요')), null, { timeout: 120000 });
+  await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((x) => x.textContent.includes('저장 완료')), null, { timeout: 120000 });
   assert.equal(readFileSync(hwpxOut).subarray(0, 2).toString(), 'PK');
   assert.ok(readFileSync(hwpxOut).length > 1000);
   await clearToasts();

@@ -1,7 +1,19 @@
-import { h, clear } from './ui.js';
+import { h, clear, modal } from './ui.js';
 import { listLow, nextLow, moveLow, clearLow, setLow } from './lowconf.js';
 
-export const REVIEW_HELP = '노란 밑줄과 테두리는 잘못 읽었을 수 있는 곳입니다. 원본과 비교해 고치거나 [맞아요]를 눌러 주세요.';
+export const REVIEW_HELP = '노란 밑줄·테두리: 잘못 읽었을 수 있는 곳';
+
+export function reviewHelpButton(extra = []) {
+  return h('button.btn.btn-small', { onclick: () => modal({ title: '확인 표시 도움말', width: 520,
+    body: h('ul', [
+      '표시 또는 [원본 보기]: 원본 확대',
+      '[맞아요]: 선택한 표시 지우기',
+      '[되돌리기]: 마지막 확인·수정 취소',
+      'F8: 다음 표시, Shift+F8: 이전 표시',
+      ...extra,
+    ].map((text) => h('li', text))), buttons: [{ label: '닫기', value: true }],
+  }) }, '도움말');
+}
 
 /** 입력은 기본 textarea에 맡기고, 같은 글의 배경 층에만 표시를 그린다. */
 export function reviewInput(block, { item, label, onSelect, onChange } = {}) {
@@ -92,7 +104,7 @@ export function reviewInput(block, { item, label, onSelect, onChange } = {}) {
 export function reviewSource(getStack, getWidth = () => 540) {
   let serial = 0;
   let closed = false;
-  const zoom = h('div.review-zoom', h('p.small.muted', '표시를 누르면 이곳에 원본이 나옵니다.'));
+  const zoom = h('div.review-zoom');
   const show = async (mark) => {
     const run = ++serial;
     clear(zoom);
@@ -113,7 +125,7 @@ export function reviewSource(getStack, getWidth = () => 540) {
       canvas.style.width = `${w * scale}px`;
       canvas.style.height = `${hh * scale}px`;
       clear(zoom).append(canvas);
-    } catch { if (!closed && run === serial) clear(zoom).append(h('p.small.muted', '원본을 열지 못했습니다. 창을 닫고 다시 열어 주세요.')); }
+    } catch { if (!closed && run === serial) clear(zoom).append(h('p.small.muted', '원본을 열지 못했습니다.')); }
   };
   return { element: h('div.review-source', h('h4', '원본 보기'), zoom), show, close() { closed = true; serial++; } };
 }
@@ -166,7 +178,11 @@ export function reviewPanel(blocks, getStack, redraw) {
     redraw();
   } }, '되돌리기');
   const original = h('button.btn', { onclick: () => source.show(current?.mark) }, '원본 보기');
-  const toolbar = h('div.review-toolbar', next, previous, count, okay, original, undo);
+  const toolbar = h('div.review-toolbar', next, previous, count, okay, original, undo, reviewHelpButton([
+    '수식 입력: LaTeX (예: \\frac{1}{2})',
+    '고친 글은 한글(HWPX)에 반영됩니다. PDF는 원본 그림입니다.',
+    '저장 뒤 [원래대로]: 처음 옮긴 글과 표시 복원',
+  ]));
   const aside = h('aside.review-reference', source.element);
   return { toolbar, aside, update,
     resetFields() { fields.forEach((field) => field.dispose()); fields.clear(); current = null; },

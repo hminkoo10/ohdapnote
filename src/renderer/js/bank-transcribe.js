@@ -21,10 +21,10 @@ export async function putBank(book, { item = null, onChange = () => {} } = {}) {
     const ok = await modal({
       title: '문제은행에 넣기',
       body: h('div.bank-start',
-        h('p', `이 교재의 문항 ${count}개를 글자·수식으로 옮겨 문제은행에 넣습니다. 기본 글자 인식은 이 컴퓨터에서 처리합니다. 한 문항에 몇 초 정도 걸리며, 옮기는 동안 다른 작업을 할 수 있습니다.`),
-        h('label.bank-ai', { title: geminiReady() ? '' : '설정에서 API 키·모델을 먼저 정해 주세요.' }, ai, h('span', '정밀 인식도 사용 — 확인이 필요한 문항만 외부 서비스로 보냅니다')),
-        !geminiReady() ? h('p.small.muted', '정밀 인식은 설정에서 준비할 수 있습니다. 기본 글자 인식은 별도 설정 없이 사용할 수 있습니다.') : null,
-        book.$canEdit === false ? h('p.readonly-banner', `${book.createdBy?.name || '다른'} 선생님이 만든 책이라 옮긴 글은 나에게만 저장돼요. 만든 선생님이 넣으면 학원 모두가 함께 써요.`) : null),
+        h('p', `문항 ${count}개 · 이 컴퓨터에서 글자·수식 인식`),
+        h('label.bank-ai', { title: geminiReady() ? '' : '설정에서 API 키·모델 준비 필요' }, ai, h('span', '정밀 인식 사용 (외부 서비스로 전송)')),
+        !geminiReady() ? h('p.small.muted', '정밀 인식 설정 필요') : null,
+        book.$canEdit === false ? h('p.readonly-banner', `${book.createdBy?.name || '다른'} 선생님 교재 · 옮긴 글은 나에게만 저장`) : null),
       buttons: [{ label: '취소', value: false }, { label: '넣기 시작', value: true, primary: true }],
     });
     if (!ok) return;
@@ -147,8 +147,8 @@ async function runBank(book, { item, useAi, onChange }) {
     stored = await saveTranscripts();
     const stopped = failure?.name === 'AbortError' || abort.signal.aborted;
     const remaining = targets.reduce((sum, b) => sum + countLow(bestTranscript(book.id, b)?.entry.blocks), 0);
-    const note = remaining ? ` 확인이 필요한 곳 ${remaining}군데가 있습니다. 원본과 비교해 고쳐 주세요.` : '';
-    const message = (!stored ? '옮긴 글을 저장하지 못했어요. 앱을 끄지 말고 다시 넣기를 눌러 주세요.' : stopped ? '넣기를 멈췄어요. 옮긴 글은 남아 있어요.' : failure ? `넣지 못했어요: ${failure.message}` : `${book.name} · 문제은행에 넣기를 마쳤어요.`) + note;
+    const note = remaining ? ` · 확인 필요 ${remaining}군데` : '';
+    const message = (!stored ? '저장 실패 · 앱을 끄기 전에 다시 넣기' : stopped ? '넣기 중단 · 옮긴 글은 유지' : failure ? `넣기 실패: ${failure.message}` : `${book.name} · 넣기 완료`) + note;
     status.textContent = message;
     const bad = !stored || (failure && !stopped);
     const actions = remaining ? [{ label: '확인하러 가기', onClick: () => import('./bankview.js').then((view) => view.openBankReview(book.id)) }] : [];
