@@ -81,7 +81,12 @@ export function recognizedAnswer(blocks) {
 
 export function answerContent(entry) {
   if (!entry) return null;
+  const answer = entry.answer?.trim() || '';
+  const head = answer ? [{ type: 'para', text: `정답 ${answer}` }] : [];
   const useful = entry.blocks?.some((b) => b.type !== 'para' || b.text?.trim() || b.runs?.some((r) => r.eq || r.text?.trim()));
-  if (useful) return entry.blocks;
-  return entry.answer?.trim() ? [{ type: 'para', text: `정답 ${entry.answer}` }] : null;
+  if (!useful) return head.length ? head : null;
+  // 해설지에는 정답을 맨 앞에. 불러온 해설이 이미 같은 정답으로 시작하면 다시 쓰지 않음
+  const first = entry.blocks.find((b) => b.type === 'para' && b.text?.trim())?.text.trim() || '';
+  const already = answer && recognizedAnswer([{ type: 'para', text: first }]) === answer && /^(?:정답|답)/.test(first);
+  return already ? entry.blocks : [...head, ...entry.blocks];
 }

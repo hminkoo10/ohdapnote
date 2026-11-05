@@ -10,7 +10,7 @@ test('사람 해설 우선: 답지 유무와 무관, 정답만 있으면 한 줄
   for (const withAns of [true, false]) {
     const entry = { ...e(1, withAns), bookId: 'book-1', writtenAnswer: written };
     const [block] = makeBlocks('answers', [entry], {}, label);
-    assert.deepEqual(block.answerBlocks, written.blocks);
+    assert.deepEqual(block.answerBlocks, [{ type: 'para', text: '정답 ③' }, ...written.blocks]);
     assert.equal(block.bookId, entry.bookId);
     assert.equal(block.item, entry.problem);
     assert.equal(block.src, undefined);
@@ -19,6 +19,14 @@ test('사람 해설 우선: 답지 유무와 무관, 정답만 있으면 한 줄
     entry.writtenAnswer = { answer: '', blocks: [{ type: 'para', text: '' }] };
     assert.equal(makeBlocks('answers', [entry], {}, label)[0].kind, withAns ? 'answer' : 'note');
   }
+});
+
+test('사람 해설의 정답 줄: 해설 앞에 한 번, 불러온 해설이 같은 정답으로 시작하면 다시 쓰지 않음', () => {
+  const entry = (written) => ({ ...e(1), bookId: 'book-1', writtenAnswer: written });
+  const first = (written) => makeBlocks('answers', [entry(written)], {}, label)[0].answerBlocks.map((b) => b.text);
+  assert.deepEqual(first({ answer: '⑤', blocks: [{ type: 'para', text: '정답 ⑤ 옮긴 풀이' }] }), ['정답 ⑤ 옮긴 풀이']);
+  assert.deepEqual(first({ answer: '③', blocks: [{ type: 'para', text: '정답 ⑤ 옮긴 풀이' }] }), ['정답 ③', '정답 ⑤ 옮긴 풀이']);
+  assert.deepEqual(first({ answer: '', blocks: [{ type: 'para', text: '풀이만' }] }), ['풀이만']);
 });
 
 test('makeBlocks: 문제+해설 — 문제마다 바로 뒤에', () => {

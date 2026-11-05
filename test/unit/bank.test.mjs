@@ -20,7 +20,7 @@ test('문제은행 해설: 사람 글 우선, 답지 없는 교재의 정답도 
   for (const original of [entries[0], entries.at(-1)]) {
     const e = { ...original, writtenAnswer: { answer: '③', blocks: [{ type: 'para', text: '직접 쓴 풀이' }] } };
     const blocks = makeBankBlocks('answers', [e], {}, label);
-    assert.deepEqual(blocks[0].answerBlocks, e.writtenAnswer.blocks);
+    assert.deepEqual(blocks[0].answerBlocks, [{ type: 'para', text: '정답 ③' }, ...e.writtenAnswer.blocks]);
     assert.equal(blocks[0].bookId, original.bookId);
     e.writtenAnswer = { answer: '12', blocks: [] };
     assert.equal(makeBankBlocks('answers', [e], {}, label)[0].answerBlocks[0].text, '정답 12');
