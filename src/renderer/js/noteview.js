@@ -870,7 +870,7 @@ function renderExportSummary() {
   const closedCount = n.bookIds.filter((bid) => subjectClosed(ns.books.get(bid))).reduce((sum, bid) => sum + noteSelection(n, bid).length, 0);
   if (closedCount) el.append(h('p.warn-text.small', icon('warn'), `학원 계약에 없는 과목 교재에서 고른 ${closedCount}문항은 빼고 내보내요`));
   if (!entries.length) {
-    el.append(h('p.empty-hint', '왼쪽 표에서 틀린 번호를 골라 주세요.'));
+    el.append(h('p.empty-hint', '아직 고른 문항이 없어요.'));
     return;
   }
   const noAns = entries.filter((e) => e.bookObj.docs.answer?.items?.length && !e.answer && !answerContent(e.bookObj.$answers?.items[e.problem.id])).length;

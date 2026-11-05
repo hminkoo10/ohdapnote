@@ -131,7 +131,7 @@ async function runBank(book, { item, useAi, onChange }) {
           });
         } catch (err) {
           if (err.name === 'AbortError' || abort.signal.aborted) throw err;
-          current.textContent = `정밀 인식으로 옮기지 못했습니다: ${err.message}. 읽어 둔 글자 인식 결과는 유지됩니다.`;
+          current.textContent = `정밀 인식으로 옮기지 못했어요: ${err.message}. 스캔 인식 결과는 남아요.`;
         }
         converted += group.length;
         update();
@@ -148,7 +148,7 @@ async function runBank(book, { item, useAi, onChange }) {
     const stopped = failure?.name === 'AbortError' || abort.signal.aborted;
     const remaining = targets.reduce((sum, b) => sum + countLow(bestTranscript(book.id, b)?.entry.blocks), 0);
     const note = remaining ? ` · 확인 필요 ${remaining}군데` : '';
-    const message = (!stored ? '저장 실패 · 앱을 끄기 전에 다시 넣기' : stopped ? '넣기 중단 · 옮긴 글은 유지' : failure ? `넣기 실패: ${failure.message}` : `${book.name} · 넣기 완료`) + note;
+    const message = (!stored ? '저장하지 못했어요. 앱을 끄지 말고 다시 넣으세요.' : stopped ? '넣기 중단 · 옮긴 글은 유지' : failure ? `넣기 실패: ${failure.message}` : `${book.name} · 넣기 완료`) + note;
     status.textContent = message;
     const bad = !stored || (failure && !stopped);
     const actions = remaining ? [{ label: '확인하러 가기', onClick: () => import('./bankview.js').then((view) => view.openBankReview(book.id)) }] : [];

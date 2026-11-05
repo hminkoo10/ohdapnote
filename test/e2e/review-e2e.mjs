@@ -88,6 +88,7 @@ try {
   await win.locator('.review-modal .review-toolbar').getByRole('button', { name: '도움말', exact: true }).click();
   const help = win.locator('.modal-overlay').last();
   assert.match(await help.innerText(), /수식 입력: LaTeX/);
+  assert.match(await help.innerText(), /PDF는 원본 그림이에요\. 고친 글은 한글 문서에만 들어가요\./);
   await shot('help');
   await help.locator('.modal-footer').getByRole('button', { name: '닫기', exact: true }).click();
   await win.waitForFunction(() => document.querySelectorAll('.modal-overlay').length === 1);

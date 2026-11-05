@@ -137,7 +137,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
     showPanel('글자·파일', h('div', h('div.eq-extra-tools', [['로만체', 'rm'], ['기울임', 'it'], ['굵은 기울임', 'bold'], ['굵은 로만체', 'rmbold']].map(([name, cmd]) => button(name, '', () => { put(`${cmd} {}`); closePanel(); }))),
       h('div.eq-extra-tools', h('label', '미리보기 글꼴 ', font), color, button('글자 색 넣기', '', () => {
         const rgb = color.value.slice(1).match(/../g).map((v) => parseInt(v, 16)).join(','); put(`COLOR {${rgb}}{}`); closePanel();
-      })), h('p.small.muted', '글꼴·확대는 이 창의 보기만 바꿔요. 글자 크기·줄 맞춤 도구의 공식 동작은 확인이 필요해요.'),
+      })), h('p.small.muted', '글꼴·확대는 미리보기에만 적용해요.'),
       h('div.eq-extra-tools', button('MathML 저장', '', async () => {
         try {
           const doc = new DOMParser().parseFromString(eqToMathML(cleanScript(script.value), { display: centered.checked }), 'application/xml');
@@ -159,15 +159,15 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
     closePanel();
     const table = (heads, rows) => h('table.eq-help-table', h('thead', h('tr', heads.map((text) => h('th', text)))), h('tbody', rows.map((row) => h('tr', row.map((text) => h('td', text))))));
     await modal({ title: '수식 단축키·문법', width: 800, className: 'eq-help-modal', body: h('div',
-      h('p', '한글 공식 단축키 22개입니다. 본문 키는 해설 편집기에서, 나머지는 수식 창에서 써요.'),
-      table(['번호', '키', '하는 일 · 공식 문맥'], EQUATION_SHORTCUTS),
+      h('p', '본문 단축키는 해설 편집기에서, 나머지는 수식 창에서 써요.'),
+      table(['번호', '키', '하는 일'], EQUATION_SHORTCUTS),
       h('p.small', '우리 화면: Enter는 스크립트에 #를 넣어요. Esc는 열린 목록부터 닫고, 목록이 없으면 취소를 확인해요. P는 선택한 수식을 고치는 창을 열어요. Tab은 다음 칸으로 이동하고, 마지막 칸에서는 틀 밖으로 나가요.'),
       h('h4', '자주 쓰는 문법'), table(['입력', '하는 일'], [
         ['{a} over {b}', '분수'], ['sqrt {x} / root {n} of {x}', '제곱근 / n제곱근'], ['x^2 / x_1 / x_1^2', '위 / 아래 / 양쪽 첨자'],
         ['sum _{k=1}^{n} / int _{a}^{b}', '합 / 적분'], ['lim _{x -> a}', '극한'], ['matrix {a & b # c & d}', '행렬: &는 다음 칸, #는 다음 줄'],
         ['cases {식 & 조건 # 식 & 조건}', '경우 나누기'], ['hat {x} / bar {AB}', '모자 / 윗줄'], ['rm / it / bold / rmbold', '글자 모양 전환'],
         ['{여러 항} / "여러 글자"', '한 덩어리로 묶기 / 공백까지 그대로 쓰기'], ['~ / `', '보이는 공백 / 작은 공백'],
-      ]), h('p.small.muted', '미확인 키와 명령은 싣지 않았어요. 괄호 도구는 조사표의 모듈용 틀이며, 한글의 실제 삽입 문자열까지 같다는 뜻은 아니에요.')),
+      ])),
     buttons: [{ label: '닫기', value: true }] });
     focus();
   };

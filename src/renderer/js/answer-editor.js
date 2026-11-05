@@ -222,7 +222,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
       const block = { kind: 'answer', role: 'answer', item: answerItem, src: sources.answer };
       const segs = blockSegs(block);
       const found = bestTranscript(book.id, block)?.entry.blocks || await pdfTranscribe(segs, { plain: book.subject !== 'math' });
-      if (!found?.length) throw new Error('아직 읽어 둔 답지 글이 없어요. 답지 그림을 보며 직접 써 주세요.');
+      if (!found?.length) throw new Error('읽은 답지 글이 없어요. 답지 그림을 보며 직접 입력하세요.');
       const blocks = importAnswerBlocks(found, { review: true });
       let canvas;
       for (let i = 0; i < blocks.length; i++) if (blocks[i].type === 'figure' && !blocks[i].file) {

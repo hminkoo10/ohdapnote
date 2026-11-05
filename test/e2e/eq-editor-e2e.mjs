@@ -245,6 +245,7 @@ try {
   assert.deepEqual(JSON.parse(readFileSync(macroFile, 'utf8')), [{ name: '근호 견본', script: 'sqrt {x}' }]);
   await eqModal().getByRole('button', { name: '글자·파일', exact: true }).click();
   const mathFile = join(tmp, 'equation.mml');
+  await shot('format');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, mathFile);
   await picker().getByRole('button', { name: 'MathML 저장', exact: true }).click();
   await waitForFile(mathFile);

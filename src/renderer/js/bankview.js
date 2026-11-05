@@ -41,7 +41,7 @@ const open = (e) => e.open && subjectOpen(e.bookObj, state.appInfo);
 const fail = (err) => toast(err.message || String(err), { type: 'error', timeout: 10000 });
 const attempt = (fn) => Promise.resolve().then(fn).catch(fail);
 const changed = () => { if (active?.isConnected) refresh(); };
-const pathName = { edit: '고침', ai: '정밀 인식', ocr: '글자 인식', pdf: 'PDF' };
+const pathName = { edit: '고침', ai: '정밀 인식', ocr: '스캔 인식', pdf: 'PDF' };
 // 검색용 열쇠만 만들 때는 파일 이름만 필요. 실제 그림·옮기기·내보내기의 src는 항상 getSources의 원본
 const lookupBlock = (e, item = e.item) => ({ kind: 'problem', role: 'problem', item, stem: null, src: { files: e.bookObj.docs.problem.files } });
 const result = (e, item = e.item) => bestTranscript(e.bookId, lookupBlock(e, item));
@@ -193,7 +193,7 @@ function renderBank(root, summaries, books, entries, failed) {
     const found = filterBank(entries, bs.filters, textOf).filter((e) => !bs.filters.review || reviewCount(e));
     count.textContent = `${found.length}문항`;
     if (!summaries.length || !entries.length && !Object.values(bs.filters).some(Boolean)) {
-      list.append(h('div.empty-state', h('p', '책장에 교재를 등록하고 분석하면 여기에 문항이 모여요'), h('button.btn.btn-primary', { onclick: () => nav.home({ tab: 'books' }) }, '책장으로')));
+      list.append(h('div.empty-state', h('p', '책장에서 교재를 등록하고 분석하세요.'), h('button.btn.btn-primary', { onclick: () => nav.home({ tab: 'books' }) }, '책장으로')));
     } else if (!found.length) list.append(h('div.empty-state', h('p', '맞는 문항이 없어요. 찾는 말을 줄이거나 바꿔 보세요')));
     let bookId = null;
     let bookGroup = null;
@@ -369,7 +369,7 @@ function exportOptions(picked, entries) {
   const convertText = {
     mix: ['자동 선택', '확인할 문항만 외부 서비스로 전송'],
     ai: ['정밀 인식', '문항을 외부 서비스로 전송'],
-    ocr: ['글자 인식', '이 컴퓨터에서 인식'],
+    ocr: ['스캔 인식', '이 컴퓨터에서 인식'],
   };
   const convert = h('div.opt-row', h('span.opt-label', '스캔본'), seg('convert', Object.keys(CONVERT_MODES).map((key) => [key, ...convertText[key]]), () => formatHint()));
   const formatHint = () => {

@@ -183,7 +183,7 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
   };
   /** AI 가 못 옮긴 문항: OCR 결과가 있으면 그것으로, 없으면 그림으로 */
   const aiFailed = (b, why) => {
-    if (has(ocrResult(b))) settle(b, 'ok', `${why} → OCR 결과로`, 'OCR');
+    if (has(ocrResult(b))) settle(b, 'ok', `${why} → 스캔 인식`, 'OCR');
     else settle(b, why === '읽은 내용이 없음' || why === '한도 초과' ? 'empty' : 'err', `${why} → 그림으로`, 'AI');
   };
 
@@ -201,7 +201,7 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
           const r = await scanTranscribe(canvas, { number: b.item.passage ? '' : b.item.number, signal: abort.signal, api, onStatus: (msg) => row.set('run', msg, 'OCR') });
           if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
           if (!r.blocks.length) {
-            if (useAi) row.set('wait', '읽은 내용이 없음 → AI 에게', 'OCR');
+            if (useAi) row.set('wait', '읽은 내용이 없음 → 정밀 인식', 'OCR');
             else settle(b, 'empty', '읽은 내용이 없음 → 그림으로', 'OCR');
             continue;
           }
@@ -210,12 +210,12 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
           store.dirty = true;
           const what = `글자·수식으로 옮김${r.formulas ? ` (수식 ${r.formulas}개)` : ''}`;
           if (r.reliable) settle(b, 'ok', what, 'OCR');
-          else if (useAi) row.set('wait', `미덥지 않음 (${r.reasons[0]}) → AI 에게`, 'OCR');
+          else if (useAi) row.set('wait', `미덥지 않음 (${r.reasons[0]}) → 정밀 인식`, 'OCR');
           else settle(b, 'ok', `${what} · 확인 필요 (${r.reasons[0]})`, 'OCR');
         } catch (err) {
           if (err?.name === 'AbortError' || abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
           console.warn('OCR 로 옮기지 못함', err);
-          if (useAi) row.set('wait', `${err.message} → AI 에게`, 'OCR');
+          if (useAi) row.set('wait', `${err.message} → 정밀 인식`, 'OCR');
           else settle(b, 'err', `${err.message} → 그림으로`, 'OCR');
         }
       }

@@ -180,7 +180,7 @@ export function reviewPanel(blocks, getStack, redraw) {
   const original = h('button.btn', { onclick: () => source.show(current?.mark) }, '원본 보기');
   const toolbar = h('div.review-toolbar', next, previous, count, okay, original, undo, reviewHelpButton([
     '수식 입력: LaTeX (예: \\frac{1}{2})',
-    '고친 글은 한글(HWPX)에 반영됩니다. PDF는 원본 그림입니다.',
+    'PDF는 원본 그림이에요. 고친 글은 한글 문서에만 들어가요.',
     '저장 뒤 [원래대로]: 처음 옮긴 글과 표시 복원',
   ]));
   const aside = h('aside.review-reference', source.element);
