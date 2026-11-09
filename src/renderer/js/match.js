@@ -6,7 +6,11 @@
 // 짝의 개수가 같으면(동점) 모양이 같은 짝을 고릅니다:
 //  말머리(예제/유제)가 같고, 0 채움(01 / 1)이 같고, 해설 영역이 큰 것(빠른 정답표 칸보다 실제 해설)
 
-const keyOf = (item) => item.num ?? parseInt(item.number, 10);
+const keyOf = (item) => {
+  const num = item.num ?? parseInt(item.number, 10);
+  const s = item.examSection;
+  return s ? JSON.stringify([s.subject, s.selection, s.form, num]) : num;
+};
 const paddedOf = (item) => {
   const d = String(item.number ?? '');
   return d.length >= 2 && d[0] === '0' ? d.length : 0;

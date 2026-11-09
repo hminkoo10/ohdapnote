@@ -441,7 +441,9 @@ async function buildPdfInner({ blocks, sources = {}, options, title, info, onPro
 
 /** 문항 표시 이름: "12번", "유제 3", "예제 1" */
 export function itemName(item) {
-  return item.prefix ? `${item.prefix} ${item.number}` : `${item.number}번`;
+  const section = item.examSection;
+  const label = [section?.selection, section?.form ? `${section.form}수형` : ''].filter(Boolean).join(' ');
+  return [label, item.prefix ? `${item.prefix} ${item.number}` : `${item.number}번`].filter(Boolean).join(' ');
 }
 
 /**

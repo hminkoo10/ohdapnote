@@ -2,7 +2,7 @@
 import { sortItems } from './detect.js';
 import { computeMatches, findItem, bookPage } from './store.js';
 import { subjectOf } from './subjects.js';
-import { makeBlocks } from './exporter.js';
+import { makeBlocks, itemName } from './exporter.js';
 
 export const choiceMark = (i) => '①②③④⑤'[i] || `${i + 1}.`;
 
@@ -54,7 +54,7 @@ export function filterBank(entries, { subject = '', bookId = '', page = '', numb
   const n = String(number).trim().replace(/^[^\d]+\s*/, '').replace(/번$/, '').trim();
   return entries.filter((e) => (!subject || e.subject === subject) && (!bookId || e.bookId === bookId)
     && matchesRange(bookPage(e.bookObj?.docs.problem, e.item.page), page)
-    && matchesRange(e.item.number, n) && (!q || compact(textOf(e)).includes(q)));
+    && matchesRange(e.item.number, n) && (!q || compact(`${itemName(e.item)} ${textOf(e)}`).includes(q)));
 }
 
 export function orderPicked(picked, entries) {
