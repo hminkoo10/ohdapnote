@@ -1,7 +1,7 @@
 // LaTeX(고등학교 수학에서 쓰는 만큼) → 한글 수식 스크립트
 //  - 한글 수식 편집기에서 그대로 고칠 수 있는 명령어로 바꿉니다:
 //    {a} over {b}, sqrt {x}, root {n} of {x}, x^{2}, LEFT ( … RIGHT ), log _{a} b, lim _{x -> 0} …
-//  - 모르는 명령어는 역슬래시만 떼고 두고, 괄호 짝이 틀려도 멈추지 않습니다.
+//  - 모르는 명령어 이름은 버리고 인자 내용은 보존합니다. 수식 복원 성공을 뜻하지 않습니다.
 //  - 한글 문서에 넣을 때 쓰는 대략적인 크기(글자 크기 단위)도 함께 셈합니다.
 
 const HANGUL_RE = /[ᄀ-ᇿ㄰-㆏가-힯]/;
@@ -17,7 +17,7 @@ const DROP = new Set(['!', 'displaystyle', 'textstyle', 'scriptstyle', 'scriptsc
 const DROP_ARG = new Set(['label', 'tag', 'color', 'phantom', 'hphantom', 'vphantom', 'hspace', 'vspace']);
 
 // 글꼴만 바꾸는 명령: 내용만 남김
-const FONT_CMDS = new Set(['mathbf', 'boldsymbol', 'bm', 'mathit', 'mathsf', 'mathbb', 'mathcal', 'mathscr', 'mathfrak', 'mathtt', 'boxed', 'pmb']);
+const FONT_CMDS = new Set(['mathbf', 'boldsymbol', 'bm', 'mathit', 'mathsf', 'mathbb', 'mathcal', 'mathscr', 'mathfrak', 'mathtt', 'boxed', 'pmb', 'textsc', 'textsl', 'textmd', 'mathnormal']);
 
 const FRAC = new Set(['frac', 'dfrac', 'tfrac', 'cfrac']);
 const BINOM = new Set(['binom', 'dbinom', 'tbinom']);
@@ -78,6 +78,15 @@ const SYM = {
 };
 
 // 환경 → 한글 수식 명령
+// 기존 변환기의 유니코드 대체 표기를 사용합니다. 로컬 KaTeX 기호 정의로 확인했으며,
+// 명령 이름을 알파벳 문자열로 바꾸지 않습니다.
+Object.assign(SYM, {
+  triangleleft: ['\u25c3', 'op'], sharp: ['\u266f', 'op'],
+  dashv: ['\u22a3', 'op'], imath: ['\u0131', 'op'],
+  copyright: ['\u00a9', 'op'], sqsubset: ['\u228f', 'op'],
+  frown: ['\u2322', 'op'],
+});
+
 const ENVS = {
   cases: 'cases', dcases: 'cases', rcases: 'cases', matrix: 'matrix', smallmatrix: 'matrix', array: 'matrix', pmatrix: 'pmatrix',
   bmatrix: 'bmatrix', Bmatrix: 'matrix', vmatrix: 'dmatrix', Vmatrix: 'dmatrix', aligned: 'lpile', align: 'lpile', 'align*': 'lpile',
@@ -197,8 +206,8 @@ const isCh = (tok, v) => tok?.t === 'ch' && tok.v === v;
 const isCmd = (tok, v) => tok?.t === 'cmd' && tok.v === v;
 const isRowSep = (tok) => tok?.t === 'cmd' && (tok.v === '\\' || tok.v === 'cr' || tok.v === 'newline');
 
-function parse(src) {
-  const p = { toks: tokenize(src), i: 0 };
+function parse(src, options = {}) {
+  const p = { toks: tokenize(src), i: 0, options };
   const items = [];
   while (p.i < p.toks.length) {
     items.push(...parseSeq(p, null).items);
@@ -275,7 +284,7 @@ function parseAtom(p) {
     case 'kor':
       return { t: 'text', v: tok.v };
     case 'textcmd':
-      return textCommand(tok);
+      return textCommand(tok, p.options);
     case 'begin':
       return parseEnv(tok.v, p);
     case 'end':
@@ -287,14 +296,30 @@ function parseAtom(p) {
   }
 }
 
-function textCommand(tok) {
+function textCommand(tok, options) {
   // \mathrm{m^2} 처럼 안에 수식이 있으면 수식으로 읽음
-  if ((tok.name === 'mathrm' || tok.name === 'operatorname') && /[\\^_{}]/.test(tok.v)) return { t: 'group', body: parse(tok.v) };
+  if ((tok.name === 'mathrm' || tok.name === 'operatorname') && /[\\^_{}]/.test(tok.v)) {
+    const body = parse(tok.v, options);
+    return body.items.length === 1 ? seqNode(body.items) : { t: 'group', body };
+  }
   const text = tok.v.replace(/\$/g, '');
   return text ? { t: 'text', v: text } : null;
 }
 
 const sym = (v, k) => ({ t: 'sym', v, k });
+
+// TeX 그림의 치수는 수학 내용이 아닌 배치 정보입니다.
+// 확인 가능한 숫자 치수만 소비하고, 임의의 인자를 추측하지 않습니다.
+function skipDimension(p) {
+  const start = p.i;
+  if (isCh(p.toks[p.i], '+') || isCh(p.toks[p.i], '-')) p.i++;
+  if (isCh(p.toks[p.i], '.')) p.i++;
+  if (p.toks[p.i]?.t !== 'num') { p.i = start; return; }
+  p.i++;
+  const unit = (p.toks[p.i]?.v || '') + (p.toks[p.i + 1]?.v || '');
+  if (/^(em|ex|pt|pc|cm|mm|in|bp|dd|cc|sp)$/.test(unit)) p.i += 2;
+  else p.i = start;
+}
 
 function parseChar(c, p) {
   if (c === '{') {
@@ -315,6 +340,15 @@ function parseChar(c, p) {
 }
 
 function parseCommand(name, p) {
+  if (name === 'setlength') {
+    p.options.losses?.push(name);
+    if (isCh(p.toks[p.i], '{')) parseArg(p); // 길이 변수 이름
+    if (isCh(p.toks[p.i], '{')) parseArg(p); // 중괄호로 감싼 설정값
+    else skipDimension(p);
+    return null;
+  }
+  if (name === 'unitlength') { p.options.losses?.push(name); skipDimension(p); return null; }
+  if (['llap', 'rlap', 'clap'].includes(name)) return { t: 'group', body: parseArg(p) };
   if (name in SPACES) return { t: 'space', v: SPACES[name] };
   if (DROP.has(name)) return null;
   if (DROP_ARG.has(name)) {
@@ -333,6 +367,16 @@ function parseCommand(name, p) {
   }
   if (name === 'left') return parseLeftRight(p);
   if (name === 'right' || name === 'middle' || BIG.has(name)) return delimNode(readDelim(p));
+  if (name === 'xleftarrow' || name === 'xrightarrow') {
+    const bottom = parseOpt(p);
+    const top = parseArg(p);
+    return { t: 'script', base: { ...sym(name === 'xleftarrow' ? '<-' : '->', 'kw'), labelledArrow: true }, sup: top, sub: bottom };
+  }
+  // 로컬에서 확인한 한글 중괄호 장식 명령이 없으므로 본문과 범위를 보존합니다.
+  if (name === 'overbrace' || name === 'underbrace') {
+    p.options.losses?.push(name);
+    return { t: 'group', body: parseArg(p) };
+  }
   if (ACCENT[name]) return { t: 'accent', kw: ACCENT[name], body: parseArg(p) };
   if (name === 'overset' || name === 'stackrel') {
     const top = parseArg(p);
@@ -358,7 +402,13 @@ function parseCommand(name, p) {
     return null;
   }
   // 글꼴 명령, 그리고 { } 없이 쓴 \text x 같은 것: 내용만
-  if (FONT_CMDS.has(name) || TEXT_CMDS.has(name)) return { t: 'group', body: parseArg(p) };
+  if (FONT_CMDS.has(name) || TEXT_CMDS.has(name)) {
+    const body = parseArg(p);
+    const plainFont = ['mathbf', 'boldsymbol', 'bm', 'mathit', 'mathsf', 'mathtt', 'pmb', 'textsc', 'textsl', 'textmd', 'mathnormal'].includes(name);
+    return plainFont && body.items.length === 1 ? seqNode(body.items) : { t: 'group', body };
+  }
+  // 옛 글꼴 전환 명령은 모양만 바꾸며 수학 내용과 인자 범위는 바꾸지 않습니다.
+  if (['rm', 'it', 'bf', 'sf', 'tt', 'boldmath', 'unboldmath'].includes(name)) return null;
   if (name === 'pmod') return seqNode([sym('(', 'open'), sym('mod', 'kw'), { t: 'group', body: parseArg(p) }, sym(')', 'close')]);
   if (name === 'bmod') return sym('mod', 'kw');
   if (FN.has(name)) return { ...sym(name, 'kw'), limits: LIMIT_OPS.has(name) };
@@ -370,8 +420,13 @@ function parseCommand(name, p) {
     if (isCh(p.toks[p.i], '[')) parseOpt(p); // \\[2pt]
     return { t: 'rowsep' };
   }
-  // 모르는 명령: 역슬래시만 떼고 그대로
-  return sym(name, /^[A-Za-z]+$/.test(name) ? 'kw' : 'op');
+  // 모르는 명령은 이름만 버리고 명시적인 인자는 보존합니다.
+  // 남겨진 첨자가 앞의 정상 항에 붙지 않도록 합니다.
+  // OCR이 글자 l을 한 글자 명령으로 낸 경우에는 글자와 첨자를 보존합니다.
+  if (name === 'l') return { t: 'letter', v: 'l' };
+  p.options.losses?.push(name);
+  if (isCh(p.toks[p.i], '^') || isCh(p.toks[p.i], '_')) return { t: 'group', body: seqOf([]) };
+  return null;
 }
 
 /** 여러 낱말을 한 덩어리로 (괄호 없이 그대로 이어 씀) */
@@ -557,8 +612,8 @@ function emitScript(n) {
   }
   const kw = FORCE.has(b.k) && b.k !== 'text';
   // 90^{\circ} → 90 DEG,  f^{\prime} → f prime
-  if (!n.sub && onlySym(n.sup, 'circ')) return { s: `${b.s} DEG`, k: 'kw' };
-  if (!n.sub && onlySym(n.sup, 'prime')) return { s: `${b.s} prime`, k: 'kw' };
+  if (!base.labelledArrow && !n.sub && onlySym(n.sup, 'circ')) return { s: `${b.s} DEG`, k: 'kw' };
+  if (!base.labelledArrow && !n.sub && onlySym(n.sup, 'prime')) return { s: `${b.s} prime`, k: 'kw' };
   let s = b.s;
   if (n.sub) s += `${kw ? ' ' : ''}_{${emitStr(n.sub)}}`;
   if (n.sup) s += `${kw ? ' ' : ''}^{${emitStr(n.sup)}}`;
@@ -749,7 +804,7 @@ function nodeAtoms(n, s) {
 function scriptAtoms(n, s) {
   const baseAtoms = nodeAtoms(n.base, s);
   // 90^{\circ} → 90 DEG, f^{\prime} → f prime : 뒤에 기호 하나
-  if (!n.sub && (onlySym(n.sup, 'circ') || onlySym(n.sup, 'prime'))) return [...baseAtoms, atom(px(onlySym(n.sup, 'circ') ? 825 : 300, s), s)];
+  if (!n.base.labelledArrow && !n.sub && (onlySym(n.sup, 'circ') || onlySym(n.sup, 'prime'))) return [...baseAtoms, atom(px(onlySym(n.sup, 'circ') ? 825 : 300, s), s)];
   const base = baseAtoms.length === 1 ? baseAtoms[0] : { ...hstack(baseAtoms, s), cls: 'ord', upper: baseAtoms[baseAtoms.length - 1].upper };
   const t = s === 1 ? SUB : s * 0.6; // 첨자의 첨자는 더 작게(0.42)
   const sup = n.sup ? measureSeq(n.sup, t) : null;
@@ -805,10 +860,12 @@ const SLACK_D = 30;
  * LaTeX → 한글 수식 스크립트 + 한글 문서에 넣을 크기
  * @param {string} latex
  * @param {{baseUnit?:number}} opts  글자 크기(HWPUNIT, 1000 = 10pt)
- * @returns {{script:string, width:number, height:number, baseLine:number}} width/height: HWPUNIT, baseLine: 위에서 기준선까지 %
+ * @returns {{script:string, width:number, height:number, baseLine:number, lossyCommands?:string[]}}
+ * lossyCommands는 검토가 필요합니다. 스크립트가 있어도 의미 복원 성공을 뜻하지 않습니다.
  */
 export function convertLatex(latex, { baseUnit = 1000 } = {}) {
-  const tree = parse(latex);
+  const losses = [];
+  const tree = parse(latex, { losses });
   const script = emitStr(tree).trim();
   const m = measureSeq(tree, 1);
   const k = baseUnit / 1000;
@@ -816,6 +873,7 @@ export function convertLatex(latex, { baseUnit = 1000 } = {}) {
   const d = m.d + SLACK_D;
   return {
     script,
+    ...(losses.length ? { lossyCommands: [...new Set(losses)] } : {}),
     width: Math.ceil((m.w + Math.max(SLACK_W_MIN, m.w * SLACK_W)) * k),
     height: Math.round((a + d) * k),
     baseLine: Math.round((a / (a + d)) * 100),
