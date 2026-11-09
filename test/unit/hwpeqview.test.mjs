@@ -313,3 +313,7 @@ test('hwpeqview: 기존 변환기의 모든 LaTeX·실측 예시를 다시 그�
   }
   assert.ok(count >= 120, `예시 ${count}개`);
 });
+
+test('윗줄은 확장 가능한 overline 문자로 표시', () => {
+  assert.match(eqToMathML('bar {AB}'), /‾/);
+});

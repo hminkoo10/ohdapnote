@@ -32,7 +32,7 @@ const EXACT_SYMBOLS = {
 };
 const BIG = { sum: '∑', prod: '∏', coprod: '∐', union: '⋃', inter: '⋂', int: '∫', oint: '∮', dint: '∬', tint: '∭', odint: '∯', otint: '∰' };
 const FUNCTIONS = new Set('sin cos tan cot sec cosec csc arcsin arccos arctan arc sinh cosh tanh coth log ln lg exp Exp lim Lim max min det gcd mod if for and hom ker deg arg dim Pr or'.split(' '));
-const ACCENTS = { hat: '^', check: 'ˇ', tilde: '~', acute: '´', grave: '`', dot: '˙', ddot: '¨', bar: '¯', vec: '→', dyad: '↔', under: '_', arch: '⏜' };
+const ACCENTS = { hat: '^', check: 'ˇ', tilde: '~', acute: '´', grave: '`', dot: '˙', ddot: '¨', bar: '‾', vec: '→', dyad: '↔', under: '_', arch: '⏜' };
 const TABLES = new Set(['matrix', 'pmatrix', 'bmatrix', 'dmatrix', 'pile', 'lpile', 'rpile', 'cases', 'eqalign']);
 const FONTS = new Set(['rm', 'it', 'bold', 'rmbold', 'bf']);
 const UNSUPPORTED = new Set('longdiv ladder sladder phantom identical image reimage iso dsum xor hleft laplace lslant rslant att hund thou well base benzene ohm'.split(' '));

@@ -274,3 +274,10 @@ test('한컴 연립의 본문 조건은 삭제 대신 조건 포함 원본', () 
  assert.match(r[0].reason,/조건/);
  assert.ok((r[0].rect.x+r[0].rect.w)*L.w>=120);
 });
+
+test('짝을 확보 못 한 조건 괄호는 그 조각만 원본 보류', () => {
+  const result = hancomEquationRegions(layer([row(100,50,[H('b>1)')]),row(200,50,[H('x=2')])]));
+  assert.equal(result[0].blocks[0].type, 'figure');
+  assert.match(result[0].reason, /괄호/);
+  assert.match(result[1].blocks[0].eq, /x=2/);
+});

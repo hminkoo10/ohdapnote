@@ -1432,6 +1432,15 @@ export function hancomEquationRegions(layer, rect = { x: 0, y: 0, w: 1, h: 1 }) 
     let blocks, reason;
     try {
       if (cases) fail('연립 조건 범위 미확인: 조건 포함 원본 확인 필요');
+      const fences = [];
+      for (const g of [...group].sort(byX)) {
+        const c = normalizeHancomText(g.c, g.fam);
+        if ('(['.includes(c)) fences.push(c);
+        else if (c === ')' || c === ']') {
+          if (fences.pop() !== (c === ')' ? '(' : '[')) fail('괄호 짝 미확인');
+        }
+      }
+      if (fences.length) fail('괄호 짝 미확인');
       const isolated = { ...layer, glyphs: group };
       blocks = regionBlocks(isolated, crop, crop);
       blocks = importAnswerBlocks(blocks);
