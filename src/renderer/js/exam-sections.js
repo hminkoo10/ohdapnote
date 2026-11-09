@@ -2,6 +2,8 @@
 export function stabilizeExamPages(pages, anchors, subject) {
   const header = (p) => (p.tokens || []).filter((t) => t.y0 < 0.2).map((t) => t.str).join('').replace(/\s/g, '');
   if (!/20\d{2}학년도/.test(header(pages[0] || {})) || !/수학능력시험|모의평가/.test(header(pages[0] || {}))) return null;
+  const schoolYear = +(/(20\d{2})학년도/.exec(header(pages[0] || {}))?.[1] || 0);
+  if (schoolYear < 2022 || schoolYear > 2027) return null; // 검증한 공통/선택 체제만
   let selection = null, form = null;
   const sections = new Map(), seen = new Set();
   for (const page of pages) {

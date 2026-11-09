@@ -820,6 +820,16 @@ export async function analyzeDocument(src, opts) {
   const grids = new Map(results.map((r) => [r.index, r.grid]));
   const sourceMap = new Map(results.map((r) => [r.index, r.source]));
   const flags = flagPages(pages, anchors, layouts);
+  if (examSections) {
+    flags.clear();
+    const groups = new Map();
+    for (const idx of pages) {
+      const key = JSON.stringify(examSections.get(idx));
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(idx);
+    }
+    for (const group of groups.values()) for (const [idx, reasons] of flagPages(group, anchors, layouts)) flags.set(idx, reasons);
+  }
   for (const idx of tablePages) flags.set(idx, ['빠른 정답표 같아서 건너뜀']);
   if (answersFrom >= 0) flags.set(answersFrom, ['여기부터는 정답과 풀이 같아서 뺌 (문제 쪽까지만 범위를 정하면 사라짐)']);
   const cutters = buildCutters(results, anchors, signature);
