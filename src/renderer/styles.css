@@ -4237,3 +4237,13 @@ main.sheet {
 .tabs-row, .doc-head, .preview-head, .convert-row .seg {
   flex-wrap: wrap;
 }
+
+/* 모의고사 넣기: 문제은행 목록과 같은 간격·구분선 */
+.mockexam-table { max-height: min(50vh, 480px); overflow: auto; }
+.mockexam-table table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+.mockexam-table th, .mockexam-table td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: center; }
+.mockexam-table th { position: sticky; top: 0; background: var(--surface-2); z-index: 1; }
+.mockexam-table th:first-child, .mockexam-table td:first-child { width: 48%; text-align: left; overflow-wrap: anywhere; }
+.mockexam-table th:last-child, .mockexam-table td:last-child { width: 20%; }
+.mockexam-table tbody tr:hover { background: var(--primary-softer); }
+.mockexam-table details { padding: 8px 0; overflow-wrap: anywhere; }
