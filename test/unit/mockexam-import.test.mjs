@@ -31,3 +31,11 @@ test('ZIP 중앙 목록 CP949 이름과 저장 방식 읽기, 잘린 ZIP 거부'
   assert.equal(entries[0].name, '수학.pdf'); assert.deepEqual(entries[0].data, data);
   assert.throws(() => readExamZip(zip.subarray(0, zip.length - 2)));
 });
+
+test('옛 수학 계열 문제지는 한 책으로 합치지 않음', () => {
+  const files = ['인문계', '자연계', '예체능'].map((v) => f(`2002년 6월 고2 학력평가 수학 문제(${v}).pdf`));
+  const p = planExamImport(files);
+  assert.equal(p.rows.length, 3);
+  assert.deepEqual(p.rows.map((r) => r.metadata.selection), ['인문계', '자연계', '예체능']);
+  assert.ok(p.rows.every((r) => r.files.length === 1));
+});

@@ -1,7 +1,7 @@
 import { normalizeHancomText } from './hancom.js';
 
 const subjects = [['korean', /국어|언어(?!와\s*매체)/], ['math', /수학|수리/], ['english', /영어|외국어/]];
-export const selections = ['화법과작문', '언어와매체', '확률과통계', '미적분', '기하', '가형', '나형', 'A형', 'B형'];
+export const selections = ['화법과작문', '언어와매체', '확률과통계', '미적분', '기하', '가형', '나형', 'A형', 'B형', '인문계', '자연계', '예체능'];
 const compact = (s) => normalizeHancomText(s).replace(/\s/g, '')
   .replace(/화작/g, '화법과작문').replace(/언매/g, '언어와매체')
   .replace(/확통/g, '확률과통계').replace(/미적(?!분)/g, '미적분');

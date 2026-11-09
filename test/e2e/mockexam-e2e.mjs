@@ -41,7 +41,7 @@ try {
       const wanted = candidates.find((e) => e.file.includes(`고${1 + ([2002,2004,2006,2008,2011].indexOf(year) + ['국어','수학','영어'].indexOf(subject)) % 3}`)) || candidates[0];
       if (wanted) picked.push(wanted);
     }
-    const paths = [...new Set(picked.flatMap((e) => entries.filter((a) => a.page === e.page && a.subject === e.subject && existsSync(join(archive, a.file))).map((a) => join(archive, a.file))))];
+    const paths = [...new Set(picked.flatMap((e) => entries.filter((a) => a.page === e.page && a.subject === e.subject && (!/question-/i.test(a.file) || a.file === e.file) && existsSync(join(archive, a.file))).map((a) => join(archive, a.file))))];
     paths.push(...readdirSync(process.env.MOCKEXAM_HDREAM).filter((n) => /\.pdf$/i.test(n)).map((n) => join(process.env.MOCKEXAM_HDREAM,n)));
     const result = await win.evaluate(async (paths) => {
       const m = await import('./js/mockexam-import.js');
