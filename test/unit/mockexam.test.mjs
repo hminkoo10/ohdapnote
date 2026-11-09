@@ -58,3 +58,10 @@ test('배점 열, 중복 답 충돌, 미확인 PUA', () => {
   assert.equal(r.answers.math[2], undefined);
   assert.equal(r.warnings.length, 2);
 });
+
+for (let year = 2002; year <= 2026; year++) test(`시행연도/학년도 분리 ${year}`, () => {
+  const exam = identifyExam({ filename: `${year + 1}학년도 수능 영어 문제지.pdf` });
+  assert.equal(exam.year, year);
+  assert.equal(exam.schoolYear, year + 1);
+  assert.equal(exam.subject, 'english');
+});
