@@ -1335,7 +1335,7 @@ export function transcribeParts(parts, { explain = false, plain = false } = {}) 
         const result = regionBlocks(p.layer, p.rect, p.place);
         // 한컴 배치는 검증 전까지 확인 대상으로 둔다. EH 출력은 그대로 유지.
         blocks.push(...(hancom ? result.map((b) => {
-          if (b.type === 'figure') return b;
+          if (b.type === 'figure') return { ...b, low: [{ reason: 'math' }] };
           if (b.type === 'math') return { ...importAnswerBlocks([b])[0], low: [{ reason: 'math' }] };
           const low = b.type === 'choices'
             ? b.items.map((text, item) => ({ item, start: 0, end: text.length, reason: 'math' }))

@@ -44,6 +44,16 @@ test('모르는 한컴 기호: 원본 그림과 확인 표시', () => {
   assert.deepEqual(decodeGlyph('\ue03a', 'HyhwpEQ'), { k: 'm', v: '7', letter: false, upright: true });
 });
 
+test('한컴 영역의 부분 그림에도 수식 확인 표시 유지', () => {
+  const L = layer([
+    row(100, 50, [T('가짜 그래프 '), G('\ue01a', 'HancomEQN', 1)]),
+    row(300, 50, [T('가짜 설명')]),
+  ], { shapes: [{ x0: 160, y0: 130, x1: 220, y1: 240, segs: 4, curve: true, closed: true, image: false, light: false }] });
+  const result = run(L);
+  assert.ok(result.some((b) => b.type === 'figure'));
+  assert.ok(result.every((b) => b.low?.length));
+});
+
 test('글꼴 이름 → 종류·모양', () => {
   assert.deepEqual(fontFamily('ABCDEF+EHsang-Italic'), ['EHsang', 'Italic']);
   assert.deepEqual(fontFamily('EHboNB'), ['EHboNB', '']);
