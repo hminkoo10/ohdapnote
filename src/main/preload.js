@@ -69,6 +69,9 @@ contextBridge.exposeInMainWorld('ohdap', {
     };
   },
 
+  scanExamRead: (path) => ipcRenderer.invoke('exams:read', path),
+  pickExamFiles: (folder) => ipcRenderer.invoke('exams:pick', folder),
+  scanExamPaths: (paths) => ipcRenderer.invoke('exams:scan', paths),
   pickFiles: (title) => ipcRenderer.invoke('files:pick', { title }),
   importFiles: (bookId, role, paths, add) => ipcRenderer.invoke('files:import', { bookId, role, paths, add }), // add: 지금 파일 뒤에 더하기
   savePhotoPages: (photo) => ipcRenderer.invoke('files:photo', photo),

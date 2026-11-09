@@ -607,6 +607,7 @@ function summarizeBook(book, place = 'shared') {
     updatedAt: book.updatedAt,
     createdBy: book.createdBy || null,
     subject: subjects.bookSubject(book),
+    exam: book.exam || null,
     subjectOpen: subjectOpen(book), // 학원이 이 과목을 계약했는지 (아니면 보기만)
     canEdit: canEditBook(book, place),
     shared: academyMode() && place === 'shared', // 학원 공유 (끄면 나만 보기 — 원장은 볼 수 있음)
@@ -1390,6 +1391,13 @@ function registerIpc() {
     await writeJsonAtomic(studentFile(id), student);
     return { ...student, canEdit: true };
   }
+
+  handle('exams:pick', async (_e, folder) => {
+    const r = await dialog.showOpenDialog(mainWindow, { title: '???? ???', properties: folder ? ['openDirectory'] : ['openFile', 'multiSelections'], filters: [{ name: '???', extensions: ['pdf', 'zip', 'png', 'jpg', 'jpeg'] }] });
+    return r.canceled ? [] : r.filePaths;
+  });
+  handle('exams:read', (_e, p) => fsp.readFile(p));
+  handle('exams:scan', (_e, paths) => require('./mockexam-files').scanExamPaths(paths, path.join(app.getPath('userData'), 'exam-input')));
 
   handle('files:pick', async (_e, { title } = {}) => {
     const result = await dialog.showOpenDialog(mainWindow, {

@@ -1,3 +1,4 @@
+import { examImportButton } from './mockexam-view.js';
 // 문제은행 탭: 교재 넣기 → 찾기·미리보기 → 시험지 바구니
 import { h, clear, icon, toast, modal, debounce } from './ui.js';
 import { api, state, nav, getSources, holdSource, itemImage, findJob, jobListeners, restartGuard, restartPendingChecks } from './shared.js';
@@ -107,6 +108,7 @@ export function bankView(summaries) {
 
 function renderBank(root, summaries, books, entries, failed) {
   clear(root);
+  root.append(examImportButton());
   const intro = h('div');
   const intake = h('details.bank-intake', { open: bs.intake, ontoggle: (e) => { bs.intake = e.target.open; } }, h('summary', icon('bookPlus'), '교재 넣기', h('span.small.muted', '')));
   const bookList = h('div.bank-books');
@@ -182,6 +184,9 @@ function renderBank(root, summaries, books, entries, failed) {
   const subjects = SUBJECTS.filter((s) => contractedSubjects(state.appInfo).includes(s.code) || summaries.some((b) => (b.subject || 'math') === s.code));
   filters.append(
     ...(subjects.length > 1 ? [selectFilter('subject', '과목', [['', '모든 과목'], ...subjects.map((s) => [s.code, s.name])])] : []),
+    selectFilter('exam', '모의고사', [['', '모든 교재'], ['all', '모의고사 전체'], ['csat', '수능'], ['kice', '모평'], ['edu', '학평']]),
+    field('year', '연도', '예: 2024'),
+    selectFilter('grade', '학년', [['', '모든 학년'], ['1', '고1'], ['2', '고2'], ['3', '고3']]),
     selectFilter('bookId', '책', [['', '모든 교재'], ...summaries.map((b) => [b.id, b.name])]),
     field('page', '쪽', '예: 12 또는 12-15'), field('number', '번호', '예: 3 또는 3-7'), field('text', '글자로 찾기', '예: 이차함수, 빈칸'),
     h('label.bank-check', h('input', { type: 'checkbox', checked: bs.filters.review, dataset: { bankFocus: 'review' }, onchange: (ev) => { bs.filters.review = ev.target.checked; updateFilter.flush(); } }), '확인할 문항만'),
@@ -227,7 +232,7 @@ function renderBank(root, summaries, books, entries, failed) {
       },
       h('label.bank-check', { title: open(e) ? '시험지 바구니에 담기' : '학원 계약에 없는 과목 · 보기만', onclick: (ev) => ev.stopPropagation() },
         h('input', { type: 'checkbox', checked: selected(e), disabled: !open(e), 'aria-label': `${itemName(e.item)} 담기`, onchange: (ev) => pick(e, ev.target.checked) })),
-      h('div.bank-row-text', h('strong', `${pageLabel(e.bookObj.docs.problem, e.item.page)} · ${itemName(e.item)}`),
+      h('div.bank-row-text', h('strong', e.bookObj.exam ? `${e.bookName} ${itemName(e.item)}` : `${pageLabel(e.bookObj.docs.problem, e.item.page)} · ${itemName(e.item)}`),
         reviewCount(e) ? h('span.small.bank-review-count', `확인 필요 ${reviewCount(e)}군데`) : null,
         h(`span.bank-snippet${r ? '' : '.muted'}`, blocksToText(r?.entry.blocks) || '아직 글자로 옮기지 않았어요')),
       r ? h('span.tag.soft.bank-path', pathName[r.path]) : null);

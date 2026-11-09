@@ -1,0 +1,116 @@
+import { api, state, getSources, dropSources, restartGuard } from './shared.js';
+import { identifyExam } from './mockexam.js';
+import { planExamImport } from './mockexam-plan.js';
+import { newDoc } from './store.js';
+import { analyzeDocument } from './analyze.js';
+import { parseAnswerKey, answerKeyToAnswers } from './mockexam-answers.js';
+import { recognizeWords } from './ocr.js';
+import { transcribeExam } from './bank-transcribe.js';
+import { subjectOpen } from './subjects.js';
+import { openDocSource } from './docsource.js';
+const queueKey = 'ohdap.examImport';
+export const pendingExamImport = () => { try { return JSON.parse(localStorage.getItem(queueKey)); } catch { return null; } };
+const save = (q) => localStorage.setItem(queueKey, JSON.stringify(q));
+let running = false;
+export async function inspectExamFolder(paths) {
+  const scanned = await api.scanExamPaths(paths);
+  const files = scanned.files.map((f) => ({ ...f, metadata: identifyExam(f) }));
+  const plan = planExamImport(files, await api.listBooks(), state.appInfo.subjects);
+  plan.skipped.push(...scanned.skipped);
+  return plan;
+}
+async function attach(book, role, files) {
+  if (!files.length || book.docs[role]) return;
+  const imported = await api.importFiles(book.id, role, files.map((f) => f.localPath));
+  try {
+    for (const f of imported.files.filter((f) => f.kind === 'image')) await api.savePhotoPages({ token: imported.token, name: f.name, status: 'unchanged', reason: '시험지 원본' });
+    book.docs[role] = newDoc(role, imported);
+    await api.commitFileImport(imported.token, book);
+  } catch (e) { await api.discardFileImport(imported.token); throw e; }
+}
+async function readAnswers(book, row, signal) {
+  const candidates = row.files.filter((f) => f.metadata.part === 'answerKey');
+  candidates.push(...row.files.filter((f) => f.metadata.part === 'solution'));
+  for (const file of candidates) {
+    // 정답표는 책 문서와 별개로 읽는다. 해설을 answer로 유지한다.
+    const bytes = await api.scanExamRead(file.localPath);
+    const url = URL.createObjectURL(new Blob([bytes]));
+    let src;
+    try {
+      src = await openDocSource([{ name: file.filename, kind: /\.pdf$/i.test(file.filename) ? 'pdf' : 'image' }], () => url);
+      const parsed = { answers: {} };
+      let scanned = false;
+      for (let i = 0; i < Math.min(5, src.numPages); i++) {
+        signal?.throwIfAborted();
+        let content = src.pages[i].kind === 'pdf' ? (await (await src.getPdfPage(i)).getTextContent()).items : [];
+        if (!content.some((t) => t.str.trim())) {
+          scanned = true;
+          const words = await recognizeWords(await src.renderPage(i, 1700), { lang: 'kor+eng', psm: '6' });
+          content = words.map((w, k) => ({ str: w.str, hasEOL: !words[k + 1] || Math.abs(words[k + 1].y0 - w.y0) > 12 }));
+        }
+        const p = parseAnswerKey(content, { subject: book.subject, selection: row.metadata.selection });
+        for (const [k, v] of Object.entries(p.answers)) Object.assign(parsed.answers[k] ||= {}, v);
+      }
+      let connected = 0;
+      for (const item of book.docs.problem.items) {
+        const selection = item.examSection?.selection || row.metadata.selection;
+        const section = [book.subject, selection].filter(Boolean).join('|');
+        const entry = answerKeyToAnswers(parsed, section, { [item.number]: item.id }).items[item.id];
+        if (entry) {
+          if (scanned) entry.blocks = [{ type: 'para', text: '정답을 확인하세요.', low: [{ start: 0, end: 10, reason: 'ocr' }] }];
+          await api.saveAnswer(book.id, item.id, entry); connected++;
+        }
+      }
+      if (connected) return { connected, low: scanned ? connected : 0 };
+    } finally { await src?.destroy(); URL.revokeObjectURL(url); }
+  }
+  return { connected: 0, low: 0 };
+}
+// 자동 받기 뒤에도 동일하게 호출: paths가 null이면 마지막 작업을 이어간다.
+export async function importExamFolder(paths, { onProgress = () => {}, signal, plan } = {}) {
+  if (running) throw Error('이미 모의고사를 넣고 있어요.');
+  running = true;
+  try { return await restartGuard.track('mockexam', async () => {
+    let q = paths ? { ...(plan || await inspectExamFolder(paths)), createdAt: Date.now() } : pendingExamImport();
+    if (!q) return null;
+    save(q);
+    for (const row of q.rows) {
+      if (row.reason || row.done) continue;
+      signal?.throwIfAborted();
+      const started = Date.now();
+      if (!subjectOpen({ subject: row.metadata.subject }, state.appInfo)) { row.reason = '계약 밖'; save(q); continue; }
+      onProgress({ phase: 'exam', name: row.name, queue: q });
+      let book;
+      try {
+        if (!row.bookId) {
+          book = await api.createBook(row.name, true, row.metadata.subject);
+          row.bookId = book.id; save(q);
+        } else book = await api.getBook(row.bookId);
+        const question = row.files.filter((f) => f.metadata.part === 'question');
+        book.exam = { ...row.metadata, source: { kind: 'file', name: question[0].filename, sha256: question[0].sha256 } };
+        await api.saveBook(book);
+        await attach(book, 'problem', question);
+        const solutions = row.files.filter((f) => f.metadata.part === 'solution');
+        await attach(book, 'answer', solutions.length ? solutions : row.files.filter((f) => f.metadata.part === 'answerKey'));
+        const sources = await getSources(book);
+        for (const role of ['problem', 'answer']) {
+          const doc = book.docs[role], src = sources[role];
+          if (!doc || doc.analyzedAt) continue;
+          if (!src) throw Error('시험지 파일을 열지 못했어요.');
+          const res = await analyzeDocument(src, { pages: Array.from({ length: src.numPages }, (_, i) => i), role, subject: book.subject, ...doc.options, ocrLang: 'kor+eng', signal, onProgress: (p) => onProgress({ ...p, name: row.name, queue: q }) });
+          Object.assign(doc, { items: res.items, pageInfo: res.pageInfo, signature: res.signature, analyzedAt: Date.now() });
+          await api.saveBook(book);
+        }
+        const answers = await readAnswers(book, row, signal);
+        const low = await transcribeExam(book, { signal, onProgress: (p) => onProgress({ ...p, name: row.name, queue: q }) });
+        row.result = { items: book.docs.problem.items.length, answers: answers.connected, low: low + answers.low, seconds: (Date.now() - started) / 1000 };
+        row.done = true; delete row.error; save(q);
+      } catch (err) {
+        if (signal?.aborted || err.name === 'AbortError') throw err;
+        row.error = err.message; save(q);
+      } finally { if (book) dropSources(book.id); }
+    }
+    onProgress({ phase: 'finished', queue: q });
+    return q;
+  }); } finally { running = false; }
+}

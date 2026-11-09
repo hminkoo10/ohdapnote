@@ -13,7 +13,7 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const file = compact(`${path}/${filename}`);
   const reasons = [];
   const pick = (re) => re.exec(title) || re.exec(file);
-  const classify = (s) => /전국연합|학력평가/.test(s) ? 'edu' : /모의평가|모평/.test(s) ? 'kice' : /대학수학능력시험|수능/.test(s) ? 'csat' : null;
+  const classify = (s) => /전국연합|학력평가|학평/.test(s) ? 'edu' : /모의평가|모평/.test(s) ? 'kice' : /대학수학능력시험|수능/.test(s) ? 'csat' : null;
   const exam = classify(title) || classify(file);
   const sy = pick(/(20\d{2})학년도/);
   const yr = pick(/(20\d{2})년(?!도)/);

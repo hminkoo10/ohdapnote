@@ -49,10 +49,12 @@ const matchesRange = (value, query) => {
   return String(value) === q;
 };
 
-export function filterBank(entries, { subject = '', bookId = '', page = '', number = '', text = '' } = {}, textOf = () => '') {
+export function filterBank(entries, { exam = '', year = '', grade = '', subject = '', bookId = '', page = '', number = '', text = '' } = {}, textOf = () => '') {
   const q = compact(text);
   const n = String(number).trim().replace(/^[^\d]+\s*/, '').replace(/번$/, '').trim();
-  return entries.filter((e) => (!subject || e.subject === subject) && (!bookId || e.bookId === bookId)
+  return entries.filter((e) => (!exam || !!e.bookObj.exam && (exam === 'all' || e.bookObj.exam.exam === exam))
+    && (!year || String(e.bookObj.exam?.schoolYear || e.bookObj.exam?.year) === String(year))
+    && (!grade || String(e.bookObj.exam?.grade) === String(grade)) && (!subject || e.subject === subject) && (!bookId || e.bookId === bookId)
     && matchesRange(bookPage(e.bookObj?.docs.problem, e.item.page), page)
     && matchesRange(e.item.number, n) && (!q || compact(`${itemName(e.item)} ${textOf(e)}`).includes(q)));
 }

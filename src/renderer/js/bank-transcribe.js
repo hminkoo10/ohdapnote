@@ -157,3 +157,34 @@ async function runBank(book, { item, useAi, onChange }) {
     onChange();
   }
 }
+// 모의고사 일괄 처리에서도 같은 PDF·스캔 경로를 사용한다. 화면·외부 인식 호출 없음.
+export async function transcribeExam(book, { signal, onProgress } = {}) {
+  const src = await getSources(book);
+  const store = await loadTranscripts(book.id);
+  let low = 0, done = 0;
+  try {
+    for (const b of bankTargets(book)) {
+      signal?.throwIfAborted();
+      b.src = src.problem;
+      if (!bestTranscript(book.id, b)) {
+        let entry;
+        const blocks = await pdfTranscribe(blockSegs(b), { plain: subjectOf(book) !== 'math' });
+        if (blocks?.length) entry = { blocks, model: 'pdf' };
+        else {
+          try { entry = { ...await scanTranscribe(await renderStack(blockSegs(b), TRANSCRIBE_WIDTH), { number: b.item.passage ? '' : b.item.number, signal, api }), model: 'ocr' }; }
+          catch (err) {
+            if (signal?.aborted) throw err;
+            entry = { blocks: [{ type: 'para', text: '원본을 확인하세요.', low: [{ start: 0, end: 10, reason: 'ocr' }] }], model: 'ocr', reliable: false, reasons: [err.message] };
+          }
+        }
+        signal?.throwIfAborted();
+        store.items[transcriptKey(b) + (entry.model === 'pdf' ? '|pdf' : '|local')] = { ...entry, at: Date.now() };
+        store.dirty = true;
+        if (!await saveTranscripts()) throw Error('옮긴 글을 저장하지 못했어요.');
+      }
+      low += countLow(bestTranscript(book.id, b)?.entry.blocks);
+      onProgress?.({ phase: 'transcribe', done: ++done });
+    }
+  } finally { await saveTranscripts(); }
+  return low;
+}
