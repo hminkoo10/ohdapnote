@@ -100,7 +100,7 @@ export async function readPageLayer(page, pdfjsLib) {
         // xem: 가로 1em 의 길이(폭이 0 인 윗선 글자는 가로로 늘려 길이를 맞춤), rot: 돌린 글자
         const [ex, ey] = toPage(m, (x + g.size) * g.hs, g.rise);
         const rot = Math.abs(ey - ay) > 0.05 * Math.abs(ex - ax) || ex < ax;
-        glyphs.push({ c, fam: font.fam, style: font.style, x0: Math.min(ax, bx), x1: Math.max(ax, bx), base: ay, top: Math.min(ty, by), bottom: Math.max(ty, by), size, xem: Math.abs(ex - ax), rot, seq: glyphs.length });
+        glyphs.push({ c, fam: font.fam, style: font.style + (Math.abs(m[0] * m[2] + m[1] * m[3]) / (Math.hypot(m[0], m[1]) * Math.hypot(m[2], m[3])) > 0.1 ? ' Italic' : ''), x0: Math.min(ax, bx), x1: Math.max(ax, bx), base: ay, top: Math.min(ty, by), bottom: Math.max(ty, by), size, xem: Math.abs(ex - ax), rot, seq: glyphs.length });
       }
       x += adv;
     }
@@ -381,9 +381,9 @@ export function decodeGlyph(c, fam, style = '') {
       return { k: 'brace', lo: bounds[c][0], hi: bounds[c][1] };
     }
     if ('{([})]'.includes(c)) return { k: '{(['.includes(c) ? 'open' : 'close', v: c === '{' || c === '}' ? `\\${c}` : c };
-    if (/^[A-Za-z0-9=+(),.<>|'\[\]\-]$/.test(c)) return { k: 'm', v: c, letter: /[A-Za-z]/.test(c), upright: !italic };
+    if (/^[A-Za-z0-9=+(),.:<>|'\[\]\-]$/.test(c)) return { k: 'm', v: c, letter: /[A-Za-z]/.test(c), upright: !italic };
     if (c === '′' || c === '″') return { k: 'm', v: c === '′' ? "'" : "''" };
-    const symbols = { '−': '-', '×': '\\times', '÷': '\\div', '≤': '\\le', '≥': '\\ge', '≠': '\\ne', '∞': '\\infty', '→': '\\to', 'α': '\\alpha', 'β': '\\beta', 'θ': '\\theta', 'π': '\\pi', '∑': '\\sum', '∏': '\\prod', '∩': '\\cap', '∪': '\\cup', '∈': '\\in', '⊂': '\\subset', '∅': '\\emptyset' };
+    const symbols = { '∠': '\\angle', '−': '-', '×': '\\times', '÷': '\\div', '≤': '\\le', '≥': '\\ge', '≠': '\\ne', '∞': '\\infty', '→': '\\to', 'α': '\\alpha', 'β': '\\beta', 'θ': '\\theta', 'π': '\\pi', '∑': '\\sum', '∏': '\\prod', '∩': '\\cap', '∪': '\\cup', '∈': '\\in', '⊂': '\\subset', '∅': '\\emptyset' };
     if (symbols[c]) return { k: 'm', v: symbols[c] };
     if (c === '∫') return { k: 'int' };
     return null;
@@ -481,7 +481,9 @@ function around(list, extra) {
 
 /** 글자 크기가 큰 쪽의 기준선 (첨자·아래끝을 빼고) */
 function mainLine(list) {
-  const r = list.filter(real);
+  const all = list.filter(real);
+  const operands = all.filter((b) => !['open', 'close', 'int'].includes(b.tok.k) && !/^\\(?:sum|prod|int)(?:_|\^|$)/.test(b.tok.v || ''));
+  const r = operands.length ? operands : all;
   const ref = Math.max(...r.map((b) => b.size));
   const big = r.filter((b) => b.comp || b.size >= 0.8 * ref);
   return { base: median(big.map((b) => b.base)), size: ref };
@@ -491,7 +493,6 @@ function mainLine(list) {
 function mathLatex(list) {
   const items = list.filter(real).sort(byX);
   if (!items.length) return '';
-  const { base: refBase, size: ref } = mainLine(items);
   const atoms = [];
   const need = (what) => atoms[atoms.length - 1] || fail(`${what} 앞에 붙을 글자가 없음`);
   // gap: 앞 글자와 띄어 있음 (수식 안 한글 "x≤p 또는 x≥q" 의 띄어쓰기용)
@@ -499,13 +500,17 @@ function mathLatex(list) {
   let gap = false;
   let spc = false;
   let prev = null;
-  const atom = (t, extra) => atoms.push({ t, sup: '', sub: '', up: '', lo: '', gap, spc, ...extra });
+  let current;
+  const atom = (t, extra) => atoms.push({ base: current.base, size: current.size, t, sup: '', sub: '', up: '', lo: '', gap, spc, ...extra });
   for (const b of items) {
+    current = b;
     const t = b.tok;
     spc = !!prev && !!b.spc;
     gap = spc || (!!prev && b.x0 - endX(prev) > 0.2 * b.size);
     prev = b;
-    // 작게 올라가거나 내려간 글자 = 첨자
+    // 첨자는 가장 가까운 밑 글자의 기준선·크기. 큰 연산자/괄호 높이를 따르지 않는다.
+    const ref = atoms.at(-1)?.size || mainLine(items).size;
+    const refBase = atoms.at(-1)?.base ?? mainLine(items).base;
     if (!b.comp && t.k !== 'text' && b.size < 0.8 * ref && atoms.length && ['m', 'sup', 'sub'].includes(t.k)) {
       const lift = refBase - b.base;
       const v = t.v;
@@ -773,6 +778,11 @@ function structures(boxes, lines, s) {
     if (rad) rad.tok = { ...rad.tok, len: (b.x1 - rad.x0) / rad.xem };
     else lines.push({ x0: b.x0, x1: b.x1, y, lw: 0.04 * b.size, hancom: true });
   }
+  // 같은 폭의 반복 가로선은 표. 안쪽부터 겹분수로 합치기 전에 보류한다.
+  for (const l of lines) {
+    const aligned = lines.filter((o) => Math.abs(o.x0 - l.x0) < 1 && Math.abs(o.x1 - l.x1) < 1 && Math.abs(o.y - l.y) < 12 * s);
+    if (new Set(aligned.map((o) => Math.round(o.y))).size >= 3) fail('표 가로선: 분수로 변환하지 않음');
+  }
   const items = radicalSpans(boxes);
   boxes = boxes.filter((b) => b.tok.k !== 'radx');
   for (const l of lines) if (l.x1 - l.x0 >= 2.5) items.push({ line: l, w: l.x1 - l.x0 });
@@ -802,6 +812,12 @@ function makeFrac(boxes, l, s) {
   };
   const num = l.hancom ? boxes.filter((b) => span(b) && b.base < l.y && b.base > l.y - 1.5 * s) : pick((b) => b.bottom <= l.y + 0.25 * s && b.bottom >= l.y - 0.6 * s, (b) => b.bottom <= l.y + 0.25 * s);
   const den = l.hancom ? boxes.filter((b) => span(b) && b.base > l.y && b.base < l.y + 1.5 * s) : pick((b) => b.top >= l.y - 0.25 * s && b.top <= l.y + 0.6 * s, (b) => b.top >= l.y - 0.25 * s);
+  if (l.hancom && !num.length && den.length) {
+    const ref = mainLine(den);
+    if (den.some((b) => b.tok.k === 'text') || l.y > ref.base - 0.45 * ref.size || l.y < ref.base - 1.2 * ref.size) fail('윗줄 범위 미확인');
+    const v = `\\overline{${mathLatex(den)}}`;
+    return [...boxes.filter((b) => !den.includes(b)), { ...around(den), ...ref, tok: { k: 'm', v }, comp: true }];
+  }
   if (l.hancom && (!num.length || !den.length)) fail('분수선의 분자·분모 미확인');
   if (!num.length || !den.length) return boxes; // 분수선이 아님(밑줄·꾸밈)
   const all = [...num, ...den];
@@ -851,7 +867,7 @@ function hancomStructures(boxes, s) {
     boxes = [...boxes.filter((b) => b !== arrow && !mem.includes(b)), { ...around([arrow, ...mem]), ...ref, comp: true, tok: { k: 'm', v: `\\vec{${mathLatex(mem)}}` } }];
   }
   for (const op of boxes.filter((b) => isHancomMath(b.fam) && (b.tok.k === 'int' || ['\\sum', '\\prod'].includes(b.tok.v)))) {
-    const mem = boxes.filter((b) => b !== op && real(b) && b.tok.k !== 'text' && b.size < 0.8 * op.size && midX(b) > op.x0 - 0.3 * op.size && midX(b) < op.x1 + 0.6 * op.size && b.base > op.top - op.size && b.base < op.bottom + op.size);
+    const mem = boxes.filter((b) => b !== op && real(b) && b.tok.k !== 'text' && b.size < 0.8 * op.size && midX(b) > op.x0 - 0.3 * op.size && midX(b) < op.x1 + 0.15 * op.size && b.base > op.top - op.size && b.base < op.bottom + op.size);
     const upper = mem.filter((b) => b.base < op.base - 0.45 * op.size);
     const lower = mem.filter((b) => b.base > op.base + 0.1 * op.size);
     const used = [...upper, ...lower];
@@ -1217,7 +1233,8 @@ function regionBlocks(layer, rect, place) {
   for (const gl of layer.glyphs) {
     if (!inR(gl) || SKIP_FONTS.test(gl.fam)) continue;
     if (gl.rot) fail(`돌려 놓은 글자 ${gl.fam} "${gl.c}"`);
-    const tok = decodeGlyph(gl.c, gl.fam, gl.style);
+    let tok = decodeGlyph(gl.c, gl.fam, gl.style);
+    if (/^[()]$/.test(gl.c) && layer.glyphs.some((g) => isHancomMath(g.fam))) tok = { k: gl.c === '(' ? 'open' : 'close', v: gl.c };
     if (!tok) fail(`모르는 기호 ${gl.fam}-${gl.style} "${gl.c}" (U+${gl.c.codePointAt(0).toString(16).toUpperCase()})`);
     if (tok.k === 'skip') continue;
     const ink = tok.hi != null ? { top: gl.base - tok.hi * gl.size, bottom: gl.base - tok.lo * gl.size } : { top: gl.top, bottom: gl.bottom };
@@ -1386,7 +1403,7 @@ function regionBlocks(layer, rect, place) {
  * @param {{explain?:boolean, plain?:boolean}} opts explain: 실패 이유, plain: 문제은행의 일반 글꼴 PDF도 허용
  */
 export function hancomEquationRegions(layer, rect = { x: 0, y: 0, w: 1, h: 1 }) {
-  const glyphs = layer.glyphs.filter((g) => isHancomMath(g.fam) && g.c.trim() && midX(g) >= rect.x * layer.w && midX(g) <= (rect.x + rect.w) * layer.w && g.base >= rect.y * layer.h && g.base <= (rect.y + rect.h) * layer.h);
+  const glyphs = layer.glyphs.filter((g) => (isHancomMath(g.fam) || /^[()[\]]$/.test(g.c) && layer.glyphs.some((a) => isHancomMath(a.fam) && Math.abs(a.base - g.base) < 0.3 * g.size && Math.max(a.x0 - g.x1, g.x0 - a.x1) < 0.65 * g.size)) && g.c.trim() && midX(g) >= rect.x * layer.w && midX(g) <= (rect.x + rect.w) * layer.w && g.base >= rect.y * layer.h && g.base <= (rect.y + rect.h) * layer.h);
   const groups = [];
   const pending = new Set(glyphs);
   while (pending.size) {
@@ -1398,20 +1415,34 @@ export function hancomEquationRegions(layer, rect = { x: 0, y: 0, w: 1, h: 1 }) 
         group.push(b); pending.delete(b);
       }
     }
+    const bounds = around(group);
+    const cases = group.some((g) => ['⎧', '⎨', '⎩', '⎪'].includes(normalizeHancomText(g.c, g.fam)));
+    const extra = layer.glyphs.filter((g) => !isHancomMath(g.fam) && g.c.trim() &&
+      (cases ? g.x0 >= bounds.x0 && g.x0 <= bounds.x1 + 12 * g.size && g.base >= bounds.top && g.base <= bounds.bottom :
+        /^[()[\]]$/.test(g.c) && group.some((a) => Math.abs(a.base - g.base) < 0.3 * g.size && Math.max(a.x0 - g.x1, g.x0 - a.x1) < 0.65 * g.size)));
+    group.push(...extra.filter((g) => !group.includes(g)));
+    if (cases) {
+      const edge = bounds.x0 < layer.w / 2 ? layer.w / 2 : layer.w;
+      const conditions = layer.glyphs.filter((g) => g.x0 >= bounds.x0 && g.x1 < edge && g.base >= bounds.top && g.base <= bounds.bottom);
+      group.push(...conditions.filter((g) => !group.includes(g)));
+      for (const g of conditions) pending.delete(g);
+    }
     const box = around(group);
     const crop = { x: Math.max(rect.x, (box.x0 - 1) / layer.w), y: Math.max(rect.y, (box.top - 1) / layer.h), w: (box.x1 - box.x0 + 2) / layer.w, h: (box.bottom - box.top + 2) / layer.h };
     let blocks, reason;
     try {
+      if (cases) fail('연립 조건 범위 미확인: 조건 포함 원본 확인 필요');
       const isolated = { ...layer, glyphs: group };
       blocks = regionBlocks(isolated, crop, crop);
       blocks = importAnswerBlocks(blocks);
       if (!blocks.length || blocks.some((b) => b.type !== 'math')) fail('수식 묶음 미확인');
+      if (blocks.length > 1) fail('여러 줄 수식: 분수선·첨자 연결 미확인');
     } catch (err) {
       if (!(err instanceof Fail)) throw err;
       reason = err.message;
       blocks = [{ type: 'figure', box: crop }];
     }
-    groups.push({ rect: crop, blocks: blocks.map((b) => ({ ...b, low: [{ reason: 'math' }] })), reason });
+    groups.push({ rect: crop, blocks: blocks.map((b) => ({ ...b, low: [{ reason: 'math', ...(reason ? { detail: reason } : {}) }] })), reason });
   }
   return groups.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
 }

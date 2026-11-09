@@ -230,3 +230,47 @@ test('모르는 수식 기호가 있으면 옮기지 않음 (그림으로)', () 
   const L = layer([row(100, 50, [M('x'), G('\u0001', 'EHsang', 0.5)])]);
   assert.equal(transcribeParts(whole(L)), null);
 });
+
+const H = (s) => M(s).map(([c, , style, w]) => [c, 'HyhwpEQ', style, w]);
+test('선분 윗줄과 각 기호 및 콜론 보존', () => {
+  const r = run(layer([row(100,50,[H('AB')]),row(100.5,50,[G('\ue06d','HyhwpEQ',1)])]));
+  assert.match(r[0].eq, /bar/);
+  assert.equal(decodeGlyph('∠', 'HyhwpEQ').v, '\\angle');
+  assert.equal(decodeGlyph('\ue04f', 'HyhwpEQ').v, ':');
+});
+test('큰 중괄호가 첨자 기준선을 낮추지 않음', () => {
+  const r = run(layer([row(101.4,50,[H('{')],13.5),row(100,57,[H('a')]),row(103,63,[H('n')],7.5),row(101.4,68,[H('}')],13.5)]));
+  assert.match(r[0].eq, /a_\{n\}/);
+});
+test('일반 글꼴 조건 괄호도 한컴 성분에 보존', () => {
+  const L = layer([row(100,50,[H('t')]),row(100,56,[T('(')]),row(100,66,[H('t>0')]),row(100,82,[T(')')])]);
+  const r=hancomEquationRegions(L);
+  assert.match(r[0].blocks[0].eq, /\(/);
+  assert.match(r[0].blocks[0].eq, /\)/);
+});
+test('표 가로선을 겹분수로 옮기지 않음', () => {
+ const L=layer([row(90,50,[H('1')]),row(105,50,[H('2')]),row(120,50,[H('3')]),row(135,50,[H('4')])],{lines:[98,113,128].map(y=>({x0:49,x1:59,y,lw:.4}))});
+ const r=hancomEquationRegions(L);
+ assert.ok(r.every(g=>g.blocks.every(b=>b.type==='figure')));
+ assert.match(r[0].reason,/표/);
+});
+
+test('합 연산자 다음 복합 아래첨자를 밑 글자 기준선으로 보존', () => {
+ const L=layer([row(103,50,[H('∑')],20),row(89,53,[H('4')],7.5),row(110,50,[H('k=1')],7.5),row(100,65,[H('b')]),row(103,71,[H('2n-1')],7.5)]);
+ const r=run(L);
+ assert.match(r[0].eq,/b_\{2n-1\}/);
+ assert.match(r[0].eq,/sum/);
+});
+test('분수로 연결 못 한 여러 줄은 원본과 사유 보존', () => {
+ const L=layer([row(100,50,[H('a')]),row(115,50,[H('b')])]);
+ const r=hancomEquationRegions(L);
+ assert.equal(r[0].blocks[0].type,'figure');
+ assert.match(r[0].blocks[0].low[0].detail,/여러 줄/);
+});
+test('한컴 연립의 본문 조건은 삭제 대신 조건 포함 원본', () => {
+ const L=layer([row(100,40,[H('\ue078')]),row(108,40,[H('\ue079')]),row(116,40,[H('\ue07a')]),row(99,50,[H('a')]),row(114,50,[H('b')]),row(99,70,[T('홀수인 경우')]),row(114,70,[T('짝수인 경우')])]);
+ const r=hancomEquationRegions(L);
+ assert.equal(r[0].blocks[0].type,'figure');
+ assert.match(r[0].reason,/조건/);
+ assert.ok((r[0].rect.x+r[0].rect.w)*L.w>=120);
+});
