@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { transcribeParts, decodeGlyph, fontFamily } from '../../src/renderer/js/pdfmath.js';
+import { transcribeParts, decodeGlyph, fontFamily, hancomEquationRegions } from '../../src/renderer/js/pdfmath.js';
 
 // 실제 교재 대신 글자 위치를 직접 만든 가짜 쪽으로 시험 (글꼴 이름·코드는 EBS 교재 PDF 의 수식 글꼴 규칙)
 // 글자 조각: [글자, 글꼴, 모양, 폭(em)]
@@ -26,6 +26,18 @@ function layer(rows, { lines = [], shapes = [] } = {}) {
 
 const whole = (L) => [{ layer: L, rect: { x: 0, y: 0, w: 1, h: 1 }, place: { x: 0, y: 0, w: 1, h: 1 } }];
 const run = (L) => transcribeParts(whole(L), { explain: true });
+
+test('한컴 늘인 분수 글리프는 ink 높이로 복원, 불명 조각은 별도 그림', () => {
+  const H = (s) => M(s).map(([c, , style, w]) => [c, 'HyhwpEQ', style, w]);
+  const L = layer([row(80, 50, [H('1')]), row(90, 50, [H('2')]), row(91, 49, [H('\ue06d')]), row(180, 150, [H('\uf888')])]);
+  L.glyphs.find((g) => g.c === '\ue06d').x1 = 57;
+  const result = hancomEquationRegions(L);
+  assert.equal(result.length, 2);
+  assert.match(result[0].blocks[0].eq, /1.*over.*2/);
+  assert.equal(result[1].blocks[0].type, 'figure');
+  assert.ok(result.every((r) => r.blocks.every((b) => b.low.length)));
+  assert.deepEqual(hancomEquationRegions(L), result);
+});
 
 test('한컴 PUA 숫자·위첨자·분수: 기존 위치 복원과 eq 출력', () => {
   const H = (s) => M(s).map(([c, , style, w]) => [c, 'HyhwpEQ', style, w]);

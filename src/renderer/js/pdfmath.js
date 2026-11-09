@@ -370,9 +370,16 @@ export function decodeGlyph(c, fam, style = '') {
     const italic = /^[\uE0E5-\uE0FE]$/.test(c) || /Italic/.test(style);
     c = normalizeHancomText(c, fam);
     if (isPrivateChar(c)) return null;
+    if (c === '―') return { k: 'hbar' };
+    if (c === '√') return { k: 'rad', len: 1.001, lo: -0.1963, hi: 0.8018 };
+    if ('⎧⎨⎩⎪'.includes(c)) {
+      const bounds = { '⎧': [-0.1983, 0.5918], '⎨': [-0.1983, 0.8018], '⎩': [0.0117, 0.8018], '⎪': [0.0527, 0.5537] };
+      return { k: 'brace', lo: bounds[c][0], hi: bounds[c][1] };
+    }
+    if (c === '{' || c === '}') return { k: c === '{' ? 'open' : 'close', v: c === '{' ? '\\{' : '\\}' };
     if (/^[A-Za-z0-9=+(),.<>|'\[\]\-]$/.test(c)) return { k: 'm', v: c, letter: /[A-Za-z]/.test(c), upright: !italic };
     if (c === '′' || c === '″') return { k: 'm', v: c === '′' ? "'" : "''" };
-    const symbols = { '−': '-', '×': '\\times', '÷': '\\div', '≤': '\\le', '≥': '\\ge', '≠': '\\ne', '∞': '\\infty', '→': '\\to', 'α': '\\alpha', 'β': '\\beta', 'θ': '\\theta', 'π': '\\pi' };
+    const symbols = { '−': '-', '×': '\\times', '÷': '\\div', '≤': '\\le', '≥': '\\ge', '≠': '\\ne', '∞': '\\infty', '→': '\\to', 'α': '\\alpha', 'β': '\\beta', 'θ': '\\theta', 'π': '\\pi', '∑': '\\sum', '∏': '\\prod', '∩': '\\cap', '∪': '\\cup', '∈': '\\in', '⊂': '\\subset', '∅': '\\emptyset' };
     if (symbols[c]) return { k: 'm', v: symbols[c] };
     if (c === '∫') return { k: 'int' };
     return null;
@@ -753,6 +760,15 @@ function radicalSpans(boxes) {
 
 /** 루트·분수선 → 루트·분수 덩어리. 안쪽(짧은 것)부터 */
 function structures(boxes, lines, s) {
+  // 한컴 윗선은 폭 1/2em 글리프를 가로로 늘린 것. 실제 ink 높이는 598~639/1024em.
+  const bars = boxes.filter((b) => b.tok.k === 'hbar');
+  boxes = boxes.filter((b) => b.tok.k !== 'hbar');
+  for (const b of bars) {
+    const y = b.base - 0.604 * b.size;
+    const rad = boxes.find((r) => r.tok.k === 'rad' && b.x0 >= r.x0 && b.x0 <= r.x0 + r.xem * 1.1 && Math.abs(y - (r.base - r.tok.hi * r.size)) < 0.2 * r.size);
+    if (rad) rad.tok = { ...rad.tok, len: (b.x1 - rad.x0) / rad.xem };
+    else lines.push({ x0: b.x0, x1: b.x1, y, lw: 0.04 * b.size, hancom: true });
+  }
   const items = radicalSpans(boxes);
   boxes = boxes.filter((b) => b.tok.k !== 'radx');
   for (const l of lines) if (l.x1 - l.x0 >= 2.5) items.push({ line: l, w: l.x1 - l.x0 });
@@ -780,8 +796,9 @@ function makeFrac(boxes, l, s) {
     }
     return grp;
   };
-  const num = pick((b) => b.bottom <= l.y + 0.25 * s && b.bottom >= l.y - 0.6 * s, (b) => b.bottom <= l.y + 0.25 * s);
-  const den = pick((b) => b.top >= l.y - 0.25 * s && b.top <= l.y + 0.6 * s, (b) => b.top >= l.y - 0.25 * s);
+  const num = l.hancom ? boxes.filter((b) => span(b) && b.base < l.y && b.base > l.y - 1.5 * s) : pick((b) => b.bottom <= l.y + 0.25 * s && b.bottom >= l.y - 0.6 * s, (b) => b.bottom <= l.y + 0.25 * s);
+  const den = l.hancom ? boxes.filter((b) => span(b) && b.base > l.y && b.base < l.y + 1.5 * s) : pick((b) => b.top >= l.y - 0.25 * s && b.top <= l.y + 0.6 * s, (b) => b.top >= l.y - 0.25 * s);
+  if (l.hancom && (!num.length || !den.length)) fail('분수선의 분자·분모 미확인');
   if (!num.length || !den.length) return boxes; // 분수선이 아님(밑줄·꾸밈)
   const all = [...num, ...den];
   const size = Math.max(...all.map((b) => b.size));
@@ -1323,6 +1340,37 @@ function regionBlocks(layer, rect, place) {
  *   그림 블록의 box 는 쌓은 그림에 대한 비율이라 AI 가 옮긴 결과와 같은 방법으로 잘라 쓸 수 있습니다.
  * @param {{explain?:boolean, plain?:boolean}} opts explain: 실패 이유, plain: 문제은행의 일반 글꼴 PDF도 허용
  */
+export function hancomEquationRegions(layer, rect = { x: 0, y: 0, w: 1, h: 1 }) {
+  const glyphs = layer.glyphs.filter((g) => isHancomMath(g.fam) && g.c.trim() && midX(g) >= rect.x * layer.w && midX(g) <= (rect.x + rect.w) * layer.w && g.base >= rect.y * layer.h && g.base <= (rect.y + rect.h) * layer.h);
+  const groups = [];
+  const pending = new Set(glyphs);
+  while (pending.size) {
+    const group = [pending.values().next().value];
+    pending.delete(group[0]);
+    for (let i = 0; i < group.length; i++) for (const b of pending) {
+      const a = group[i], s = Math.max(a.size, b.size);
+      if (Math.max(a.x0 - b.x1, b.x0 - a.x1) <= 0.65 * s && Math.abs(a.base - b.base) <= 1.5 * s) {
+        group.push(b); pending.delete(b);
+      }
+    }
+    const box = around(group);
+    const crop = { x: Math.max(rect.x, (box.x0 - 1) / layer.w), y: Math.max(rect.y, (box.top - 1) / layer.h), w: (box.x1 - box.x0 + 2) / layer.w, h: (box.bottom - box.top + 2) / layer.h };
+    let blocks, reason;
+    try {
+      const isolated = { ...layer, glyphs: group };
+      blocks = regionBlocks(isolated, crop, crop);
+      blocks = importAnswerBlocks(blocks);
+      if (!blocks.length || blocks.some((b) => b.type !== 'math')) fail('수식 묶음 미확인');
+    } catch (err) {
+      if (!(err instanceof Fail)) throw err;
+      reason = err.message;
+      blocks = [{ type: 'figure', box: crop }];
+    }
+    groups.push({ rect: crop, blocks: blocks.map((b) => ({ ...b, low: [{ reason: 'math' }] })), reason });
+  }
+  return groups.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
+}
+
 export function transcribeParts(parts, { explain = false, plain = false } = {}) {
   try {
     // 수식 글꼴(EH…)로 만든 PDF 만 (다른 출판사 PDF 의 수식 글꼴은 아직 모름)
@@ -1346,7 +1394,40 @@ export function transcribeParts(parts, { explain = false, plain = false } = {}) 
         const privateText = p.layer.glyphs.some((g) => isPrivateChar(g.c));
         if (!(err instanceof Fail) || (!hancom && !privateText)) throw err;
         // 불명 기호는 원본 영역과 확인 표시를 보존한다.
-        blocks.push({ type: 'figure', box: { ...p.place }, low: [{ reason: hancom ? 'math' : 'ocr' }] });
+        if (hancom) {
+          // 실패 전파는 수식 연결 성분까지만. 본문/그래프는 기존 복원 경로를 사용한다.
+          const groups = hancomEquationRegions(p.layer, p.rect);
+          const rest = { ...p.layer, glyphs: p.layer.glyphs.filter((g) => !isHancomMath(g.fam)) };
+          let prose;
+          try { prose = regionBlocks(rest, p.rect, p.place); } catch { prose = null; }
+          // 본문까지 불명일 때는 전체 원본을 보존: 수식만 내고 본문을 잃지 않는다.
+          if (!prose || !groups.length) blocks.push({ type: 'figure', box: { ...p.place }, low: [{ reason: 'math' }] });
+          else {
+            const flow = [];
+            const mapBox = (box) => ({ x: p.place.x + (box.x - p.rect.x) / p.rect.w * p.place.w, y: p.place.y + (box.y - p.rect.y) / p.rect.h * p.place.h, w: box.w / p.rect.w * p.place.w, h: box.h / p.rect.h * p.place.h });
+            const figures = prose.filter((b) => b.type === 'figure');
+            for (const b of figures) flow.push({ x: b.box.x, y: b.box.y, block: { ...b, low: [{ reason: 'ocr' }] } });
+            const rows = [];
+            for (const g of rest.glyphs.filter((g) => midX(g) >= p.rect.x * rest.w && midX(g) <= (p.rect.x + p.rect.w) * rest.w && g.base >= p.rect.y * rest.h && g.base <= (p.rect.y + p.rect.h) * rest.h).sort((a, b) => a.base - b.base || a.x0 - b.x0)) {
+              const pos = mapBox({ x: midX(g) / rest.w, y: g.base / rest.h, w: 0, h: 0 });
+              if (figures.some((f) => pos.x >= f.box.x && pos.x <= f.box.x + f.box.w && pos.y >= f.box.y && pos.y <= f.box.y + f.box.h)) continue;
+              let row = rows.find((r) => Math.abs(r[0].base - g.base) < 0.3 * g.size);
+              if (!row) rows.push(row = []);
+              row.push(g);
+            }
+            for (const row of rows) {
+              row.sort(byX);
+              const pos = mapBox({ x: row[0].x0 / rest.w, y: row[0].base / rest.h, w: 0, h: 0 });
+              flow.push({ ...pos, block: { type: 'para', text: row.map((g) => normalizeHancomText(g.c, g.fam)).join(''), low: [{ reason: 'ocr' }] } });
+            }
+            for (const group of groups) for (const b of group.blocks) {
+              const box = b.box && { x: p.place.x + (b.box.x - p.rect.x) / p.rect.w * p.place.w, y: p.place.y + (b.box.y - p.rect.y) / p.rect.h * p.place.h, w: b.box.w / p.rect.w * p.place.w, h: b.box.h / p.rect.h * p.place.h };
+              flow.push({ ...mapBox(group.rect), block: { ...b, ...(box ? { box } : {}) } });
+            }
+            flow.sort((a, b) => a.y - b.y || a.x - b.x);
+            blocks.push(...flow.map((e) => e.block));
+          }
+        } else blocks.push({ type: 'figure', box: { ...p.place }, low: [{ reason: 'ocr' }] });
       }
     }
     if (!blocks.some((b) => b.type !== 'figure' || b.low?.length)) fail('읽은 글자가 없음');
