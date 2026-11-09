@@ -1,11 +1,55 @@
 import { normalizeHancomText, isPrivateChar } from './hancom.js';
-import { selections } from './mockexam.js';
+import { identifyExam, selections } from './mockexam.js';
+
+// 반복된 머리글이 같은 높이에 있는 단일 과목 표만 좌표로 분리한다.
+function tableColumns(items, subject) {
+  const cells = items.filter((i) => i.str?.trim() && i.transform?.length === 6)
+    .map((i) => ({ text: i.str.trim(), x: i.transform[4], y: i.transform[5] }));
+  const heads = cells.filter((i) => i.text === '문항').sort((a, b) => a.x - b.x);
+  if (!subject || heads.length < 2 || !cells.some((i) => i.text.replace(/\s/g, '') === '배점')) return null;
+  if (Math.max(...heads.map((i) => i.y)) - Math.min(...heads.map((i) => i.y)) > 3) return null;
+  const labels = cells.filter((i) => selections.includes(i.text.replace(/\s/g, '')) && i.y > heads[0].y);
+  return heads.map((h, k) => {
+    const right = heads[k + 1]?.x - 3 || Infinity;
+    const label = labels.find((i) => i.x >= h.x - 3 && i.x < right);
+    const rows = [];
+    for (const c of cells.filter((i) => i.x >= h.x - 3 && i.x < right && i.y < h.y - 16)) {
+      let row = rows.find((r) => Math.abs(r.y - c.y) < 2);
+      if (!row) rows.push(row = { y: c.y, cells: [] });
+      row.cells.push(c);
+    }
+    return { selection: label?.text.replace(/\s/g, '') || null,
+      text: '번호 정답 배점\n' + rows.sort((a, b) => b.y - a.y).map((r) => r.cells.sort((a, b) => a.x - b.x).map((c) => c.text).join(' ')).join('\n') };
+  });
+}
 
 /** pdf.js TextContent.items를 내용 순서대로 넘기거나 문자열을 넘긴다.
  * 좌표 순으로 전역 정렬하면 다단 표의 과목이 섞이므로 내용 순서를 보존한다.
  * 반환 warnings는 누락/충돌 확인용이며 answers.json에는 저장하지 않는다.
  */
 export function parseAnswerKey(input, { subject = null, selection = null } = {}) {
+  if (Array.isArray(input)) {
+    const detected = identifyExam({ text: input.map((i) => i.str).join(' ') }).subject;
+    const columns = tableColumns(input, subject || detected);
+    if (columns) {
+      const answers = {}, warnings = [], conflicts = new Set();
+      for (const col of columns) {
+        const result = parseAnswerKey(col.text, { subject: subject || detected, selection: col.selection });
+        warnings.push(...result.warnings);
+        for (const [key, entries] of Object.entries(result.answers)) {
+          answers[key] ||= {};
+          for (const [number, entry] of Object.entries(entries)) {
+            const id = `${key}:${number}`;
+            if (conflicts.has(id)) continue;
+            if (answers[key][number] && JSON.stringify(answers[key][number]) !== JSON.stringify(entry)) {
+              delete answers[key][number]; conflicts.add(id); warnings.push(`${key} ${number}: 정답 충돌`);
+            } else answers[key][number] = entry;
+          }
+        }
+      }
+      return { answers, warnings };
+    }
+  }
   const source = typeof input === 'string' ? input : input.map((i) => i.str + (i.hasEOL ? '\n' : ' ')).join('');
   // 정답 PUA 숫자 바로 뒤에 다음 문항번호가 붙는 PDF도 경계를 잃지 않는다.
   const text = normalizeHancomText(source.replace(/([\uE034-\uE03D])(?=\d)/g, '$1 '));
@@ -19,7 +63,7 @@ export function parseAnswerKey(input, { subject = null, selection = null } = {})
   const read = (chunk) => {
     if (!current) return;
     const key = selected ? `${current}|${selected}` : current;
-    const pointsColumn = /문항\s*(?:번호)?\s*정답\s*배점|번호\s*정답\s*배점/.test(chunk);
+    const pointsColumn = /문항\s*(?:번호)?\s*정\s*답\s*배\s*점|번호\s*정\s*답\s*배\s*점/.test(chunk);
     const pattern = pointsColumn ? /(\d{1,2})\s+([①-⑤]|\d{1,3})\s+([1-9](?:\.\d+)?)\b/g : /(\d{1,2})\s+([①-⑤]|\d{1,3})(?!\d)/g;
     for (const m of chunk.matchAll(pattern)) {
       const number = +m[1];

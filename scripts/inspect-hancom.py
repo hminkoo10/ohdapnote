@@ -22,6 +22,8 @@ if '--build' in sys.argv:
                          (0xe09d, 'αβγδεζηθικλμνξοπρστυφχψω')]:
         mapping.update({chr(start + i): c for i, c in enumerate(chars)})
     mapping.update({chr(k): v for k, v in {
+        0xe06d: '―', 0xe06e: '→', 0xe078: '⎧', 0xe079: '⎨',
+        0xe07a: '⎩', 0xe07b: '⎪', 0xe101: '|',
         0xe050: '′', 0xe051: '″', 0xe052: ',', 0xe053: '.', 0xe054: '/',
         0xe055: '<', 0xe056: '>', 0xe057: '?', 0xe058: '←', 0xe05a: '→',
         0xe05b: '∫', 0xe05c: '√', 0xe067: '∑', 0xe068: 'Π', 0xe069: '∏',

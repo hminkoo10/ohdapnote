@@ -3,8 +3,51 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { identifyExam, groupExamFiles } from '../../src/renderer/js/mockexam.js';
 import { parseAnswerKey, answerKeyToAnswers } from '../../src/renderer/js/mockexam-answers.js';
-import { normalizeHancomText, HANCOM_PUA } from '../../src/renderer/js/hancom.js';
+import { normalizeHancomText, HANCOM_PUA, resolvePdfFontName } from '../../src/renderer/js/hancom.js';
 const { sanitizeAnswers } = createRequire(import.meta.url)('../../src/main/answers.js');
+
+test('본문은 시험 제목이 아니며 모평 약칭도 식별', () => {
+  const m = identifyExam({ filename: '2024학년도_6월모평_영어_문제지.pdf', text: '고2 학생은 수학 풀이를 읽었다. 가형 평가원' });
+  assert.deepEqual([m.exam, m.subject, m.grade, m.part, m.selection], ['kice', 'english', 3, 'question', null]);
+  assert.equal(identifyExam({ filename: '2024학년도 수능 국어 문제지.pdf', text: '본문 풀이 가형' }).selection, null);
+});
+
+test('내부 글꼴 키 무시와 실제 글꼴명 조회, 한컴 구조 기호', () => {
+  assert.equal(normalizeHancomText('\ue06d\ue06e\ue078\ue079\ue07a\ue07b\ue101', 'g_d0_f3'), '―→⎧⎨⎩⎪|');
+  assert.equal(resolvePdfFontName({ commonObjs: { get: () => ({ name: 'HancomEQN' }) } }, 'g_d0_f3'), 'HancomEQN');
+  assert.equal(resolvePdfFontName({ commonObjs: { get: () => { throw Error(); } } }, 'missing'), undefined);
+});
+
+// 실제 글·답 대신 번호에 따른 가짜 답. 행 우선 내용 순서와 다단 배치만 재현.
+for (const [subject, label, columns, size] of [
+  ['korean', '국어', [null, null, '화법과작문', '언어와매체'], [17, 17, 11, 11]],
+  ['math', '수학', [null, null, '확률과통계', '미적분', '기하'], [11, 11, 8, 8, 8]],
+  ['english', '영어', [null, null, null, null], [12, 12, 12, 9]],
+]) test(`가짜 다단 정답표 ${subject}: 공통·선택·배점`, () => {
+  const items = [];
+  const add = (str, x, y) => items.push({ str, transform: [1, 0, 0, 1, x, y], hasEOL: false });
+  add(`2024학년도 대학수학능력시험 6월 모의평가 ${label} 영역 정답표`, 0, 800);
+  columns.forEach((sel, c) => {
+    if (sel) add(sel, 10 + c * 100, 740);
+    add('문항', c * 100, 700); add('번호', c * 100, 690);
+    add('정 답', c * 100 + 30, 695); add('배 점', c * 100 + 60, 695);
+  });
+  for (let r = 0; r < Math.max(...size); r++) columns.forEach((sel, c) => {
+    if (r >= size[c]) return;
+    const start = sel ? subject === 'korean' ? 35 : 23 : c * size[0] + 1;
+    add(String(start + r), c * 100 + 5, 660 - r * 20);
+    add('①②③④⑤'[(r + c) % 5], c * 100 + 35, 660 - r * 20);
+    add(String(2 + r % 2), c * 100 + 65, 660 - r * 20);
+  });
+  const result = parseAnswerKey(items);
+  assert.deepEqual(result.warnings, []);
+  assert.equal(Object.keys(result.answers[subject]).length, subject === 'korean' ? 34 : subject === 'math' ? 22 : 45);
+  columns.forEach((sel, c) => {
+    if (sel) assert.equal(Object.keys(result.answers[`${subject}|${sel}`]).length, size[c]);
+    const number = sel ? subject === 'korean' ? 35 : 23 : c * size[0] + 1;
+    assert.deepEqual(result.answers[sel ? `${subject}|${sel}` : subject][number], { answer: String(c % 5 + 1), points: 2 });
+  });
+});
 
 for (const [title, expected] of [
   ['2025학년도 대학수학능력시험 9월 모의평가 수학 문제지', { exam: 'kice', year: 2024, schoolYear: 2025, month: 9, grade: 3, subject: 'math' }],

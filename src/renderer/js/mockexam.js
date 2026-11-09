@@ -8,11 +8,12 @@ const compact = (s) => normalizeHancomText(s).replace(/\s/g, '')
 
 /** 파일명/ZIP 경로와 제목 글자. 제목에 있는 필드는 파일명보다 우선한다. */
 export function identifyExam({ filename = '', path = '', text = '' } = {}) {
-  const title = compact(text.slice(0, 2500));
+  // 본문 속 고2·풀이·평가원은 제목 정보가 아니다.
+  const title = compact(/20\d{2}(?:학년도|년)[^\n]{0,160}/.exec(text)?.[0] || '');
   const file = compact(`${path}/${filename}`);
   const reasons = [];
   const pick = (re) => re.exec(title) || re.exec(file);
-  const classify = (s) => /전국연합|학력평가/.test(s) ? 'edu' : /모의평가|평가원/.test(s) ? 'kice' : /대학수학능력시험|수능/.test(s) ? 'csat' : null;
+  const classify = (s) => /전국연합|학력평가/.test(s) ? 'edu' : /모의평가|모평/.test(s) ? 'kice' : /대학수학능력시험|수능/.test(s) ? 'csat' : null;
   const exam = classify(title) || classify(file);
   const sy = pick(/(20\d{2})학년도/);
   const yr = pick(/(20\d{2})년(?!도)/);
@@ -20,16 +21,17 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const schoolYear = exam === 'csat' || exam === 'kice' ? (sy ? +sy[1] : null) : null;
   const year = schoolYear ? schoolYear - 1 : yr ? +yr[1] : sy && exam === 'edu' ? +sy[1] : bare ? +bare[1] : null;
   const month = +(pick(/(1[012]|[1-9])월/)?.[1] || 0) || (exam === 'csat' ? 11 : null);
-  const grade = +(pick(/고(?:등학교)?([123])(?:학년)?/)?.[1] || 0) || (exam === 'csat' || exam === 'kice' ? 3 : null);
+  const grade = exam === 'csat' || exam === 'kice' ? 3 : +(pick(/고(?:등학교)?([123])(?:학년)?/)?.[1] || 0) || null;
   const foundSubjects = (s) => subjects.filter(([id, re]) => re.test(s.replace(/대학수학능력시험/g, '').replace(id === 'korean' ? /외국어/g : /$^/g, ''))).map(([id]) => id);
   const ss = foundSubjects(title).length ? foundSubjects(title) : foundSubjects(file);
   const subject = ss.length === 1 ? ss[0] : null;
-  const sel = selections.filter((v) => (title || file).includes(v));
-  if (!sel.length) sel.push(...selections.filter((v) => file.includes(v)));
+  const allowed = selections.filter((v) => !schoolYear || (/[가나]형/.test(v) ? subject === 'math' && schoolYear <= 2021 : /[AB]형/.test(v) ? schoolYear <= 2016 : true));
+  const sel = allowed.filter((v) => (title || file).includes(v));
+  if (!sel.length) sel.push(...allowed.filter((v) => file.includes(v)));
   const selection = sel.length === 1 ? sel[0] : null;
   const form = pick(/(홀|짝)수?형/)?.[1] || null;
   const partOf = (s) => /듣기.*(?:대본|스크립트)|listening.*script/i.test(s) ? 'listeningScript' : /해설|풀이/.test(s) ? 'solution' : /정답|정답표|answer/i.test(s) ? 'answerKey' : /문제|question/i.test(s) ? 'question' : null;
-  const part = /\.(?:mp3|wav|m4a)$/i.test(filename) ? 'audio' : partOf(title) || partOf(file) || 'other';
+  const part = /\.(?:mp3|wav|m4a)$/i.test(filename) ? 'audio' : partOf(file) || partOf(title) || 'other';
   for (const [name, value] of Object.entries({ exam, year, month, grade, subject })) if (value === null) reasons.push(`${name} 미확인 또는 합본`);
   if (part === 'other') reasons.push('파일 역할 미확인');
   if (sel.length > 1) reasons.push('선택 합권');
