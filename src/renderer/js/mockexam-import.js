@@ -37,7 +37,10 @@ async function attach(book, role, files) {
   if (!files.length || book.docs[role]) return;
   const imported = await api.importFiles(book.id, role, files.map((f) => f.localPath));
   try {
-    for (const f of imported.files.filter((f) => f.kind === 'image')) await api.savePhotoPages({ token: imported.token, name: f.name, status: 'unchanged', reason: '시험지 원본' });
+    const prepared = [];
+    for (const f of imported.files) prepared.push(...(f.kind === 'image'
+      ? await api.savePhotoPages({ token: imported.token, name: f.name, status: 'unchanged', reason: '시험지 원본' }) : [f]));
+    imported.files = prepared;
     book.docs[role] = newDoc(role, imported);
     await api.commitFileImport(imported.token, book);
   } catch (e) { await api.discardFileImport(imported.token); throw e; }
@@ -47,10 +50,10 @@ async function readAnswers(book, row, signal) {
   candidates.push(...row.files.filter((f) => f.metadata.part === 'solution'));
   for (const file of candidates) {
     // 정답표는 책 문서와 별개로 읽는다. 해설을 answer로 유지한다.
-    const bytes = await api.scanExamRead(file.localPath);
-    const url = URL.createObjectURL(new Blob([bytes]));
-    let src;
+    let src, url;
     try {
+      const bytes = await api.scanExamRead(file.localPath);
+      url = URL.createObjectURL(new Blob([bytes]));
       src = await openDocSource([{ name: file.filename, kind: /\.pdf$/i.test(file.filename) ? 'pdf' : 'image' }], () => url);
       const parsed = { answers: {} };
       let scanned = false;
@@ -76,6 +79,9 @@ async function readAnswers(book, row, signal) {
         }
       }
       if (connected) return { connected, low: scanned ? connected : 0 };
+    } catch (err) {
+      if (signal?.aborted || err.name === 'AbortError') throw err;
+      // 못 여는 정답표는 다음 정답표·해설을 시도하고, 문제지는 계속 넣는다.
     } finally { await src?.destroy(); URL.revokeObjectURL(url); }
   }
   return { connected: 0, low: 0 };
