@@ -27,6 +27,23 @@ function layer(rows, { lines = [], shapes = [] } = {}) {
 const whole = (L) => [{ layer: L, rect: { x: 0, y: 0, w: 1, h: 1 }, place: { x: 0, y: 0, w: 1, h: 1 } }];
 const run = (L) => transcribeParts(whole(L), { explain: true });
 
+test('한컴 PUA 숫자·위첨자·분수: 기존 위치 복원과 eq 출력', () => {
+  const H = (s) => M(s).map(([c, , style, w]) => [c, 'HyhwpEQ', style, w]);
+  const r = run(layer([row(100, 50, [H('x=')]), row(94, 65.5, [H('\ue034')]), row(107, 65.5, [H('x')])], { lines: [{ x0: 64, x1: 72, y: 97, lw: 0.4 }] }));
+  assert.equal(r[0].type, 'math');
+  assert.match(r[0].eq, /over/);
+  assert.equal(r[0].low[0].reason, 'math');
+  const sup = run(layer([row(100, 50, [H('x')]), row(95, 56, [H('\ue035')], 6)]));
+  assert.match(sup[0].eq, /\^/);
+});
+
+test('모르는 한컴 기호: 원본 그림과 확인 표시', () => {
+  const r = run(layer([row(100, 50, [G('\uf888', 'HancomEQN', 1)])]));
+  assert.equal(r[0].type, 'figure');
+  assert.equal(r[0].low[0].reason, 'math');
+  assert.deepEqual(decodeGlyph('\ue03a', 'HyhwpEQ'), { k: 'm', v: '7', letter: false });
+});
+
 test('글꼴 이름 → 종류·모양', () => {
   assert.deepEqual(fontFamily('ABCDEF+EHsang-Italic'), ['EHsang', 'Italic']);
   assert.deepEqual(fontFamily('EHboNB'), ['EHboNB', '']);

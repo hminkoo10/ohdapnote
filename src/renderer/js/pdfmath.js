@@ -1,3 +1,5 @@
+import { isHancomMath, isPrivateChar, normalizeHancomText } from './hancom.js';
+import { importAnswerBlocks } from './answer-model.js';
 // PDF 글자 정보로 문항을 글자·수식 블록으로 옮기기 (AI 없이, 내 컴퓨터에서)
 //  - EBS 수능특강처럼 Mac 조판 프로그램의 수식 글꼴(EHsang, EHboNB, EHSusic …)로 만든 디지털 PDF 는
 //    수식이 그림이 아니라 글자로 들어 있습니다. 다만 글꼴마다 자판 자리에 기호를 따로 넣어 두어서
@@ -364,7 +366,19 @@ function fracPiece(c) {
  */
 export function decodeGlyph(c, fam, style = '') {
   if (SPACES.has(c)) return { k: 'sp' };
-  if (!fam.startsWith('EH')) return { k: 'text', v: TEXT_FIX[c] ?? c };
+  if (isHancomMath(fam)) {
+    c = normalizeHancomText(c, fam);
+    if (isPrivateChar(c)) return null;
+    if (/^[A-Za-z0-9=+(),.<>|\[\]\-]$/.test(c)) return { k: 'm', v: c, letter: /[A-Za-z]/.test(c) };
+    const symbols = { '−': '-', '×': '\\times', '÷': '\\div', '≤': '\\le', '≥': '\\ge', '≠': '\\ne', '∞': '\\infty', '→': '\\to', 'α': '\\alpha', 'β': '\\beta', 'θ': '\\theta', 'π': '\\pi' };
+    if (symbols[c]) return { k: 'm', v: symbols[c] };
+    if (c === '∫') return { k: 'int' };
+    return null;
+  }
+  if (!fam.startsWith('EH')) {
+    if (isPrivateChar(c)) return null;
+    return { k: 'text', v: TEXT_FIX[c] ?? c };
+  }
   switch (fam) {
     case 'EHsang':
       if (OPT_SHIFT_DIGIT[c]) return { k: 'sup', v: OPT_SHIFT_DIGIT[c] };
@@ -1311,10 +1325,21 @@ export function transcribeParts(parts, { explain = false, plain = false } = {}) 
   try {
     // 수식 글꼴(EH…)로 만든 PDF 만 (다른 출판사 PDF 의 수식 글꼴은 아직 모름)
     // 문제은행에서는 일반 글꼴의 디지털 PDF도 읽음. 기존 수식 내보내기의 기본 제한은 유지
-    if (!parts.length || !plain && !parts.every((p) => p.layer.glyphs.some((g) => g.fam.startsWith('EH')))) fail('수식 글꼴(EH…)로 만든 PDF 가 아님');
+    if (!parts.length || !plain && !parts.every((p) => p.layer.glyphs.some((g) => (g.fam.startsWith('EH') || isHancomMath(g.fam))))) fail('수식 글꼴(EH…)로 만든 PDF 가 아님');
     const blocks = [];
-    for (const p of parts) blocks.push(...regionBlocks(p.layer, p.rect, p.place));
-    if (!blocks.some((b) => b.type !== 'figure')) fail('읽은 글자가 없음');
+    for (const p of parts) {
+      const hancom = p.layer.glyphs.some((g) => isHancomMath(g.fam));
+      try {
+        const result = regionBlocks(p.layer, p.rect, p.place);
+        // 한컴 배치는 검증 전까지 확인 대상으로 둔다. EH 출력은 그대로 유지.
+        blocks.push(...(hancom ? importAnswerBlocks(result).map((b) => ({ ...b, low: [{ reason: b.type === 'math' || b.runs?.some((r) => r.eq) ? 'math' : 'ocr' }] })) : result));
+      } catch (err) {
+        if (!(err instanceof Fail) || !hancom) throw err;
+        // 불명 기호는 원본 영역과 확인 표시를 보존한다.
+        blocks.push({ type: 'figure', box: { ...p.place }, low: [{ reason: 'math' }] });
+      }
+    }
+    if (!blocks.some((b) => b.type !== 'figure' || b.low?.length)) fail('읽은 글자가 없음');
     return blocks;
   } catch (err) {
     if (!(err instanceof Fail)) throw err;
