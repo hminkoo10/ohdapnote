@@ -4245,5 +4245,5 @@ main.sheet {
 .mockexam-table th { position: sticky; top: 0; background: var(--surface-2); z-index: 1; }
 .mockexam-table th:first-child, .mockexam-table td:first-child { width: 48%; text-align: left; overflow-wrap: anywhere; }
 .mockexam-table th:last-child, .mockexam-table td:last-child { width: 20%; }
-.mockexam-table tbody tr:hover { background: var(--primary-softer); }
+.mockexam-table .bank-row { display: table-row; min-height: 0; cursor: default; }
 .mockexam-table details { padding: 8px 0; overflow-wrap: anywhere; }

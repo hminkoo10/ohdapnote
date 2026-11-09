@@ -23,7 +23,7 @@ export async function openExamImport() {
       table.replaceChildren();
       const t = h('table', h('thead', h('tr', ['시험', '문제지', '정답', '해설', '상태'].map((s) => h('th', s)))));
       const tb = h('tbody'); t.append(tb);
-      for (const row of plan.rows) tb.append(h(`tr${row.reason ? '.muted' : ''}`, h('td', `${row.name} · 고${row.metadata.grade}${row.metadata.form ? ` · ${row.metadata.form}수형` : ''}`), ...['question', 'answerKey', 'solution'].map((part) => h('td', row.files.some((f) => f.metadata.part === part) ? '✓' : '—')), h('td', row.reason || '넣을 수 있어요')));
+      for (const row of plan.rows) tb.append(h(`tr.bank-row${row.reason ? '.muted' : ''}`, h('td', `${row.name} · 고${row.metadata.grade}${row.metadata.form ? ` · ${row.metadata.form}수형` : ''}`), ...['question', 'answerKey', 'solution'].map((part) => h('td', row.files.some((f) => f.metadata.part === part) ? '✓' : '—')), h('td', row.reason || '넣을 수 있어요')));
       table.append(t);
       if (plan.skipped.length) table.append(h('details', h('summary', `${plan.skipped.length}개는 건너뜀`), h('ul', plan.skipped.map((s) => h('li.small', s)))));
     } catch (e) { plan = null; table.replaceChildren(h('p.small', e.message)); }
