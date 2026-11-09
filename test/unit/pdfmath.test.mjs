@@ -291,3 +291,9 @@ test('등식 양쪽 합의 한계와 항의 아래첨자를 따로 보존', () =
   assert.equal((result[0].eq.match(/sum/g) || []).length, 2);
   assert.equal((result[0].eq.match(/_\{k=1\}/g) || []).length, 2);
 });
+
+test('부분 전사에서 수식에 포함한 본문 괄호를 다시 출력하지 않음', () => {
+  const result = run(layer([row(100,50,[H('t')]),row(100,56,[T('(')]),row(100,66,[H('t>0')]),row(100,82,[T(')')]),row(300,50,[H('\uf888')])]));
+  assert.ok(result.some((b) => b.eq?.includes('t>0')));
+  assert.ok(!result.some((b) => b.type === 'para' && /[()]/.test(b.text)));
+});

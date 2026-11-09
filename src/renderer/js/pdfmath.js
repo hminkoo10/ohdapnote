@@ -1482,7 +1482,8 @@ export function transcribeParts(parts, { explain = false, plain = false } = {}) 
         if (hancom) {
           // 실패 전파는 수식 연결 성분까지만. 본문/그래프는 기존 복원 경로를 사용한다.
           const groups = hancomEquationRegions(p.layer, p.rect);
-          const rest = { ...p.layer, glyphs: p.layer.glyphs.filter((g) => !isHancomMath(g.fam)) };
+          // 본문 글꼴 괄호·조건도 수식/그림에 이미 포함했다면 본문에서 중복 출력하지 않는다.
+          const rest = { ...p.layer, glyphs: p.layer.glyphs.filter((g) => !isHancomMath(g.fam) && !groups.some(({ rect }) => midX(g) >= rect.x * p.layer.w && midX(g) <= (rect.x + rect.w) * p.layer.w && midY(g) >= rect.y * p.layer.h && midY(g) <= (rect.y + rect.h) * p.layer.h)) };
           let prose;
           try { prose = regionBlocks(rest, p.rect, p.place); } catch { prose = null; }
           // 본문까지 불명일 때는 전체 원본을 보존: 수식만 내고 본문을 잃지 않는다.
