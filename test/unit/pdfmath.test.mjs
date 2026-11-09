@@ -281,3 +281,13 @@ test('짝을 확보 못 한 조건 괄호는 그 조각만 원본 보류', () =>
   assert.match(result[0].reason, /괄호/);
   assert.match(result[1].blocks[0].eq, /x=2/);
 });
+
+test('등식 양쪽 합의 한계와 항의 아래첨자를 따로 보존', () => {
+  const sum = (x) => [row(103,x,[G('∑','HyhwpEQ',0.72)],20),row(89,x+2,[H('10')],7.5),row(110,x,[H('k=1')],7.5)];
+  const L = layer([...sum(50),row(100,65,[H('a')]),row(103,71,[H('k')],7.5),row(100,80,[H('=')]),...sum(100),row(100,115,[H('(2b')]),row(103,131,[H('k')],7.5),row(100,137,[H('-1)')])]);
+  const result = run(L);
+  assert.match(result[0].eq, /a_\{k\}/);
+  assert.match(result[0].eq, /b_\{k\}/);
+  assert.equal((result[0].eq.match(/sum/g) || []).length, 2);
+  assert.equal((result[0].eq.match(/_\{k=1\}/g) || []).length, 2);
+});
