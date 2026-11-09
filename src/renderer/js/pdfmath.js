@@ -372,9 +372,12 @@ export function decodeGlyph(c, fam, style = '') {
     c = normalizeHancomText(c, fam);
     if (isPrivateChar(c)) return null;
     if (c === '―') return { k: 'hbar' };
-    if (c === '√') return { k: 'rad', len: 1.001, lo: -0.1963, hi: 0.8018 };
+    const hancomEqn = /HancomEQN/i.test(fam);
+    if (c === '√') return { k: 'rad', len: hancomEqn ? 0.6582 : 1.001, lo: -0.1963, hi: hancomEqn ? 0.8008 : 0.8018 };
     if ('⎧⎨⎩⎪'.includes(c)) {
-      const bounds = { '⎧': [-0.1983, 0.5918], '⎨': [-0.1983, 0.8018], '⎩': [0.0117, 0.8018], '⎪': [0.0527, 0.5537] };
+      const bounds = hancomEqn
+        ? { '⎧': [-0.1983, 0.6611], '⎨': [-0.1992, 0.8008], '⎩': [-0.0586, 0.8008], '⎪': [0.0527, 0.5537] }
+        : { '⎧': [-0.1983, 0.5918], '⎨': [-0.1983, 0.8018], '⎩': [0.0117, 0.8018], '⎪': [0.0527, 0.5537] };
       return { k: 'brace', lo: bounds[c][0], hi: bounds[c][1] };
     }
     if ('{([})]'.includes(c)) return { k: '{(['.includes(c) ? 'open' : 'close', v: c === '{' || c === '}' ? `\\${c}` : c };
