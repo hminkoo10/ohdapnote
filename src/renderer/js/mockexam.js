@@ -2,7 +2,9 @@ import { normalizeHancomText } from './hancom.js';
 
 const subjects = [['korean', /국어|언어(?!와\s*매체)/], ['math', /수학|수리/], ['english', /영어|외국어/]];
 export const selections = ['화법과작문', '언어와매체', '확률과통계', '미적분', '기하', '가형', '나형', 'A형', 'B형'];
-const compact = (s) => normalizeHancomText(s).replace(/\s/g, '');
+const compact = (s) => normalizeHancomText(s).replace(/\s/g, '')
+  .replace(/화작/g, '화법과작문').replace(/언매/g, '언어와매체')
+  .replace(/확통/g, '확률과통계').replace(/미적(?!분)/g, '미적분');
 
 /** 파일명/ZIP 경로와 제목 글자. 제목에 있는 필드는 파일명보다 우선한다. */
 export function identifyExam({ filename = '', path = '', text = '' } = {}) {
@@ -29,6 +31,7 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const partOf = (s) => /듣기.*(?:대본|스크립트)|listening.*script/i.test(s) ? 'listeningScript' : /해설|풀이/.test(s) ? 'solution' : /정답|정답표|answer/i.test(s) ? 'answerKey' : /문제|question/i.test(s) ? 'question' : null;
   const part = /\.(?:mp3|wav|m4a)$/i.test(filename) ? 'audio' : partOf(title) || partOf(file) || 'other';
   for (const [name, value] of Object.entries({ exam, year, month, grade, subject })) if (value === null) reasons.push(`${name} 미확인 또는 합본`);
+  if (part === 'other') reasons.push('파일 역할 미확인');
   if (sel.length > 1) reasons.push('선택 합권');
   if (title && classify(file) && classify(title) && classify(file) !== classify(title)) reasons.push('파일명과 제목 시험 종류 불일치: 제목 우선');
   const fm = /(1[012]|[1-9])월/.exec(file)?.[1];
@@ -39,7 +42,7 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   // 검증된 수능/모평 체제만. 학평·옛 초기 회차는 추정하지 않는다.
   if (schoolYear >= 2003 && schoolYear <= 2027) {
     if (subject === 'english') listening = { start: 1, end: schoolYear === 2014 ? 22 : 17 };
-    if (subject === 'korean' && schoolYear <= 2013) listening = { start: 1, end: 5 };
+    if (subject === 'korean' && schoolYear >= 2008 && schoolYear <= 2013) listening = { start: 1, end: 5 };
   }
   return { exam, year, schoolYear, month, grade, subject, part, selection, form, listening, confidence: Math.max(0.1, 1 - reasons.length * 0.16), reasons };
 }

@@ -367,9 +367,11 @@ function fracPiece(c) {
 export function decodeGlyph(c, fam, style = '') {
   if (SPACES.has(c)) return { k: 'sp' };
   if (isHancomMath(fam)) {
+    const italic = /^[\uE0E5-\uE0FE]$/.test(c) || /Italic/.test(style);
     c = normalizeHancomText(c, fam);
     if (isPrivateChar(c)) return null;
-    if (/^[A-Za-z0-9=+(),.<>|\[\]\-]$/.test(c)) return { k: 'm', v: c, letter: /[A-Za-z]/.test(c) };
+    if (/^[A-Za-z0-9=+(),.<>|'\[\]\-]$/.test(c)) return { k: 'm', v: c, letter: /[A-Za-z]/.test(c), upright: !italic };
+    if (c === '′' || c === '″') return { k: 'm', v: c === '′' ? "'" : "''" };
     const symbols = { '−': '-', '×': '\\times', '÷': '\\div', '≤': '\\le', '≥': '\\ge', '≠': '\\ne', '∞': '\\infty', '→': '\\to', 'α': '\\alpha', 'β': '\\beta', 'θ': '\\theta', 'π': '\\pi' };
     if (symbols[c]) return { k: 'm', v: symbols[c] };
     if (c === '∫') return { k: 'int' };
@@ -1332,11 +1334,19 @@ export function transcribeParts(parts, { explain = false, plain = false } = {}) 
       try {
         const result = regionBlocks(p.layer, p.rect, p.place);
         // 한컴 배치는 검증 전까지 확인 대상으로 둔다. EH 출력은 그대로 유지.
-        blocks.push(...(hancom ? importAnswerBlocks(result).map((b) => ({ ...b, low: [{ reason: b.type === 'math' || b.runs?.some((r) => r.eq) ? 'math' : 'ocr' }] })) : result));
+        blocks.push(...(hancom ? result.map((b) => {
+          if (b.type === 'figure') return b;
+          if (b.type === 'math') return { ...importAnswerBlocks([b])[0], low: [{ reason: 'math' }] };
+          const low = b.type === 'choices'
+            ? b.items.map((text, item) => ({ item, start: 0, end: text.length, reason: 'math' }))
+            : [{ start: 0, end: b.text.length, reason: b.text.includes('$') ? 'math' : 'ocr' }];
+          return { ...b, low };
+        }) : result));
       } catch (err) {
-        if (!(err instanceof Fail) || !hancom) throw err;
+        const privateText = p.layer.glyphs.some((g) => isPrivateChar(g.c));
+        if (!(err instanceof Fail) || (!hancom && !privateText)) throw err;
         // 불명 기호는 원본 영역과 확인 표시를 보존한다.
-        blocks.push({ type: 'figure', box: { ...p.place }, low: [{ reason: 'math' }] });
+        blocks.push({ type: 'figure', box: { ...p.place }, low: [{ reason: hancom ? 'math' : 'ocr' }] });
       }
     }
     if (!blocks.some((b) => b.type !== 'figure' || b.low?.length)) fail('읽은 글자가 없음');

@@ -40,6 +40,12 @@ test('PUA 숫자와 미확인 코드 보존', () => {
   assert.equal(normalizeHancomText('\uf888'), '\uf888');
   assert.ok(Object.keys(HANCOM_PUA).length > 100);
 });
+test('선택 약칭 정규화, 옛 듣기는 불명으로 보존', () => {
+  for (const [name, selection] of [['화작', '화법과작문'], ['언매', '언어와매체'], ['확통', '확률과통계'], ['미적', '미적분']]) {
+    assert.equal(identifyExam({ filename: `2025학년도 수능 ${name}.pdf` }).selection, selection);
+  }
+  assert.equal(identifyExam({ text: '2003학년도 수능 언어' }).listening, null);
+});
 test('합본·공통/선택·PUA 단답·타 과목 제외', () => {
   const r = parseAnswerKey('국어영역\n1 ②\n34 ⑤\n[화법과작문]\n35 ①\n[언어와매체]\n35 ③\n수학영역\n1 ④\n22 \ue035\ue03d\ue035\n[확률과통계]\n29 \ue036\ue037\ue03830 \ue03c\n영어영역\n1 ⑤\n한국사영역\n1 ①');
   assert.equal(r.answers.korean[1].answer, '2');

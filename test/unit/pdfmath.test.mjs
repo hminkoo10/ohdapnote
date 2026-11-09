@@ -41,7 +41,7 @@ test('모르는 한컴 기호: 원본 그림과 확인 표시', () => {
   const r = run(layer([row(100, 50, [G('\uf888', 'HancomEQN', 1)])]));
   assert.equal(r[0].type, 'figure');
   assert.equal(r[0].low[0].reason, 'math');
-  assert.deepEqual(decodeGlyph('\ue03a', 'HyhwpEQ'), { k: 'm', v: '7', letter: false });
+  assert.deepEqual(decodeGlyph('\ue03a', 'HyhwpEQ'), { k: 'm', v: '7', letter: false, upright: true });
 });
 
 test('글꼴 이름 → 종류·모양', () => {

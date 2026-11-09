@@ -11,6 +11,7 @@ export function parseAnswerKey(input, { subject = null, selection = null } = {})
   const text = normalizeHancomText(source.replace(/([\uE034-\uE03D])(?=\d)/g, '$1 '));
   const answers = {};
   const warnings = [];
+  const conflicts = new Set();
   const headers = /국\s*어(?:\s*영역)?|언\s*어\s*영역|수\s*학(?:\s*영역)?|수\s*리\s*영역|영\s*어(?:\s*영역)?|외국어(?:\s*\(영어\))?(?:\s*영역)?|한국사(?:\s*영역)?|사회탐구(?:\s*영역)?|과학탐구(?:\s*영역)?|직업탐구(?:\s*영역)?|제2외국어[^\n]*|화법\s*과\s*작문|언어\s*와\s*매체|확률\s*과\s*통계|미적분|기하|[가나AB]\s*형/g;
   let current = subject;
   let selected = selection;
@@ -26,10 +27,12 @@ export function parseAnswerKey(input, { subject = null, selection = null } = {})
       const answer = /^[①-⑤]$/.test(m[2]) ? String('①②③④⑤'.indexOf(m[2]) + 1) : String(+m[2]);
       if (current !== 'math' && (+answer < 1 || +answer > 5)) { warnings.push(`${key} ${number}: 답 범위`); continue; }
       answers[key] ||= {};
+      if (conflicts.has(`${key}:${number}`)) continue;
       const entry = { answer, points: pointsColumn ? +m[3] : null };
       if (answers[key][number] && JSON.stringify(answers[key][number]) !== JSON.stringify(entry)) {
         warnings.push(`${key} ${number}: 정답 충돌`);
         delete answers[key][number];
+        conflicts.add(`${key}:${number}`);
       } else answers[key][number] = entry;
     }
     if (isPrivateChar(chunk)) warnings.push(`${key}: 미확인 PUA`);
