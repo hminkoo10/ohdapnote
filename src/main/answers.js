@@ -1,6 +1,7 @@
 'use strict';
 
 const { isObj, key } = require('./data-validate');
+const { sanitizeTranscripts } = require('./transcript-review');
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const imageFile = (v) => typeof v === 'string' && /^answer-images\/[a-f0-9]{16}\.png$/.test(v);
@@ -15,6 +16,10 @@ function sanitizeAnswer(v) {
     if (b.type === 'para') {
       if (!text(b.text, 20000)) return null;
       const out = { type: 'para', text: b.text };
+      if (b.low) {
+        const clean = sanitizeTranscripts({ items: { answer: { blocks: [{ type: 'para', text: b.text, low: b.low }] } } });
+        if (clean.items.answer.blocks[0].low) out.low = clean.items.answer.blocks[0].low;
+      }
       size += b.text.length;
       if (b.runs !== undefined) {
         if (!Array.isArray(b.runs) || b.runs.length > 1000) return null;

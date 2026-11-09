@@ -36,7 +36,7 @@ export async function openExamImport() {
   const abort = new AbortController();
   const status = h('p.small', '시험지를 준비해요.');
   const bar = h('div.progress-bar');
-  const ui = jobDialog({ key: 'mockexam', abort, title: '모의고사를 넣는 중', body: h('div', h('div.progress', bar), status, h('p.small.muted', '멈춰도 넣은 내용은 남아요. 모의고사 넣기에서 이어서 넣으세요.')) });
+  const ui = jobDialog({ key: 'mockexam', abort, cancelLabel: '멈춤', title: '모의고사를 넣는 중', body: h('div', h('div.progress', bar), status, h('p.small.muted', '멈춰도 넣은 내용은 남아요. 모의고사 넣기에서 이어서 넣으세요.')) });
   let q;
   try {
     q = await importExamFolder(action === 'resume' ? null : paths, { plan, signal: abort.signal, onProgress: (p) => {

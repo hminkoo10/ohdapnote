@@ -14,7 +14,21 @@ const save = (q) => localStorage.setItem(queueKey, JSON.stringify(q));
 let running = false;
 export async function inspectExamFolder(paths) {
   const scanned = await api.scanExamPaths(paths);
-  const files = scanned.files.map((f) => ({ ...f, metadata: identifyExam(f) }));
+  const files = [];
+  for (const f of scanned.files) {
+    let metadata = identifyExam(f);
+    if (/\.pdf$/i.test(f.filename) && (!metadata.exam || !metadata.subject || !metadata.year || (['csat', 'kice'].includes(metadata.exam) && !metadata.schoolYear))) {
+      let src, url;
+      try {
+        url = URL.createObjectURL(new Blob([await api.scanExamRead(f.localPath)]));
+        src = await openDocSource([{ name: f.filename, kind: 'pdf' }], () => url);
+        const text = (await src.getTextTokens(0)).filter((t) => t.y0 < 0.2).map((t) => t.str).join(' ');
+        metadata = identifyExam({ ...f, text });
+      } catch { /* 열 수 없는 파일은 미확인 목록에 남긴다. */ }
+      finally { await src?.destroy(); if (url) URL.revokeObjectURL(url); }
+    }
+    files.push({ ...f, metadata });
+  }
   const plan = planExamImport(files, await api.listBooks(), state.appInfo.subjects);
   plan.skipped.push(...scanned.skipped);
   return plan;

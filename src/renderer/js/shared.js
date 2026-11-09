@@ -551,7 +551,7 @@ export async function confirmStopJobs(ok = '멈추고 끄기') {
  *   close()    창이 열려 있으면 닫음 (작업은 건드리지 않음 — 취소하려면 job.cancel())
  *   closed     작업이 끝나고 창도 닫히면 resolve
  */
-export function jobDialog({ title, jobTitle = title, body, width = 480, className = '', ...jobOpts }) {
+export function jobDialog({ title, jobTitle = title, body, width = 480, className = '', cancelLabel = '작업 취소', ...jobOpts }) {
   let dialog = null; // 지금 열린 창 (.modal)
   let finished = false;
   let resolveClosed;
@@ -566,7 +566,7 @@ export function jobDialog({ title, jobTitle = title, body, width = 480, classNam
       buttons: finished
         ? [{ label: '닫기', value: 'close', primary: true }]
         : [
-            { label: '작업 취소', value: 'cancel' },
+            { label: cancelLabel, value: 'cancel' },
             { label: '다른 일 하면서 기다리기', value: 'background', primary: true },
           ],
       onClose: (value) => {
