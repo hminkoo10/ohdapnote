@@ -45,8 +45,22 @@ for (const [subject, label, columns, size] of [
   columns.forEach((sel, c) => {
     if (sel) assert.equal(Object.keys(result.answers[`${subject}|${sel}`]).length, size[c]);
     const number = sel ? subject === 'korean' ? 35 : 23 : c * size[0] + 1;
-    assert.deepEqual(result.answers[sel ? `${subject}|${sel}` : subject][number], { answer: String(c % 5 + 1), points: 2 });
+    for (let r = 0; r < size[c]; r++) {
+      assert.deepEqual(result.answers[sel ? `${subject}|${sel}` : subject][number + r], {
+        answer: String((r + c) % 5 + 1), points: 2 + r % 2,
+      });
+    }
+    // PDF 내용 순서가 뒤집혀도 좌표 있는 표의 값은 같다.
   });
+  assert.deepEqual(parseAnswerKey([...items].reverse()), result);
+});
+
+test('좌표 없는 교육청 통합 items는 내용 순서 경로 유지', () => {
+  const text = '국어 영역 번호 정 답 배 점\n1 ⑤ 3\n수학 영역 번호 정답 배점\n22 123 4\n영어 영역 번호 정답 배점\n45 ② 2';
+  const expected = parseAnswerKey(text);
+  assert.deepEqual(parseAnswerKey(text.split('\n').map((str) => ({ str, hasEOL: true }))), expected);
+  assert.deepEqual(expected.answers.math[22], { answer: '123', points: 4 });
+  assert.deepEqual(expected.warnings, []);
 });
 
 for (const [title, expected] of [
