@@ -1,11 +1,13 @@
 // 로컬 표본 점검. 내용/글꼴 데이터는 쓰지 않고 코드·통계만 출력한다.
 // node scripts/check-mockexam.mjs <정답표.pdf>
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { readPageLayer, transcribeParts } from '../src/renderer/js/pdfmath.js';
 import { parseAnswerKey } from '../src/renderer/js/mockexam-answers.js';
 import { isPrivateChar } from '../src/renderer/js/hancom.js';
-const task = pdfjs.getDocument({ data: new Uint8Array(readFileSync(process.argv[2])), fontExtraProperties: true, disableFontFace: true });
+const task = pdfjs.getDocument({ data: new Uint8Array(readFileSync(process.argv[2])), fontExtraProperties: true, disableFontFace: true,
+  cMapUrl: fileURLToPath(new URL('../node_modules/pdfjs-dist/cmaps/', import.meta.url)).replaceAll('\\', '/'), cMapPacked: true });
 try {
   const doc = await task.promise;
   const page = await doc.getPage(1);
