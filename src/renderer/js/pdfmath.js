@@ -367,6 +367,7 @@ function fracPiece(c) {
 export function decodeGlyph(c, fam, style = '') {
   if (SPACES.has(c)) return { k: 'sp' };
   if (isHancomMath(fam)) {
+    if (c === '\ue06e') return { k: 'vector' };
     const italic = /^[\uE0E5-\uE0FE]$/.test(c) || /Italic/.test(style);
     c = normalizeHancomText(c, fam);
     if (isPrivateChar(c)) return null;
@@ -376,7 +377,7 @@ export function decodeGlyph(c, fam, style = '') {
       const bounds = { '⎧': [-0.1983, 0.5918], '⎨': [-0.1983, 0.8018], '⎩': [0.0117, 0.8018], '⎪': [0.0527, 0.5537] };
       return { k: 'brace', lo: bounds[c][0], hi: bounds[c][1] };
     }
-    if (c === '{' || c === '}') return { k: c === '{' ? 'open' : 'close', v: c === '{' ? '\\{' : '\\}' };
+    if ('{([})]'.includes(c)) return { k: '{(['.includes(c) ? 'open' : 'close', v: c === '{' || c === '}' ? `\\${c}` : c };
     if (/^[A-Za-z0-9=+(),.<>|'\[\]\-]$/.test(c)) return { k: 'm', v: c, letter: /[A-Za-z]/.test(c), upright: !italic };
     if (c === '′' || c === '″') return { k: 'm', v: c === '′' ? "'" : "''" };
     const symbols = { '−': '-', '×': '\\times', '÷': '\\div', '≤': '\\le', '≥': '\\ge', '≠': '\\ne', '∞': '\\infty', '→': '\\to', 'α': '\\alpha', 'β': '\\beta', 'θ': '\\theta', 'π': '\\pi', '∑': '\\sum', '∏': '\\prod', '∩': '\\cap', '∪': '\\cup', '∈': '\\in', '⊂': '\\subset', '∅': '\\emptyset' };
@@ -813,9 +814,49 @@ function makeSqrt(boxes, { rad, x1, top, bottom }, s) {
   const mem = boxes.filter((b) => b !== rad && real(b) && midX(b) > rad.x1 - 0.5 && midX(b) < x1 && midY(b) > top - pad && midY(b) < bottom + pad);
   if (!mem.length) fail('루트 안이 비어 있음');
   const { base, size } = mainLine(mem);
+  const index = boxes.filter((b) => b !== rad && real(b) && b.size < 0.65 * rad.size && b.x0 >= rad.x0 && b.x1 <= rad.x1 && b.base < rad.base - 0.15 * rad.size && b.base > top);
   const box = around([rad, ...mem, { x0: rad.x0, x1, top, bottom }]);
   const inside = (b) => !real(b) && midX(b) > box.x0 && midX(b) < box.x1 && midY(b) > box.top && midY(b) < box.bottom;
-  return [...boxes.filter((b) => b !== rad && !mem.includes(b) && !inside(b)), { ...box, base, size, tok: { k: 'm', v: `\\sqrt{${mathLatex(mem)}}` }, comp: true }];
+  return [...boxes.filter((b) => b !== rad && !mem.includes(b) && !index.includes(b) && !inside(b)), { ...box, base, size, tok: { k: 'm', v: `\\sqrt${index.length ? `[${mathLatex(index)}]` : ''}{${mathLatex(mem)}}` }, comp: true }];
+}
+
+function hancomStructures(boxes, s) {
+  for (const open of boxes.filter((b) => isHancomMath(b.fam) && b.tok.k === 'open' && ['(', '['].includes(b.tok.v) && b.bottom - b.top > 1.8 * s)) {
+    const close = boxes.filter((b) => b.tok.k === 'close' && b.tok.v === (open.tok.v === '(' ? ')' : ']') && b.x0 > open.x1 && Math.abs(b.top - open.top) < 0.3 * s && Math.abs(b.bottom - open.bottom) < 0.3 * s).sort(byX)[0];
+    if (!close) fail('행렬 닫는 괄호 미확인');
+    const mem = boxes.filter((b) => b !== open && b !== close && b.x0 >= open.x1 && b.x1 <= close.x0 && midY(b) >= open.top && midY(b) <= open.bottom);
+    const rows = clusterRows(mem, s).map((row) => row.filter(real).sort(byX)).filter((row) => row.length);
+    if (rows.length < 2) continue;
+    const cells = rows.map((row) => {
+      const out = [[]];
+      for (const b of row) {
+        const prev = out.at(-1).at(-1);
+        if (prev && b.x0 - prev.x1 > 0.7 * s) out.push([]);
+        out.at(-1).push(b);
+      }
+      return out;
+    });
+    if (cells[0].length < 2 || !cells.every((row) => row.length === cells[0].length && row.every((cell, k) => Math.abs(cell[0].x0 - cells[0][k][0].x0) < 0.3 * s))) fail('행렬 행·열 정렬 미확인');
+    const env = open.tok.v === '(' ? 'pmatrix' : 'bmatrix';
+    const v = `\\begin{${env}}${cells.map((row) => row.map(mathLatex).join('&')).join('\\\\')}\\end{${env}}`;
+    boxes = [...boxes.filter((b) => b !== open && b !== close && !mem.includes(b)), { ...around([open, close, ...mem]), size: s, base: (open.top + open.bottom) / 2 + 0.3 * s, comp: true, tok: { k: 'm', v } }];
+  }
+  for (const arrow of boxes.filter((b) => b.tok.k === 'vector')) {
+    const mem = boxes.filter((b) => b !== arrow && b.tok.letter && midX(b) >= arrow.x0 && midX(b) <= arrow.x1 && b.base > arrow.base - 0.3 * arrow.size && b.base < arrow.base + arrow.size);
+    if (!mem.length) fail('벡터 화살표 범위 미확인');
+    const ref = mainLine(mem);
+    boxes = [...boxes.filter((b) => b !== arrow && !mem.includes(b)), { ...around([arrow, ...mem]), ...ref, comp: true, tok: { k: 'm', v: `\\vec{${mathLatex(mem)}}` } }];
+  }
+  for (const op of boxes.filter((b) => isHancomMath(b.fam) && (b.tok.k === 'int' || ['\\sum', '\\prod'].includes(b.tok.v)))) {
+    const mem = boxes.filter((b) => b !== op && real(b) && b.tok.k !== 'text' && b.size < 0.8 * op.size && midX(b) > op.x0 - 0.3 * op.size && midX(b) < op.x1 + 0.6 * op.size && b.base > op.top - op.size && b.base < op.bottom + op.size);
+    const upper = mem.filter((b) => b.base < op.base - 0.45 * op.size);
+    const lower = mem.filter((b) => b.base > op.base + 0.1 * op.size);
+    const used = [...upper, ...lower];
+    if (!used.length) continue;
+    const v = (op.tok.k === 'int' ? '\\int' : op.tok.v) + (lower.length ? `_{${mathLatex(lower)}}` : '') + (upper.length ? `^{${mathLatex(upper)}}` : '');
+    boxes = [...boxes.filter((b) => b !== op && !used.includes(b)), { ...around([op, ...used]), base: op.base, size: Math.min(op.size, s), comp: true, tok: { k: 'm', v } }];
+  }
+  return boxes;
 }
 
 /** 세로로 이어진 큰 중괄호 조각 + 오른쪽 여러 줄 → cases */
@@ -1195,6 +1236,7 @@ function regionBlocks(layer, rect, place) {
   boxes = glyphFractions(boxes, free);
   boxes = limits(boxes);
   boxes = structures(boxes, free, s);
+  boxes = hancomStructures(boxes, s);
   boxes = makeCases(boxes, s);
   const left = boxes.find((b) => ['fr', 'rad', 'radx', 'brace'].includes(b.tok.k));
   if (left) fail(`풀지 못한 조각(${left.tok.k})`);

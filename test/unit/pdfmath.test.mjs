@@ -39,6 +39,18 @@ test('한컴 늘인 분수 글리프는 ink 높이로 복원, 불명 조각은 �
   assert.deepEqual(hancomEquationRegions(L), result);
 });
 
+test('한컴 거듭제곱근·벡터·행렬 구조는 확인 표시와 함께 출력', () => {
+  const H = (s) => M(s).map(([c, , style, w]) => [c, 'HyhwpEQ', style, w]);
+  const root = run(layer([row(100,50,[H('\ue05c')],12),row(94,51,[H('3')],5),row(100,57,[H('x')])]));
+  assert.match(root[0].eq, /root.*3.*of/);
+  const vector = run(layer([row(100,50,[H('a')]), row(99,50,[H('\ue06e')])]));
+  assert.match(vector[0].eq, /vec/);
+  const matrix = layer([row(105,40,[H('(')],30),row(105,90,[H(')')],30),row(95,58,[H('1')]),row(95,76,[H('2')]),row(110,58,[H('3')]),row(110,76,[H('4')])]);
+  const result = run(matrix);
+  assert.match(result[0].eq, /pmatrix/);
+  assert.ok(result[0].low.length);
+});
+
 test('한컴 PUA 숫자·위첨자·분수: 기존 위치 복원과 eq 출력', () => {
   const H = (s) => M(s).map(([c, , style, w]) => [c, 'HyhwpEQ', style, w]);
   const r = run(layer([row(100, 50, [H('x=')]), row(94, 65.5, [H('\ue034')]), row(107, 65.5, [H('x')])], { lines: [{ x0: 64, x1: 72, y: 97, lw: 0.4 }] }));
