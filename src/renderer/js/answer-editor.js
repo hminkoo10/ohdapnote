@@ -128,7 +128,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
   let composing = false;
   const uploads = new Set();
   const updateStatus = () => {
-    status.textContent = !editable ? '보기만' : failed ? '저장 못함 · 다시 시도해 주세요' : saver.pending || saver.saving || uploads.size ? '저장 중…' : '저장됨';
+    status.textContent = !editable ? '보기만' : failed ? '저장 못함 · 다시 시도하세요' : saver.pending || saver.saving || uploads.size ? '저장 중…' : '저장됨';
     undo.disabled = !editable || !history.canUndo;
     redo.disabled = !editable || !history.canRedo;
   };

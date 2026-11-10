@@ -374,14 +374,13 @@ function noteBody() {
       left.append(
         h(
           'div.empty-state',
-          h('div.empty-art', icon('eye')),
           h('h3', '볼 수 없는 교재예요'),
           h('p.muted', '삭제·비공개 교재의 문항은 보이지 않고 내보내기에서도 빠져요.'),
           ro ? null : h('button.btn', { onclick: () => removeBook(ns.active) }, icon('x'), '이 오답노트에서 빼기'),
         ),
       );
-    } else if (ro) left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '아직 책이 없어요')));
-    else left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '책을 추가하세요'), h('p.muted', '')));
+    } else if (ro) left.append(h('div.empty-state', h('h3', '아직 책이 없어요')));
+    else left.append(h('div.empty-state', h('h3', '책을 추가하세요')));
     setTimeout(renderExportSummary, 0);
     return view;
   }
@@ -389,7 +388,6 @@ function noteBody() {
     left.append(
       h(
         'div.empty-state',
-        h('div.empty-art', icon('scan')),
         h('h3', doc ? '이 책은 아직 분석 전이에요' : '이 책에는 문제집 파일이 없어요'),
         h('p.muted', '책 화면에서 파일을 넣고 분석하세요.'),
         h('button.btn.btn-primary', { onclick: () => nav.book(b.id) }, icon('arrowRight'), '책 화면으로'),
@@ -694,7 +692,7 @@ function exportPanel() {
       }),
     );
   const anyAnswers = [...ns.books.values()].some((b) => b.docs.answer?.items?.length || b.docs.problem?.items?.some((item) => answerContent(b.$answers?.items[item.id])));
-  const needAns = anyAnswers ? '' : '정답·해설을 직접 쓰거나 답지를 올려 주세요';
+  const needAns = anyAnswers ? '' : '정답·해설을 직접 쓰거나 답지를 올리세요';
   const exportBtn = (mode, title, sub, tip, disabled) =>
     h('button.export-btn', { onclick: () => doExport(mode), dataset: { mode }, disabled, title: tip }, h('span.xb-icon', icon('download')), h('span.xb-text', h('b', title), sub ? h('small', sub) : null));
   return h(

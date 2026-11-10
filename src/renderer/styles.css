@@ -4259,3 +4259,9 @@ main.sheet {
 .bank-book .progress { height: 4px; background: var(--grey150); }
 .bank-book .progress-bar { background: var(--accent); }
 .bank-book .bank-review-count { padding: 0; min-height: 0; height: auto; }
+
+.bank-intro { background: var(--surface); padding: 12px; }
+.bank-intro .bank-heading h3 { font-size: 13px; font-weight: 500; color: var(--text-2); }
+.bank-steps { gap: 16px; margin-top: 8px; }
+.bank-steps strong { font-weight: 600; font-size: 13px; }
+.bank-steps p { margin: 4px 0 0; }

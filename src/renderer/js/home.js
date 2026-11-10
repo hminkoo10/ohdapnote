@@ -400,7 +400,7 @@ export async function showHome({ tab } = {}) {
     const q = rosterQ.trim().toLowerCase();
     const shown = students.filter((st) => st.deletedAt && matchStudent(st, q)).sort((a, b) => b.deletedAt - a.deletedAt);
     if (!shown.length) {
-      return [h('div.empty-state', h('div.empty-art', icon('trash')), h('h3', q ? '맞는 학생이 없어요' : '지운 학생이 없어요'), h('p.muted', `삭제 ${purgeDays}일 뒤 오답노트도 완전히 지워져요.`))];
+      return [h('div.empty-state', h('h3', q ? '맞는 학생이 없어요' : '지운 학생이 없어요'), h('p.muted', `삭제 ${purgeDays}일 뒤 오답노트도 완전히 지워져요.`))];
     }
     return [
       h(
@@ -434,7 +434,7 @@ export async function showHome({ tab } = {}) {
 
     function shelfBody() {
       if (shelf === 'mine') return bookCards(mine, true);
-      if (!others.length) return h('div.empty-state', h('div.empty-art', icon('school')), h('h3', '아직 공유된 책이 없어요'), h('p.muted', ''));
+      if (!others.length) return h('div.empty-state', h('h3', '아직 공유된 책이 없어요'));
       return bookCards(others, false);
     }
 

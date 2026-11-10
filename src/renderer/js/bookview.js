@@ -707,8 +707,8 @@ function resultView() {
   const role = b.docs[bs.role] ? bs.role : b.docs.problem ? 'problem' : 'answer';
   const doc = b.docs[role];
   if (!doc) {
-    if (bs.readonly) view.append(h('div.empty-state', h('div.empty-art', icon('upload')), h('h3', '아직 올린 파일이 없어요'), h('p.muted', '만든 사람이 파일을 올려야 해요.')));
-    else view.append(h('div.empty-state', h('div.empty-art', icon('upload')), h('h3', '문제집부터 올려 주세요'), h('p.muted', '')));
+    if (bs.readonly) view.append(h('div.empty-state', h('h3', '아직 올린 파일이 없어요'), h('p.muted', '만든 사람이 파일을 올려야 해요.')));
+    else view.append(h('div.empty-state', h('h3', '문제집부터 올리세요')));
     return view;
   }
   const left = h('div.result-main');
@@ -741,7 +741,7 @@ function resultView() {
   left.append(h('div.result-toolbar', roleSeg, h('span.spacer'), h('span.small.muted', '번호를 누르면 미리보기가 열려요')));
 
   if (!doc.analyzedAt) {
-    left.append(h('div.empty-state', h('div.empty-art', icon('scan')), h('h3', '아직 분석 전이에요'), h('p.muted', bs.readonly ? '만든 사람이 분석해야 해요.' : `[${ROLE_NAME[role]} 분석]을 누르세요.`)));
+    left.append(h('div.empty-state', h('h3', '아직 분석 전이에요'), h('p.muted', bs.readonly ? '만든 사람이 분석해야 해요.' : `[${ROLE_NAME[role]} 분석]을 누르세요.`)));
     return view;
   }
 
@@ -1005,7 +1005,7 @@ function reviewView() {
   const ed = getEditor();
   const b = bs.book;
   if (!b.docs.problem && !b.docs.answer) {
-    return h('div.empty-state', h('div.empty-art', icon('files')), h('h3', '먼저 파일을 올려 주세요'), h('p.muted', ''));
+    return h('div.empty-state', h('h3', '먼저 파일을 올리세요'));
   }
   const wrap = h('div.review-view', ed.el);
   const role = b.docs[ed.role] ? ed.role : b.docs.problem ? 'problem' : 'answer';
