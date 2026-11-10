@@ -181,11 +181,11 @@ export async function transcribeExam(book, { signal, onProgress } = {}) {
         signal?.throwIfAborted();
         store.items[transcriptKey(b) + (entry.model === 'pdf' ? '|pdf' : '|local')] = { ...entry, at: Date.now() };
         store.dirty = true;
-        if (!await saveExamTranscripts(saveTranscripts)) throw Error('옮긴 글을 저장하지 못했어요.');
+        if (!await saveExamTranscripts(() => saveTranscripts(book.id))) throw Error('옮긴 글을 저장하지 못했어요.');
       }
       low += countLow(bestTranscript(book.id, b)?.entry.blocks);
       onProgress?.({ phase: 'transcribe', done: ++done });
     }
-  } finally { await saveTranscripts(); }
+  } finally { await saveTranscripts(book.id); }
   return low;
 }

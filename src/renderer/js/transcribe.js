@@ -44,15 +44,15 @@ export async function loadTranscripts(bookId, { reload = false } = {}) {
   }
 }
 
-export function saveTranscripts() {
-  saving = saving.then(flushTranscripts, flushTranscripts);
+export function saveTranscripts(bookId) {
+  saving = saving.then(() => flushTranscripts(bookId), () => flushTranscripts(bookId));
   return saving;
 }
 
-async function flushTranscripts() {
+async function flushTranscripts(onlyBookId) {
   let ok = true;
   for (const [bookId, t] of transcripts) {
-    if (!t.dirty) continue;
+    if (!t.dirty || onlyBookId && bookId !== onlyBookId) continue;
     t.items = trimTranscripts(t.items, MAX_TRANSCRIPTS);
     const sent = JSON.stringify(t.items);
     try {

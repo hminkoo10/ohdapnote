@@ -13,6 +13,8 @@ const { app, BrowserWindow, protocol, ipcMain, dialog, shell, Menu, net, utility
 const path = require('node:path');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
+const { createFileQueue } = require('./file-queue');
+const withJsonFile = createFileQueue();
 const crypto = require('node:crypto');
 const log = require('electron-log/main');
 const ai = require('./ai');
@@ -209,6 +211,7 @@ const cleanJson = (value, sanitize, file) => cleanValue(value, sanitize, file, l
 
 const MAX_DATA_JSON = 256 * 1024 * 1024; // 쪽수가 많은 책도 읽게 넉넉히 (너무 큰 파일만 거름)
 async function readJson(file, fallback, sanitize = sanitizeData) {
+  return withJsonFile(file, async () => {
   try {
     if ((await fsp.stat(file)).size > MAX_DATA_JSON) {
       invalidJson(file, log);
@@ -221,6 +224,7 @@ async function readJson(file, fallback, sanitize = sanitizeData) {
     if (err.code !== 'ENOENT') invalidJson(file, log);
     return fallback;
   }
+  });
 }
 
 function readJsonSync(file, fallback = null, sanitize = sanitizeData) {
@@ -239,11 +243,15 @@ function readJsonSync(file, fallback = null, sanitize = sanitizeData) {
 }
 
 async function writeJsonAtomic(file, value) {
-  await fsp.mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await fsp.writeFile(tmp, JSON.stringify(value), 'utf8');
-  markOwn(file);
-  await fsp.rename(tmp, file);
+  return withJsonFile(file, async () => {
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${crypto.randomUUID()}.tmp`;
+    try {
+      await fsp.writeFile(tmp, JSON.stringify(value), 'utf8');
+      markOwn(file);
+      await fsp.rename(tmp, file);
+    } finally { await fsp.unlink(tmp).catch(() => {}); }
+  });
 }
 
 function writeJsonAtomicSync(file, value) {
