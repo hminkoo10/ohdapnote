@@ -4255,3 +4255,7 @@ main.sheet {
 .tag, .tag.teal, .tag.soft { background: var(--grey100); color: var(--grey700); border-radius: 4px; font-weight: 400; }
 .subject-opt .subject-badge { background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; }
 .subject-opt input:checked + .subject-badge { border-color: var(--grey700); background: var(--grey100); }
+
+.bank-book .progress { height: 4px; background: var(--grey150); }
+.bank-book .progress-bar { background: var(--accent); }
+.bank-book .bank-review-count { padding: 0; min-height: 0; height: auto; }

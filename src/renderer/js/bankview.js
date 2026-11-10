@@ -157,16 +157,21 @@ function renderBank(root, summaries, books, entries, failed) {
       const job = findJob(`bank:${s.id}`);
       const locked = s.subjectOpen === false || !subjectOpen(s, state.appInfo);
       const card = h(`div.bank-book${locked ? '.bank-locked' : ''}`, { dataset: { book: s.id } },
-        h('div.bank-heading', h('strong', s.name), h('span.tag.soft', subjectName(s.subject))),
-        h('div.progress', h('div.progress-bar', { style: { width: `${job?.total ? job.done * 100 / job.total : total ? n * 100 / total : 0}%` } })),
-        h('p.small.muted', job ? job.label || '파일을 준비하는 중…' : `옮긴 문항 ${n} / 전체 ${total}`));
-      if (low) card.append(h('span.small.bank-review-count', `확인 필요 ${low}군데`));
+        h('div.bank-heading', h('strong', s.name), h('span.small.muted', subjectName(s.subject))));
+      if (!locked && (job || n > 0 && n < total)) card.append(
+        h('div.progress', h('div.progress-bar', { style: { width: `${job?.total ? job.done * 100 / job.total : total ? n * 100 / total : 0}%` } })));
       if (locked) card.append(h('p.small.muted', '학원 계약에 없는 과목 · 보기만'));
-      else if (job) card.append(h('button.btn', { onclick: () => job.open() }, '넣는 중 · 진행 보기'));
+      else if (job) card.append(h('p.small.muted', `넣는 중 ${job.done} / ${job.total || total}`), h('button.btn', { onclick: () => job.open() }, '진행 보기'));
       else if (!s.problemAnalyzed && !total) card.append(h('p.small.muted', '책 분석이 필요해요'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
       else if (!book) card.append(h('p.small.warn-text', '교재를 읽지 못했어요. 책장에서 확인하세요.'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
-      else if (total && n === total) card.append(h('strong.bank-complete', icon('check'), '다 넣었어요'));
-      else card.append(h('button.btn.btn-primary', { onclick: () => attempt(() => putBank(book, { onChange: changed })) }, n || bankTargets(book).some((b) => bestTranscript(book.id, { ...b, src: { files: book.docs.problem.files } })) ? '이어서 넣기' : '문제은행에 넣기'));
+      else if (total && n === total) card.append(h('p.small.bank-complete', `${total}문항 다 넣었어요`));
+      else card.append(h('p.small.muted', `${total}문항 중 ${n}문항 넣었어요`), h('button.btn.btn-primary', { onclick: () => attempt(() => putBank(book, { onChange: changed })) }, n || bankTargets(book).some((b) => bestTranscript(book.id, { ...b, src: { files: book.docs.problem.files } })) ? '이어서 넣기' : '문제은행에 넣기'));
+      if (low) card.append(h('button.btn.btn-ghost.btn-small.bank-review-count', { onclick: () => {
+        bs.filters.bookId = s.id; bs.filters.review = true; bs.limit = 200; bs.scroll = 0;
+        filters.querySelector('[data-bank-focus="bookId"]').value = s.id;
+        filters.querySelector('[data-bank-focus="review"]').checked = true;
+        renderList(); list.scrollIntoView({ block: 'start' });
+      } }, `확인할 곳 ${low}군데`));
       bookList.append(card);
     }
   }
@@ -203,7 +208,7 @@ function renderBank(root, summaries, books, entries, failed) {
       if (bookId !== e.bookId) {
         bookId = e.bookId;
         previousStem = '';
-        bookGroup = h('section.bank-book-group', h('h3', e.bookName, h('span.tag.soft', subjectName(e.subject))));
+        bookGroup = h('section.bank-book-group', h('h3', e.bookName, h('span.small.muted', subjectName(e.subject))));
         list.append(bookGroup);
       }
       if (e.stemKey && previousStem !== e.stemKey) {
@@ -230,7 +235,7 @@ function renderBank(root, summaries, books, entries, failed) {
       h('div.bank-row-text', h('strong', `${pageLabel(e.bookObj.docs.problem, e.item.page)} · ${itemName(e.item)}`),
         reviewCount(e) ? h('span.small.bank-review-count', `확인 필요 ${reviewCount(e)}군데`) : null,
         h(`span.bank-snippet${r ? '' : '.muted'}`, blocksToText(r?.entry.blocks) || '아직 글자로 옮기지 않았어요')),
-      r ? h('span.tag.soft.bank-path', pathName[r.path]) : null);
+      r ? h('span.small.muted.bank-path', pathName[r.path]) : null);
       (e.stemKey ? setBox : bookGroup).append(row);
     }
     if (found.length > bs.limit) list.append(h('button.btn.bank-more', { onclick: () => { bs.limit += 200; renderList(); } }, `더 보기 (${Math.min(bs.limit, found.length)} / ${found.length})`));
@@ -273,7 +278,7 @@ function renderBank(root, summaries, books, entries, failed) {
     const r = bestTranscript(e.bookId, block);
     const panel = h('div.bank-transcript', { dataset: { passage: String(!!item.passage) } },
       h('div.bank-heading', h('h4', item.passage ? `${itemName(item)} · 옮긴 글` : '옮긴 글'),
-        r ? h('span.tag.soft', pathName[r.path]) : null,
+        r ? h('span.small.muted', pathName[r.path]) : null,
         open(e) ? h('button.btn.btn-small', { onclick: () => attempt(() => editTranscript(e, block)) }, '글 고치기') : null,
         !item.passage ? answerEditorButton({ book: e.bookObj, item: e.item, answerItem: e.answer, onChange: changed }) : null));
     if (r) panel.append(...r.entry.blocks.map((b) => b.type === 'para' ? h('p.bank-para', b.text)
