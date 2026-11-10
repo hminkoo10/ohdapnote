@@ -5,6 +5,14 @@ import { planExamImport, examBookName, examImportItems } from '../../src/rendere
 import { identifyExam, examForm } from '../../src/renderer/js/mockexam.js';
 const { readExamZip } = createRequire(import.meta.url)('../../src/main/mockexam-files.js');
 const f = (name, sha256 = name) => ({ filename: name, path: name, sha256 });
+
+test('과목 미확인 공통 정답 합본은 같은 시험에만 연결', () => {
+  const files = ['2006년 3월 고1 학평 국어 문제.pdf','2006년 3월 고1 학평 수학 문제.pdf','2006년 3월 고1 학평 공통 정답.pdf','2006년 6월 고1 학평 공통 정답.pdf'].map(n=>({...f(n),metadata:identifyExam(f(n))}));
+  const plan=planExamImport(files,[],['korean','math']);
+  assert.equal(plan.rows.length,2);
+  assert.ok(plan.rows.every(r=>r.files.some(f=>f.filename===files[2].filename)));
+  assert.ok(plan.rows.every(r=>!r.files.some(f=>f.filename===files[3].filename)));
+});
 test('시험 이름은 학평 시행연도와 수능·모평 학년도를 구별', () => {
   for (const [file, name] of [['2024학년도 수능 수학 문제지.pdf', '2024학년도 수능 수학'], ['2024학년도 6월 모평 수학 문제지.pdf', '2024학년도 6월 모평 수학'], ['2023년 3월 고1 학평 수학 문제지.pdf', '2023년 3월 고1 학평 수학']]) assert.equal(examBookName(identifyExam({ filename: file })), name);
 });

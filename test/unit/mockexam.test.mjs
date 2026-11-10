@@ -128,3 +128,9 @@ for (let year = 2002; year <= 2026; year++) test(`시행연도/학년도 분리 
   assert.equal(exam.schoolYear, year + 1);
   assert.equal(exam.subject, 'english');
 });
+
+test('옛 점 번호와 계열별 정답, 해설 본문의 숫자는 제외', () => {
+  const r=parseAnswerKey('수리 영역 [인문계 정답] 1. ③ 2. ② 3. ① 해설 1. ④ 2. ⑤ [자연계 정답] 1. ⑤ 2. ④');
+  assert.equal(r.answers['math|인문계'][1].answer,'3');
+  assert.equal(r.answers['math|자연계'][1].answer,'5');
+});

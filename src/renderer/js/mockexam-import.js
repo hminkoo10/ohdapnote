@@ -57,7 +57,7 @@ async function readAnswers(book, row, signal) {
       src = await openDocSource([{ name: file.filename, kind: /\.pdf$/i.test(file.filename) ? 'pdf' : 'image' }], () => url);
       const parsed = { answers: {} };
       let scanned = false;
-      for (let i = 0; i < Math.min(5, src.numPages); i++) {
+      for (let i = 0; i < src.numPages; i++) {
         signal?.throwIfAborted();
         let content = src.pages[i].kind === 'pdf' ? (await (await src.getPdfPage(i)).getTextContent()).items : [];
         if (!content.some((t) => t.str.trim())) {
@@ -68,7 +68,7 @@ async function readAnswers(book, row, signal) {
         const form = book.docs.problem.items.find((i) => i.examSection?.form)?.examSection.form || row.metadata.form;
         const pageForm = examForm(content.map((t) => t.str).join(' '));
         if (form && pageForm && form !== pageForm) continue;
-        const p = parseAnswerKey(content, { subject: book.subject, selection: row.metadata.selection });
+        const p = parseAnswerKey(content, { subject: file.metadata.subject ? book.subject : null, selection: row.metadata.selection });
         for (const [k, v] of Object.entries(p.answers)) Object.assign(parsed.answers[k] ||= {}, v);
       }
       let connected = 0;
@@ -120,7 +120,7 @@ export async function importExamFolder(paths, { onProgress = () => {}, signal, p
           const doc = book.docs[role], src = sources[role];
           if (!doc || doc.analyzedAt) continue;
           if (!src) throw Error('시험지 파일을 열지 못했어요.');
-          const res = await analyzeDocument(src, { pages: Array.from({ length: src.numPages }, (_, i) => i), role, subject: book.subject, ...doc.options, ocrLang: 'kor+eng', signal, onProgress: (p) => onProgress({ ...p, name: row.name, queue: q }) });
+          const res = await analyzeDocument(src, { pages: Array.from({ length: src.numPages }, (_, i) => i), role, subject: book.subject, ...doc.options, exam: row.metadata, ocrLang: 'kor+eng', signal, onProgress: (p) => onProgress({ ...p, name: row.name, queue: q }) });
           Object.assign(doc, { items: examImportItems(res.items), pageInfo: res.pageInfo, signature: res.signature, analyzedAt: Date.now() });
           await api.saveBook(book);
         }

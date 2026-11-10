@@ -1,12 +1,31 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stabilizeExamPages } from '../../src/renderer/js/exam-sections.js';
+import { stabilizeExamPages, stabilizeLegacyExamPages } from '../../src/renderer/js/exam-sections.js';
 import { itemName } from '../../src/renderer/js/exporter.js';
 import { matchItems } from '../../src/renderer/js/match.js';
 import { filterBank } from '../../src/renderer/js/bank.js';
 
 const token = (str, y0 = .05) => ({ str, x0: .1, x1: .13, y0, y1: y0 + .01 });
 const page = (index, title, nums) => ({ index, tokens: [token(title), ...nums.map((n, i) => token(`${n}.`, .3 + i * .04))], layout: { columns: [{ x0: .08, x1: .48 }] } });
+
+test('옛 학평의 괄호·점 번호 회복, 본문 숫자와 중복 제외, 일반 교재 불변', () => {
+  const p = page(0, '가짜 학력평가', [1,2,3,4,5]);
+  p.tokens[2].str = '(2)';
+  p.tokens.push({...token('1.', .7), x0:.3}, token('3', .8));
+  const anchors = new Map([[0,[{num:99}]]]);
+  const exam = {exam:'edu',year:2006};
+  assert.equal(stabilizeLegacyExamPages([p],anchors,'math',null),null);
+  assert.equal(anchors.get(0)[0].num,99);
+  stabilizeLegacyExamPages([p],anchors,'math',exam);
+  assert.deepEqual(anchors.get(0).map(c=>c.num),[1,2,3,4,5]);
+});
+
+test('스캔 학평은 OCR 후보 보존, 과목 범위와 중복만 제한', () => {
+  const p = page(0,'',[]); p.tokens=[];
+  const anchors=new Map([[0,[{num:1,col:0,y0:.2},{num:1,col:0,y0:.3},{num:31,col:0,y0:.4}]]]);
+  stabilizeLegacyExamPages([p],anchors,'math',{exam:'edu',year:2006});
+  assert.deepEqual(anchors.get(0).map(c=>c.num),[1]);
+});
 test('선택별 번호·본문 숫자 배제·홀짝·반복 결과', () => {
   const pages = [page(0, '2024학년도 대학수학능력시험 홀수형 (화법과작문)', [35,36]), page(1, '(언어와매체)', [35,36,1,2]), page(2, '짝수형 (화법과작문)', [35,36])];
   const run = () => { const anchors = new Map(); const s = stabilizeExamPages(structuredClone(pages), anchors, 'korean'); return { anchors, s }; };

@@ -29,7 +29,7 @@ import {
 import { recognizeWords, recognizeLine, OCR_WORKERS } from './ocr.js';
 import { geminiDetect, canvasToBase64Jpeg } from './gemini.js';
 import { createCanvas } from './docsource.js';
-import { stabilizeExamPages } from './exam-sections.js';
+import { stabilizeExamPages, stabilizeLegacyExamPages } from './exam-sections.js';
 
 const ANALYSIS_WIDTH = 960; // 레이아웃 분석용 렌더링 폭(px)
 // OCR 방식(렌더링 폭 px): 처음엔 쪽 전체 + 번호 띠, 번호가 빠진 쪽은 해상도를 바꿔 한 번 더(놓치는 글자가 달라짐)
@@ -815,7 +815,7 @@ export async function analyzeDocument(src, opts) {
   // 앞뒤 번호 흐름과 동떨어진 짧은 덩어리(목차·만화 쪽, 부록 표에서 잘못 읽은 숫자)는 뺌
   if (signature) dropStrayRuns(pages, anchors, `${signature.prefix || ''}|${signature.padded ? signature.digitsLen : 0}`);
 
-  const examSections = role === 'problem' && ['korean', 'math', 'english'].includes(opts.subject) ? stabilizeExamPages(results, anchors, opts.subject) : null;
+  const examSections = role === 'problem' && ['korean', 'math', 'english'].includes(opts.subject) ? (stabilizeExamPages(results, anchors, opts.subject) || stabilizeLegacyExamPages(results, anchors, opts.subject, opts.exam)) : null;
   const layouts = new Map(results.map((r) => [r.index, r.layout]));
   const grids = new Map(results.map((r) => [r.index, r.grid]));
   const sourceMap = new Map(results.map((r) => [r.index, r.source]));

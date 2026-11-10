@@ -56,15 +56,23 @@ export function parseAnswerKey(input, { subject = null, selection = null } = {})
   const answers = {};
   const warnings = [];
   const conflicts = new Set();
-  const headers = /국\s*어(?:\s*영역)?|언\s*어\s*영역|수\s*학(?:\s*영역)?|수\s*리\s*영역|영\s*어(?:\s*영역)?|외국어(?:\s*\(영어\))?(?:\s*영역)?|한국사(?:\s*영역)?|사회탐구(?:\s*영역)?|과학탐구(?:\s*영역)?|직업탐구(?:\s*영역)?|제2외국어[^\n]*|화법\s*과\s*작문|언어\s*와\s*매체|확률\s*과\s*통계|미적분|기하|[가나AB]\s*형/g;
+  const headers = /국\s*어(?:\s*영역)?|언\s*어\s*영역|수\s*학(?:\s*영역)?|수\s*리\s*영역|영\s*어(?:\s*영역)?|외국어(?:\s*\(영어\))?(?:\s*영역)?|한국사(?:\s*영역)?|사회탐구(?:\s*영역)?|과학탐구(?:\s*영역)?|직업탐구(?:\s*영역)?|제2외국어[^\n]*|화법\s*과\s*작문|언어\s*와\s*매체|확률\s*과\s*통계|미적분|기하|인문계|자연계|예체능|[가나AB]\s*형/g;
   let current = subject;
   let selected = selection;
   let last = 0;
   const read = (chunk) => {
     if (!current) return;
+    // 정답표 뒤의 해설 숫자는 답이 아니다. 제목의 '정답 및 해설'은 건너뛴다.
+    const firstAnswer = /\b1[.)]?\s+[①-⑤]/.exec(chunk);
+    if (firstAnswer) {
+      const tail = chunk.slice(firstAnswer.index);
+      const end = /해\s*설|풀\s*이|출제|정답률/.exec(tail);
+      if (end) chunk = chunk.slice(0, firstAnswer.index + end.index);
+    }
+
     const key = selected ? `${current}|${selected}` : current;
     const pointsColumn = /문항\s*(?:번호)?\s*정\s*답\s*배\s*점|번호\s*정\s*답\s*배\s*점/.test(chunk);
-    const pattern = pointsColumn ? /(\d{1,2})\s+([①-⑤]|\d{1,3})\s+([1-9](?:\.\d+)?)\b/g : /(\d{1,2})\s+([①-⑤]|\d{1,3})(?!\d)/g;
+    const pattern = pointsColumn ? /(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})\s+([1-9](?:\.\d+)?)\b/g : /(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})(?!\d)/g;
     for (const m of chunk.matchAll(pattern)) {
       const number = +m[1];
       if (!number || number > (current === 'math' ? 30 : 60)) { warnings.push(`문항번호 범위: ${m[1]}`); continue; }
