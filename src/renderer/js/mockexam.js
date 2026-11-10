@@ -31,8 +31,8 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const sel = allowed.filter((v) => (title || file).includes(v));
   if (!sel.length) sel.push(...allowed.filter((v) => file.includes(v)));
   // 옛 파일은 '수학A'처럼 형을 생략한다. 과목 바로 뒤의 표기만 인정.
-  const legacyType = subject === 'math' && exam === 'edu' && year <= 2021
-    ? /(?:수학|수리)([AB])(?:형|[_)./\\-]|$)/.exec(title || file) : null;
+  const legacyType = subject && exam === 'edu' && year <= 2016
+    ? /(?:수학|수리|국어|언어|영어|외국어)([AB])(?:형|[_)./\\-]|$)/.exec(title || file) : null;
   if (legacyType) sel.splice(0, sel.length, `${legacyType[1]}형`);
   const selection = sel.length === 1 ? sel[0] : null;
   const form = examForm(title) || examForm(file);

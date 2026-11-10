@@ -64,6 +64,7 @@ test('괄호로 감싼 정답표 홀짝 머리글 식별', () => {
 test('해시 이름의 영문 해설도 역할 식별', () => {
   assert.equal(identifyExam({filename:'explanation-0123456789.pdf'}).part,'solution');
   assert.equal(identifyExam({filename:'explanation-0123456789.pdf',path:'2014년 3월 고2 학평/수학A/explanation-0123456789.pdf'}).selection,'A형');
+  assert.equal(identifyExam({filename:'explanation-0123456789.pdf',path:'2013년 3월 고3 학평/영어A/explanation-0123456789.pdf'}).selection,'A형');
 });
 
 test('과목 해설이 있으면 전 과목 합본을 답지에 중복 첨부하지 않음', () => {
