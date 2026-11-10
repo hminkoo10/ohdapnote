@@ -33,3 +33,21 @@ test('문항 배치는 보존하고 복사 반환',()=>{
   const items=[{number:'8'},{number:'2'},{number:'8'}];const r=routePageItems(items,classify({}));
   assert.deepEqual(r.questions,items);assert.notEqual(r.questions,items);assert.equal(r.retainedNonQuestions.length,0);
 });
+
+const displayGrid = () => {
+  const grid = {w:100,h:150,data:new Uint8Array(15000)};
+  for(let i=0;i<5;i++) for(let y=40;y<48;y++) for(let x=20+i*12;x<26+i*12;x++) grid.data[y*100+x]=1;
+  return grid;
+};
+test('머리글 OCR 없이 큰 잉크와 빈 하단으로 표지 판단',()=>{
+  assert.equal(classify({grid:displayGrid()}).role,'unit_cover');
+  assert.equal(classify({tokens:[t('읽기 실패')],grid:displayGrid()}).role,'unit_cover');
+});
+test('큰 잉크가 있어도 질문·하단 본문·조밀한 배치는 보존',()=>{
+  assert.equal(classify({tokens:[t('값을 구하시오')],grid:displayGrid()}).extractQuestions,true);
+  const body=displayGrid();for(let x=10;x<80;x++) body.data[130*100+x]=1;
+  assert.equal(classify({grid:body}).extractQuestions,true);
+  const dense=displayGrid();for(let y=60;y<100;y+=4)for(let x=10;x<90;x+=4)dense.data[y*100+x]=1;
+  assert.equal(classify({grid:dense}).extractQuestions,true);
+  assert.equal(classify({grid:{w:100,h:150,data:[]}}).extractQuestions,true);
+});
