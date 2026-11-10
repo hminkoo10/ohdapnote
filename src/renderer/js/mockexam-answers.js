@@ -27,14 +27,14 @@ function tableColumns(items, subject) {
  * 좌표 순으로 전역 정렬하면 다단 표의 과목이 섞이므로 내용 순서를 보존한다.
  * 반환 warnings는 누락/충돌 확인용이며 answers.json에는 저장하지 않는다.
  */
-export function parseAnswerKey(input, { subject = null, selection = null } = {}) {
+export function parseAnswerKey(input, { subject = null, selection = null, tablesOnly = false } = {}) {
   if (Array.isArray(input)) {
     const detected = identifyExam({ text: input.map((i) => i.str).join(' ') }).subject;
     const columns = tableColumns(input, subject || detected);
     if (columns) {
       const answers = {}, warnings = [], conflicts = new Set();
       for (const col of columns) {
-        const result = parseAnswerKey(col.text, { subject: subject || detected, selection: col.selection });
+        const result = parseAnswerKey(col.text, { subject: subject || detected, selection: col.selection, tablesOnly });
         warnings.push(...result.warnings);
         for (const [key, entries] of Object.entries(result.answers)) {
           answers[key] ||= {};
@@ -52,7 +52,7 @@ export function parseAnswerKey(input, { subject = null, selection = null } = {})
   }
   const source = typeof input === 'string' ? input : input.map((i) => i.str + (i.hasEOL ? '\n' : ' ')).join('');
   // 정답 PUA 숫자 바로 뒤에 다음 문항번호가 붙는 PDF도 경계를 잃지 않는다.
-  const text = normalizeHancomText(source.replace(/([\uE034-\uE03D])(?=\d)/g, '$1 '));
+  const text = normalizeHancomText(source.replace(/([\uE034-\uE03D])(?=\d)/g, '$1 ')).replace(/예[․·ㆍ.]체능(?:계)?/g, '예체능');
   const answers = {};
   const warnings = [];
   const conflicts = new Set();
@@ -72,6 +72,8 @@ export function parseAnswerKey(input, { subject = null, selection = null } = {})
 
     const key = selected ? `${current}|${selected}` : current;
     const pointsColumn = /문항\s*(?:번호)?\s*정\s*답\s*배\s*점|번호\s*정\s*답\s*배\s*점/.test(chunk);
+    // 해설 쪽의 계산 숫자를 정답으로 만들지 않는다. 명시적 표 또는 1·2·3 답 연속 확인.
+    if (tablesOnly && !pointsColumn && !/\b1[.)]?\s+[①-⑤]\s+2[.)]?\s+[①-⑤]\s+3[.)]?\s+[①-⑤]/.test(chunk)) return;
     const pattern = pointsColumn ? /(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})\s+([1-9](?:\.\d+)?)\b/g : /(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})(?!\d)/g;
     for (const m of chunk.matchAll(pattern)) {
       const number = +m[1];

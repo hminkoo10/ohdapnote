@@ -68,7 +68,7 @@ async function readAnswers(book, row, signal) {
         const form = book.docs.problem.items.find((i) => i.examSection?.form)?.examSection.form || row.metadata.form;
         const pageForm = examForm(content.map((t) => t.str).join(' '));
         if (form && pageForm && form !== pageForm) continue;
-        const p = parseAnswerKey(content, { subject: file.metadata.subject ? book.subject : null, selection: row.metadata.selection });
+        const p = parseAnswerKey(content, { subject: file.metadata.subject ? book.subject : null, selection: row.metadata.selection, tablesOnly: file.metadata.part === 'solution' });
         for (const [k, v] of Object.entries(p.answers)) Object.assign(parsed.answers[k] ||= {}, v);
       }
       let connected = 0;

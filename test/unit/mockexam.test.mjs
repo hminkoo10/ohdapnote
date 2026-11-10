@@ -134,3 +134,9 @@ test('옛 점 번호와 계열별 정답, 해설 본문의 숫자는 제외', ()
   assert.equal(r.answers['math|인문계'][1].answer,'3');
   assert.equal(r.answers['math|자연계'][1].answer,'5');
 });
+
+test('해설 본문 숫자는 정답 아님, 예·체능계 정답 제목은 인식', () => {
+  assert.deepEqual(parseAnswerKey('가짜 풀이 3 5 4 2',{subject:'math',selection:'예체능',tablesOnly:true}).answers,{});
+  const r=parseAnswerKey('수리 영역 [예·체능계 정답] 1. ① 2. ② 3. ③ 해설 3 5',{subject:'math',tablesOnly:true});
+  assert.equal(Object.keys(r.answers['math|예체능']).length,3);
+});
