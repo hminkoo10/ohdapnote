@@ -2441,7 +2441,7 @@ main.sheet {
 }
 .chip.on {
   border-color: transparent;
-  background: var(--primary);
+  background: var(--grey800);
   color: #fff;
   box-shadow: none;
 }
@@ -4281,7 +4281,7 @@ button:focus-visible, .bank-row:focus-visible { outline: 2px solid var(--grey700
 .legend { color: var(--text-2); }
 .chip.missing, .chip.missing:hover { border: 1px dashed var(--grey400); background: var(--surface); color: var(--text-2); }
 .chip-q { background: transparent; color: var(--text-2); border-radius: 0; }
-.chip.noans.on { background: var(--primary); color: white; }
+.chip.noans.on { background: var(--grey800); color: white; }
 .seg-tab.active, .btn-active, .btn-active:hover:not(:disabled), .model-chip:hover { color: var(--text); }
 .readonly-banner .btn, .sum-chip, .qflag, .page-flags { color: var(--text-2); }
 .page-row.flagged:not(.active), .qrow.flagged, .gem-row[data-state='run'] { background: transparent; }
