@@ -308,9 +308,9 @@ class Parser {
     const glyph = symbol(value);
     if (glyph !== undefined) return make(has(GREEK, key) || key.startsWith('var') ? 'identifier' : 'operator', start, end, { value: glyph });
     if (kind === 'word') {
-      // 임의의 영문 변수와 모르는 명령은 구별할 수 없어 경고만 남기고 원문을 보존합니다.
+      // 대문자 점 이름(프라임은 별도 토큰)과 overline 표기는 허용하고, 소문자 명령 오타는 경고합니다.
       const unknown = value.length > 1;
-      if (unknown) this.issue('unknown-word', start, end, 'warning');
+      if (unknown && !/^[A-Z]+$/.test(value) && key !== 'overline') this.issue('unknown-word', start, end, 'warning');
       return make('identifier', start, end, { value, unknown });
     }
     return make(/[\p{L}]/u.test(value) ? 'identifier' : 'operator', start, end, { value: value === "'" ? '′' : value });

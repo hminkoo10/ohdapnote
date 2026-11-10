@@ -331,3 +331,12 @@ test('hwpeqview: 기존 변환기의 모든 LaTeX·실측 예시를 다시 그�
   }
   assert.ok(count >= 120, `예시 ${count}개`);
 });
+
+test('hwpeqview: 점 이름은 경고 없이 보존하고 명령 오타는 경고', () => {
+  for (const script of ['bar {AB}', 'vec {AB}', 'ABC', "A'B", "AB'C", 'overline {PQ}', 'bar {x}', 'hat {x}', '{{a} over {b}}']) {
+    assert.deepEqual(parseEq(script).errors, [], script);
+  }
+  for (const script of ['sqr {x}', 'ovr', 'fraq']) {
+    assert.ok(parseEq(script).errors.some(e => e.code === 'unknown-word' && e.severity === 'warning'), script);
+  }
+});
