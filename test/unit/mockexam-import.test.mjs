@@ -97,3 +97,9 @@ test('명시적 공통 답지의 시험 종류만 없으면 같은 날짜의 유
   const wrong={...files[2],metadata:{...files[2].metadata,exam:'csat'}};
   assert.ok(planExamImport([...files.slice(0,2),wrong],[],['math','korean']).rows.every(r=>!r.files.some(f=>f.filename===names[2])));
 });
+
+test('옛 자료의 폴더 A형보다 실제 머리글 가형 우선', () => {
+  const file={filename:'question-test.pdf',path:'2015년 3월 고2 학평/수학A/question-test.pdf'};
+  assert.equal(identifyExam(file).selection,'A형');
+  assert.equal(identifyExam({...file,text:'2015학년도 3월 고2 전국연합학력평가 수학 가형'}).selection,'가형');
+});
