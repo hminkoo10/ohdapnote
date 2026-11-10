@@ -38,7 +38,10 @@ export function stabilizeLegacyExamPages(pages, anchors, subject, exam) {
     const recovered = original.filter(c=>!strongNumbers.has(c.num) && !c.prefix);
     const list = digital && page.tokens?.length ? [...candidates.get(page.index), ...recovered] : original;
     const chosen = list.filter(c => c.num >= 1 && c.num <= hi).sort((a,b) => a.col-b.col || a.y0-b.y0);
-    anchors.set(page.index, chosen.filter(c => { if(seen.has(c.num)) return false; seen.add(c.num); return true; }));
+    const confirmed = chosen.filter(c => { if(seen.has(c.num)) return false; seen.add(c.num); return true; });
+    anchors.set(page.index, confirmed);
+    // 반대 단이 빈 문항 첫 줄을 전체 폭 제목으로 오인한 띠만 해제한다.
+    page.layout.spans = (page.layout.spans || []).filter(b => !confirmed.some(c => c.y0 >= b.y0 && c.y0 <= b.y1));
     sections.set(page.index, { subject, selection:exam.selection || null, form:exam.form || null });
   }
   return sections;

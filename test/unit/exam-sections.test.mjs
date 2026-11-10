@@ -66,3 +66,10 @@ test('선택 표시·검색·다른 선택 정답 자동 연결 금지', () => {
   stabilizeLegacyExamPages([p],anchors,'math',{exam:'edu',year:2025});
   assert.deepEqual(anchors.get(0).map(c=>c.num),[1,2,3,4,5]);
 });
+
+test('확정 학평 번호를 가리는 가짜 제목 띠만 제거', () => {
+  const p=page(0,'가짜 학평',[1,2,3,4,5]);
+  p.layout.spans=[{y0:.295,y1:.32},{y0:.7,y1:.72}];
+  stabilizeLegacyExamPages([p],new Map(),'korean',{exam:'edu',year:2015});
+  assert.deepEqual(p.layout.spans,[{y0:.7,y1:.72}]);
+});
