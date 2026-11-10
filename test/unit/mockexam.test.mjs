@@ -151,3 +151,8 @@ test('다른 유니코드 원문자 정답도 동일한 선택지로 읽음', ()
   const r=parseAnswerKey('영어 영역 정답\n1 ➄ 2 ➁ 3 ➀ 4 ❹ 5 ❸',{tablesOnly:true});
   assert.deepEqual(Object.values(r.answers.english).map(e=>e.answer),['5','2','1','4','3']);
 });
+
+test('점 번호와 답이 붙은 옛 표는 읽고 뒤 해설은 제외', () => {
+  const r=parseAnswerKey('언어 영역 [정답] 1.③ 2.① 3.⑤ [해설] 4.②',{tablesOnly:true});
+  assert.deepEqual(Object.values(r.answers.korean).map(e=>e.answer),['3','1','5']);
+});

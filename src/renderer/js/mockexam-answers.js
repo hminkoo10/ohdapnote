@@ -52,7 +52,7 @@ export function parseAnswerKey(input, { subject = null, selection = null, tables
   }
   const source = typeof input === 'string' ? input : input.map((i) => i.str + (i.hasEOL ? '\n' : ' ')).join('');
   // 정답 PUA 숫자 바로 뒤에 다음 문항번호가 붙는 PDF도 경계를 잃지 않는다.
-  const normalized = source.replace(/[➀-➄❶-❺]/g, c => '①②③④⑤'[(c.codePointAt(0) >= 0x2780 ? c.codePointAt(0) - 0x2780 : c.codePointAt(0) - 0x2776)]);
+  const normalized = source.replace(/(\d{1,2}[.)])(?=[①-⑤➀-➄❶-❺])/g, '$1 ').replace(/[➀-➄❶-❺]/g, c => '①②③④⑤'[(c.codePointAt(0) >= 0x2780 ? c.codePointAt(0) - 0x2780 : c.codePointAt(0) - 0x2776)]);
   const text = normalizeHancomText(normalized.replace(/([\uE034-\uE03D])(?=\d)/g, '$1 ')).replace(/예[․·ㆍ.]체능(?:계)?/g, '예체능');
   const answers = {};
   const warnings = [];
