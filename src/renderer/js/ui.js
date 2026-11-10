@@ -140,7 +140,8 @@ export function modal({ title, body, buttons = [], width = 460, onClose, beforeC
     document.body.append(overlay);
     document.addEventListener('keydown', onKey, true);
     const first = dialog.querySelector('input, select, textarea');
-    (first || footer.querySelector('.btn-primary'))?.focus();
+    if (first) first.focus();
+    else { dialog.tabIndex = -1; dialog.focus(); }
     dialog.close = close;
   });
 }

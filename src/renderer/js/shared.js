@@ -384,7 +384,7 @@ export function renderQTable(table, o) {
           ? h(
               'button.qflag',
               { title: `${(doc.pageInfo?.[page]?.flags || []).join(', ')} — 눌러서 확인`, onclick: () => o.onFlag?.(page) },
-              icon('warn'),
+              '확인',
             )
           : null,
       ),
@@ -402,7 +402,6 @@ export function renderQTable(table, o) {
       },
       m.prefix ? h('span.chip-pre', m.prefix) : null,
       m.digits ? String(m.num).padStart(m.digits, '0') : String(m.num),
-      h('span.chip-q', '?'),
     );
   }
 }

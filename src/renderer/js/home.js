@@ -6,20 +6,6 @@ import { topbar } from './chrome.js';
 import { SUBJECTS, subjectOf, subjectName, contractedSubjects } from './subjects.js';
 import { bankView, rememberBankView } from './bankview.js';
 
-const SPINES = [
-  'var(--grey300)',
-  'var(--grey300)',
-  'var(--grey300)',
-  'var(--grey300)',
-  'var(--grey300)',
-  'var(--grey300)',
-];
-export function spineFor(id) {
-  let hsh = 0;
-  for (const ch of String(id)) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;
-  return SPINES[hsh % SPINES.length];
-}
-
 let homeTab = 'notes';
 let shelf = 'mine'; // 책장 안 (학원 공간에서만): mine 내 책장 | shared 공유 책장
 // 학생 오답노트 · 학생 명단 탭에서 보던 것 (실시간으로 다시 그려도 그대로)
@@ -301,7 +287,7 @@ export async function showHome({ tab } = {}) {
         n.bookIds.length
           ? n.bookIds.map((id) => {
               const b = bookById.get(id);
-              return h('span.book-pill', { style: { '--spine': spineFor(id) }, title: b ? null : '지워졌거나 다른 선생님의 나만 보기 교재예요' }, b?.name || '볼 수 없는 교재');
+              return h('span.book-pill', { title: b ? null : '지워졌거나 다른 선생님의 나만 보기 교재예요' }, b?.name || '볼 수 없는 교재');
             })
           : h('span.muted.small', '책 없음'),
       ),
@@ -474,7 +460,7 @@ export async function showHome({ tab } = {}) {
             tabIndex: 0,
             onclick: () => nav.book(b.id),
             onkeydown: (e) => e.key === 'Enter' && nav.book(b.id),
-            style: { '--i': Math.min(i + 1, 14), '--spine': spineFor(b.id) },
+            style: { '--i': Math.min(i + 1, 14) },
           },
           h('div.bc-title', b.name),
           showSubject
@@ -655,7 +641,6 @@ export async function createNote(allBooks, { student: preset = null } = {}) {
     books.map((b) =>
       h(
         `label.book-opt${picked.has(b.id) ? '.on' : ''}`,
-        { style: { '--spine': spineFor(b.id) } },
         h('input', {
           type: 'checkbox',
           checked: picked.has(b.id),
@@ -665,7 +650,6 @@ export async function createNote(allBooks, { student: preset = null } = {}) {
             e.target.closest('.book-opt').classList.toggle('on', e.target.checked);
           },
         }),
-        h('span.bo-spine'),
         h('span.bo-name', b.name),
         h('span.bo-meta', [manySubjects ? subjectName(subjectOf(b)) : '', b.problemCount ? `${b.problemCount}문항` : '분석 전'].filter(Boolean).join(' · ')),
         h('span.bo-check', icon('check')),

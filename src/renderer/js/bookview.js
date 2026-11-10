@@ -386,7 +386,7 @@ function docCard(role, i) {
     h(
       'div.doc-head',
       h('span.doc-icon', icon(role === 'problem' ? 'book' : 'bookCheck')),
-      h('div.doc-titles', h('div.doc-title', ROLE_NAME[role]), doc ? h('div.doc-file', { title: doc.originalName }, doc.originalName, h('span.muted', src ? ` · ${src.numPages}쪽` : ' · 여는 중…')) : h('div.doc-file.muted', '아직 파일이 없어요')),
+      h('div.doc-titles', h('div.doc-title', ROLE_NAME[role], doc ? h('span.doc-pages.small.muted', src ? `${src.numPages}쪽` : '여는 중…') : null), doc?.originalName ? h('div.doc-file', { title: doc.originalName }, doc.originalName) : !doc ? h('div.doc-file.muted', '아직 파일이 없어요') : null),
       doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pickMore, disabled: locked, title: '기존 파일·분석 결과는 그대로 남아요' }, icon('plus'), '파일 추가') : null,
       doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pick, disabled: locked }, icon('refresh'), '파일 바꾸기') : null,
     ),
