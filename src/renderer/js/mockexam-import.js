@@ -1,6 +1,6 @@
 import { api, state, getSources, dropSources, restartGuard } from './shared.js';
-import { identifyExam } from './mockexam.js';
-import { planExamImport } from './mockexam-plan.js';
+import { identifyExam, examForm } from './mockexam.js';
+import { planExamImport, examImportItems } from './mockexam-plan.js';
 import { newDoc } from './store.js';
 import { analyzeDocument } from './analyze.js';
 import { parseAnswerKey, answerKeyToAnswers } from './mockexam-answers.js';
@@ -65,6 +65,9 @@ async function readAnswers(book, row, signal) {
           const words = await recognizeWords(await src.renderPage(i, 1700), { lang: 'kor+eng', psm: '6' });
           content = words.map((w, k) => ({ str: w.str, hasEOL: !words[k + 1] || Math.abs(words[k + 1].y0 - w.y0) > 12 }));
         }
+        const form = book.docs.problem.items.find((i) => i.examSection?.form)?.examSection.form || row.metadata.form;
+        const pageForm = examForm(content.map((t) => t.str).join(' '));
+        if (form && pageForm && form !== pageForm) continue;
         const p = parseAnswerKey(content, { subject: book.subject, selection: row.metadata.selection });
         for (const [k, v] of Object.entries(p.answers)) Object.assign(parsed.answers[k] ||= {}, v);
       }
@@ -118,7 +121,7 @@ export async function importExamFolder(paths, { onProgress = () => {}, signal, p
           if (!doc || doc.analyzedAt) continue;
           if (!src) throw Error('시험지 파일을 열지 못했어요.');
           const res = await analyzeDocument(src, { pages: Array.from({ length: src.numPages }, (_, i) => i), role, subject: book.subject, ...doc.options, ocrLang: 'kor+eng', signal, onProgress: (p) => onProgress({ ...p, name: row.name, queue: q }) });
-          Object.assign(doc, { items: res.items, pageInfo: res.pageInfo, signature: res.signature, analyzedAt: Date.now() });
+          Object.assign(doc, { items: examImportItems(res.items), pageInfo: res.pageInfo, signature: res.signature, analyzedAt: Date.now() });
           await api.saveBook(book);
         }
         const answers = await readAnswers(book, row, signal);

@@ -24,3 +24,9 @@ export function planExamImport(files, books = [], subjects = ['math']) {
   }
   return { rows, skipped };
 }
+
+// 한 PDF 안에 홀짝이 함께 실렸어도 문제은행에는 홀수형만 남긴다.
+export function examImportItems(items) {
+  return items.some((i) => i.examSection?.form === '홀')
+    ? items.filter((i) => i.examSection?.form !== '짝') : items;
+}

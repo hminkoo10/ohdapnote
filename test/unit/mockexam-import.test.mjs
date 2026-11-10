@@ -1,8 +1,8 @@
 ﻿import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { planExamImport, examBookName } from '../../src/renderer/js/mockexam-plan.js';
-import { identifyExam } from '../../src/renderer/js/mockexam.js';
+import { planExamImport, examBookName, examImportItems } from '../../src/renderer/js/mockexam-plan.js';
+import { identifyExam, examForm } from '../../src/renderer/js/mockexam.js';
 const { readExamZip } = createRequire(import.meta.url)('../../src/main/mockexam-files.js');
 const f = (name, sha256 = name) => ({ filename: name, path: name, sha256 });
 test('시험 이름은 학평 시행연도와 수능·모평 학년도를 구별', () => {
@@ -38,4 +38,17 @@ test('옛 수학 계열 문제지는 한 책으로 합치지 않음', () => {
   assert.equal(p.rows.length, 3);
   assert.deepEqual(p.rows.map((r) => r.metadata.selection), ['인문계', '자연계', '예체능']);
   assert.ok(p.rows.every((r) => r.files.length === 1));
+});
+
+test('한 PDF의 홀짝 합본도 홀수형만 등록, 짝수형 단독은 보존', () => {
+  const odd = { id: 'odd', examSection: { form: '홀' } };
+  const even = { id: 'even', examSection: { form: '짝' } };
+  const common = { id: 'common' };
+  assert.deepEqual(examImportItems([common, odd, even]), [common, odd]);
+  assert.deepEqual(examImportItems([even]), [even]);
+});
+
+test('괄호로 감싼 정답표 홀짝 머리글 식별', () => {
+  assert.equal(examForm('국어 영역 정답표 ( 홀수 ) 형'), '홀');
+  assert.equal(examForm('수학 영역 정답표 ( 짝수 ) 형'), '짝');
 });

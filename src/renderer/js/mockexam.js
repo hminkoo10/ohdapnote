@@ -6,6 +6,8 @@ const compact = (s) => normalizeHancomText(s).replace(/\s/g, '')
   .replace(/화작/g, '화법과작문').replace(/언매/g, '언어와매체')
   .replace(/확통/g, '확률과통계').replace(/미적(?!분)/g, '미적분');
 
+export const examForm = (text) => /(홀|짝)수?\)?형/.exec(compact(text))?.[1] || null;
+
 /** 파일명/ZIP 경로와 제목 글자. 제목에 있는 필드는 파일명보다 우선한다. */
 export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   // 본문 속 고2·풀이·평가원은 제목 정보가 아니다.
@@ -29,7 +31,7 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const sel = allowed.filter((v) => (title || file).includes(v));
   if (!sel.length) sel.push(...allowed.filter((v) => file.includes(v)));
   const selection = sel.length === 1 ? sel[0] : null;
-  const form = pick(/(홀|짝)수?형/)?.[1] || null;
+  const form = examForm(title) || examForm(file);
   const partOf = (s) => /듣기.*(?:대본|스크립트)|listening.*script/i.test(s) ? 'listeningScript' : /해설|풀이/.test(s) ? 'solution' : /정답|정답표|answer/i.test(s) ? 'answerKey' : /문제|question/i.test(s) ? 'question' : null;
   const part = /\.(?:mp3|wav|m4a)$/i.test(filename) ? 'audio' : partOf(compact(filename)) || partOf(file) || partOf(title) || 'other';
   for (const [name, value] of Object.entries({ exam, year, month, grade, subject })) if (value === null) reasons.push(`${name} 미확인 또는 합본`);
