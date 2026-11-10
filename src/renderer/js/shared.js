@@ -232,8 +232,7 @@ export async function renderPreview(box, o) {
     box.append(
       h(
         'div.preview-empty',
-        h('span.pe-icon', icon('eye')),
-        h('div', o.emptyText || ['번호를 누르면', h('br'), '문제와 해설을 여기서 볼 수 있어요.']),
+        h('div', o.emptyText || '번호를 누르면 문제와 해설이 보여요.'),
       ),
     );
     return;
