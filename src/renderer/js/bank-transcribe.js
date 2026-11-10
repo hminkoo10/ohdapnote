@@ -1,3 +1,4 @@
+import { saveExamTranscripts } from './mockexam-save.js';
 // 교재의 문제·지문을 문제은행에 넣기. 기본은 이 컴퓨터의 PDF 글자·OCR만 사용
 import { h, modal, toast } from './ui.js';
 import { api, nav, state, getSources, holdSource, findJob, jobDialog, geminiReady, aiOptions, restartGuard } from './shared.js';
@@ -180,7 +181,7 @@ export async function transcribeExam(book, { signal, onProgress } = {}) {
         signal?.throwIfAborted();
         store.items[transcriptKey(b) + (entry.model === 'pdf' ? '|pdf' : '|local')] = { ...entry, at: Date.now() };
         store.dirty = true;
-        if (!await saveTranscripts()) throw Error('옮긴 글을 저장하지 못했어요.');
+        if (!await saveExamTranscripts(saveTranscripts)) throw Error('옮긴 글을 저장하지 못했어요.');
       }
       low += countLow(bestTranscript(book.id, b)?.entry.blocks);
       onProgress?.({ phase: 'transcribe', done: ++done });

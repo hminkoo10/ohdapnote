@@ -43,14 +43,19 @@ try {
     }
     const paths = [...new Set((process.env.MOCKEXAM_MEASURE_CSAT ? picked.filter((e) => e.year === 2002 && e.subject === '영어') : picked).flatMap((e) => entries.filter((a) => a.page === e.page && a.subject === e.subject && (!/question-/i.test(a.file) || a.file === e.file) && existsSync(join(archive, a.file))).map((a) => join(archive, a.file))))];
     paths.push(...readdirSync(process.env.MOCKEXAM_HDREAM).filter((n) => /\.pdf$/i.test(n) && (!process.env.MOCKEXAM_MEASURE_CSAT || n.includes('수능') || n.includes('6월') && n.includes('국어'))).map((n) => join(process.env.MOCKEXAM_HDREAM,n)));
+    if (process.env.MOCKEXAM_ONLY_FAILED) {
+      const previous = JSON.parse(readFileSync(join(shots, 'measurement-csat.json'), 'utf8'));
+      await win.evaluate((names) => { globalThis.retryExamNames = names; }, previous.filter((r) => r.error).map((r) => r.name));
+    }
     const result = await win.evaluate(async (paths) => {
       const m = await import('./js/mockexam-import.js');
       const plan = await m.inspectExamFolder(paths);
+      if (globalThis.retryExamNames) plan.rows = plan.rows.filter((r) => globalThis.retryExamNames.includes(r.name));
       console.log('MEASURE plan ' + plan.rows.length + ' skipped ' + plan.skipped.length);
       const q = await m.importExamFolder(paths, { plan, onProgress: (p) => { if (p.phase === 'exam') console.log('MEASURE ' + p.name); } });
       return q.rows.map((r) => ({ name: r.name, reason: r.reason, result: r.result, error: r.error }));
     }, paths);
-    const out = join(process.env.MOCKEXAM_SHOTS, process.env.MOCKEXAM_MEASURE_CSAT ? 'measurement-csat.json' : 'measurement.json');
+    const out = join(process.env.MOCKEXAM_SHOTS, process.env.MOCKEXAM_ONLY_FAILED ? 'measurement-retry.json' : process.env.MOCKEXAM_MEASURE_CSAT ? 'measurement-csat.json' : 'measurement.json');
     writeFileSync(out, JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
   } else {
@@ -86,6 +91,15 @@ try {
   // 파일·책 ID 저장 직후 강제 종료: 미완료 시험부터 재개해야 한다.
   await app.evaluate(({ app }) => app.exit(0)).catch(() => {}); app = null;
   await launch();
+  await app.evaluate(({ ipcMain }) => {
+    const original = ipcMain._invokeHandlers.get('books:saveTranscripts');
+    let failed = false;
+    ipcMain.removeHandler('books:saveTranscripts');
+    ipcMain.handle('books:saveTranscripts', (...args) => {
+      if (!failed) { failed = true; globalThis.examSaveFailureInjected = true; throw Error('EPERM: 시험용 일시적 파일 잠금'); }
+      return original(...args);
+    });
+  });
   await win.getByRole('button', { name: '모의고사 넣기', exact: true }).click();
   await win.getByRole('button', { name: '이어서 넣기', exact: true }).click();
   await win.waitForFunction(() => JSON.parse(localStorage.getItem('ohdap.examImport'))?.rows.every((r) => r.done || r.reason || r.error), { timeout: 180000 });
@@ -112,6 +126,7 @@ try {
   const answers = await win.evaluate((id) => window.ohdap.getAnswers(id), q.rows.find((r) => r.metadata.exam === 'csat').bookId);
   assert.equal(Object.keys(answers.items).length, 5);
   assert.ok(Object.values(answers.items).every((a) => a.answer !== '5'));
+  assert.equal(await app.evaluate(() => globalThis.examSaveFailureInjected), true);
   console.log('mockexam-e2e PASS');
   }
 } finally {
