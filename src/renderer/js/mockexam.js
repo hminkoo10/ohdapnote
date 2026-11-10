@@ -30,6 +30,10 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const allowed = selections.filter((v) => !schoolYear || (/[가나]형/.test(v) ? subject === 'math' && schoolYear <= 2021 : /[AB]형/.test(v) ? schoolYear <= 2016 : true));
   const sel = allowed.filter((v) => (title || file).includes(v));
   if (!sel.length) sel.push(...allowed.filter((v) => file.includes(v)));
+  // 옛 파일은 '수학A'처럼 형을 생략한다. 과목 바로 뒤의 표기만 인정.
+  const legacyType = subject === 'math' && exam === 'edu' && year <= 2021
+    ? /(?:수학|수리)([AB])(?:형|[_)./\\-]|$)/.exec(title || file) : null;
+  if (legacyType) sel.splice(0, sel.length, `${legacyType[1]}형`);
   const selection = sel.length === 1 ? sel[0] : null;
   const form = examForm(title) || examForm(file);
   const partOf = (s) => /듣기.*(?:대본|스크립트)|listening.*script/i.test(s) ? 'listeningScript' : /해설|풀이|explanation|solution/i.test(s) ? 'solution' : /정답|정답표|answer/i.test(s) ? 'answerKey' : /문제|question/i.test(s) ? 'question' : null;
