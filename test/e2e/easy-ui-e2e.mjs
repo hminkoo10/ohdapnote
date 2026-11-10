@@ -170,7 +170,7 @@ try {
   assert.equal(await win.locator('.sel-chip').count(), chosen); passed++;
   assert.doesNotMatch(await win.locator('.sel-chip-label').first().innerText(), /수학 중간고사 대비 연습 교재/);
   const two = await call('createNote', { title: '두 교재 오답', bookIds: [id, secondId] });
-  two.selected[id] = ['problem-2']; two.selected[secondId] = ['problem-1'];
+  two.selected[id] = [(await call('getBook', id)).docs.problem.items[0].id]; two.selected[secondId] = ['problem-1'];
   await call('saveNote', two); await nav('note', two.id);
   await win.waitForSelector('.sel-chip-label');
   const labels = await win.locator('.sel-chip-label').allTextContents();
