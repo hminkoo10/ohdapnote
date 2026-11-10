@@ -34,6 +34,11 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const legacyType = subject && exam === 'edu' && year <= 2016
     ? /(?:수학|수리|국어|언어|영어|외국어)([AB])(?:형|[_)./\\-]|$)/.exec(title || file) : null;
   if (legacyType) sel.splice(0, sel.length, `${legacyType[1]}형`);
+  const oldYear = schoolYear || year;
+  const legacyMath = subject === 'math' && oldYear && oldYear <= 2021
+    ? /(?:수학|수리)([가나])형/.exec(title) || /(?:수학|수리)([가나])형/.exec(file) : null;
+  // 옛 가형의 '미적분과 통계'는 최신 선택 과목 이름이 아니다.
+  if (legacyMath && !sel.some(v=>/^[가나]형$/.test(v) && v !== `${legacyMath[1]}형`)) sel.splice(0, sel.length, `${legacyMath[1]}형`);
   const selection = sel.length === 1 ? sel[0] : null;
   const form = examForm(title) || examForm(file);
   const partOf = (s) => /듣기.*(?:대본|스크립트)|listening.*script/i.test(s) ? 'listeningScript' : /해설|풀이|explanation|solution/i.test(s) ? 'solution' : /정답|정답표|answer/i.test(s) ? 'answerKey' : /문제|question/i.test(s) ? 'question' : null;
