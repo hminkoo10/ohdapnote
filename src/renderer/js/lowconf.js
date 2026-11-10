@@ -60,6 +60,10 @@ export function moveLow(low = [], before, after, item) {
   const delta = after.length - before.length;
   return low.flatMap((mark) => {
     if (item !== undefined && mark.item !== item) return [{ ...mark }];
+    // 수식 하나를 고쳤다고 문항의 나머지 수식까지 확인된 것은 아니다.
+    if (/^수식 \d+개 — 원본과 한 번 비교하세요$/.test(mark.detail || '')) {
+      return [{ ...mark, ...(mark.start !== undefined && after.length ? { start: 0, end: after.length } : {}) }];
+    }
     if (mark.start === undefined) return [];
     if (mark.end <= start) return [{ ...mark }];
     if (mark.start >= end) return [{ ...mark, start: mark.start + delta, end: mark.end + delta }];

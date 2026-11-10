@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { groupMathReview } from '../../src/renderer/js/math-review.js';
-import { countLow, nextLow, clearLow } from '../../src/renderer/js/lowconf.js';
+import { countLow, nextLow, clearLow, moveLow } from '../../src/renderer/js/lowconf.js';
 import { sanitizeTranscripts } from '../../src/main/transcript-review.js';
 const math = (eq) => ({ type: 'math', eq, low: [{ reason: 'math' }] });
 test('단순 수식 무표시, 복원 수식 문항당 하나, 모호한 구조·그림 개별 유지', () => {
@@ -28,4 +28,9 @@ test('문단·보기 안의 한 줄 식도 단순 식 제외 후 같은 문항 �
   assert.equal(countLow(out),1);
   assert.match(out[1].low[0].detail,/수식 2개/);
   assert.equal(out[1].low[0].item,0);
+});
+
+test('한 식 편집으로 문항 전체 수식 묶음이 확인 처리되지 않음', () => {
+  const blocks=groupMathReview([math('x ^ {2}'),math('y ^ {3}')]);
+  assert.equal(moveLow(blocks[0].low,'x ^ {2}','x ^ {4}').length,1);
 });
