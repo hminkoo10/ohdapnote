@@ -129,8 +129,9 @@ export async function importExamFolder(paths, { onProgress = () => {}, signal, p
         row.done = true; delete row.error; save(q);
       } catch (err) {
         if (signal?.aborted || err.name === 'AbortError') throw err;
-        row.error = err.message; save(q);
+        row.error = err.message; row.seconds = (Date.now() - started) / 1000; save(q);
       } finally { if (book) dropSources(book.id); }
+      onProgress({ phase: 'exam-end', name: row.name, row, queue: q });
     }
     onProgress({ phase: 'finished', queue: q });
     return q;

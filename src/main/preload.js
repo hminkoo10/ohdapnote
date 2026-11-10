@@ -113,3 +113,12 @@ contextBridge.exposeInMainWorld('ohdap', {
   },
   openHelp: (section) => ipcRenderer.invoke('app:openHelp', section),
 });
+
+const batchThreads = process.argv.find((arg) => arg.startsWith('--exam-ocr-threads='));
+if (batchThreads) contextBridge.exposeInMainWorld('examBatch', {
+  threads: Number(batchThreads.split('=')[1]),
+  config: () => ipcRenderer.invoke('exam-batch:config'),
+  event: (data) => ipcRenderer.send('exam-batch:event', data),
+  finish: (queue) => ipcRenderer.invoke('exam-batch:finish', queue),
+  fatal: (error) => ipcRenderer.send('exam-batch:fatal', error),
+});

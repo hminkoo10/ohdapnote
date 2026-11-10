@@ -451,7 +451,7 @@ try {
   assert.ok(resolve(tmp).startsWith(resolve(OUT) + sep));
   if (process.platform === 'win32') {
     const { execFileSync } = await import('node:child_process');
-    execFileSync('powershell.exe', ['-NoProfile', '-Command', "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:OHDAP_TEST_CLEANUP, 'OnlyErrorDialogs', 'SendToRecycleBin')"], { env: { ...process.env, OHDAP_TEST_CLEANUP: tmp } });
+    execFileSync('powershell.exe', ['-NoProfile', '-Command', "try { Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:OHDAP_TEST_CLEANUP, 'OnlyErrorDialogs', 'SendToRecycleBin') } catch { Write-Output $env:OHDAP_TEST_CLEANUP }"], { env: { ...process.env, OHDAP_TEST_CLEANUP: tmp } });
   } else rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 if (errors.length) process.exitCode = 1;

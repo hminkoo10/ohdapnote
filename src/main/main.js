@@ -35,7 +35,13 @@ log.initialize();
 log.transports.file.level = 'info';
 
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
-const isSmokeTest = process.env.OHDAP_E2E === '1';
+const { parseExamBatch, makeSummary } = require('./exam-batch');
+let batch, batchArgumentError;
+try { batch = parseExamBatch(process.argv, app.isPackaged); }
+catch (err) { batchArgumentError = err; }
+const isBatch = !!batch || !!batchArgumentError;
+const isSmokeTest = !isBatch && process.env.OHDAP_E2E === '1';
+if (isBatch) require('node:os').setPriority(0, require('node:os').constants.priority.PRIORITY_BELOW_NORMAL);
 // 배포본에서는 개발자 도구를 막는다 (창의 개발자 도구, 원격 디버깅으로 붙기). 개발 실행에서만 열 수 있음
 const devTools = !app.isPackaged;
 if (app.isPackaged && ['remote-debugging-port', 'remote-debugging-pipe', 'inspect', 'inspect-brk'].some((s) => app.commandLine.hasSwitch(s))) app.exit(1);
@@ -53,7 +59,10 @@ function startCloudSession() {
   }
   return cloud.check('ohdapnote', { packaged: app.isPackaged, env });
 }
-const session = startCloudSession();
+const session = isBatch ? {
+  localDir: app.getPath('userData'), dataDir: path.join(app.getPath('userData'), 'data'),
+  user: { id: 'local-' + crypto.createHash('sha256').update(require('node:os').userInfo().username).digest('hex').slice(0, 24), name: '' },
+} : startCloudSession();
 if (session) app.setPath('userData', session.localDir); // 이 컴퓨터에만 두는 것 (모델, 로그, 화면 캐시)
 const me = session?.user || {}; // { id: 계정 ID, name, role, academy: 학원 이름 }
 // 설정 서명 키 (매니페스트 dataSigning — 예전 통합 클라우드는 주지 않음). 다른 프로그램(Codex 등)에 넘어가지 않게 환경 변수에서 지움
@@ -353,7 +362,7 @@ const reloadAcademyInfo = () => {
 };
 
 /** 학원이 계약한 과목 (통합 클라우드의 academy.subjects, 없으면 수학만) */
-const contractSubjects = () => subjects.contractSubjects(academyInfo()?.academy?.subjects);
+const contractSubjects = () => isBatch ? subjects.SUBJECTS : subjects.contractSubjects(academyInfo()?.academy?.subjects);
 /** 이 교재의 과목을 학원이 계약했는지 — 안 했으면 보기만 (고치기·분석·문제은행·내보내기 막음) */
 const subjectOpen = (book) => contractSubjects().includes(subjects.bookSubject(book));
 const SUBJECT_CLOSED = '학원이 계약하지 않은 과목의 교재라 보기만 할 수 있어요.';
@@ -515,7 +524,7 @@ ipcMain.handle('editor:shortcut-scope', (event, scope) => {
 });
 let photoImports;
 const updateMonitor = createUpdateMonitor({
-  app, ipcMain, cloud, session, isSmokeTest,
+  app, ipcMain, cloud, session, isSmokeTest: isSmokeTest || isBatch,
   isBusy: () => fetching.size > 0 || changedPaths.size > 0 || photoImports?.size > 0,
 });
 
@@ -535,11 +544,13 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
+      backgroundThrottling: !isBatch,
+      additionalArguments: isBatch && batch ? [`--exam-ocr-threads=${batch.threads}`] : [],
       devTools,
     },
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  if (!isBatch) mainWindow.once('ready-to-show', () => mainWindow.show());
   updateMonitor.attach(mainWindow);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -565,7 +576,7 @@ function createWindow() {
   mainWindow.webContents.on('did-start-navigation', (_event, _url, inPlace, isMainFrame) => { if (isMainFrame && !inPlace) clearEditorShortcuts(); });
   mainWindow.webContents.on('render-process-gone', clearEditorShortcuts);
 
-  mainWindow.loadURL('app://bundle/index.html');
+  mainWindow.loadURL(isBatch ? 'app://bundle/exam-batch.html' : 'app://bundle/index.html');
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -1648,7 +1659,9 @@ function flushChanges() {
 // 시작
 // ---------------------------------------------------------------------------
 
-if (!session) {
+if (isBatch) {
+  runExamBatch();
+} else if (!session) {
   // 통합 클라우드에서 켜지 않음 → 통합 클라우드가 설치되어 있으면 안내 없이 넘겨서 켜 달라고 함.
   // 없거나 넘기지 못했거나 통합 클라우드가 켰는데 확인이 안 됐으면 안내 (통합 클라우드가 있으면 열어 줌)
   app.whenReady().then(() => {
@@ -1689,4 +1702,51 @@ if (!session) {
     for (const w of watchers) w.close();
     watchers = [];
   });
+}
+
+// Batch lifecycle excludes interactive startup.
+async function runExamBatch() {
+  const startedAt = new Date().toISOString();
+  let ended = false;
+  const emit = (event, done) => process.stdout.write(JSON.stringify(event) + '\n', done);
+  const fatal = (err) => {
+    if (ended) return;
+    ended = true;
+    emit({ event: 'fatal', error: String(err?.message || err).replace(/[\r\n]+/g, ' ') }, () => app.exit(2));
+  };
+  process.on('uncaughtException', fatal);
+  process.on('unhandledRejection', fatal);
+  try {
+    if (batchArgumentError) throw batchArgumentError;
+    await fsp.mkdir(batch.output, { recursive: true });
+    await fsp.access(batch.output, fs.constants.W_OK);
+    const commit = require('node:child_process').execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path.join(__dirname, '../..'), encoding: 'utf8', windowsHide: true }).trim();
+    await app.whenReady();
+    Menu.setApplicationMenu(null);
+    registerAppProtocol();
+    registerIpc();
+    ipcMain.handle('exam-batch:config', () => ({ input: batch.input }));
+    ipcMain.on('exam-batch:event', (_event, data) => {
+      if (['exam-start', 'exam-end'].includes(data?.event)) emit(data);
+    });
+    ipcMain.handle('exam-batch:finish', async (_event, queue) => {
+      try {
+        const summary = makeSummary(queue, { startedAt, version: app.getVersion(), commit });
+        for (const row of summary.exams.filter((r) => r.done)) {
+          try { await fsp.cp(bookDir(row.bookId), path.join(batch.output, 'books', row.bookId), { recursive: true }); }
+          catch (err) { row.error = err.message; summary.errors.push({ name: row.name, error: err.message }); }
+        }
+        await fsp.writeFile(path.join(batch.output, 'summary.json'), JSON.stringify(summary, null, 2) + '\n');
+        const code = summary.errors.length ? 1 : 0;
+        ended = true;
+        emit({ event: 'finished', code, exams: summary.exams.length, errors: summary.errors.length }, () => app.exit(code));
+      } catch (err) { fatal(err); }
+    });
+    ipcMain.on('exam-batch:fatal', (_event, error) => fatal(Error(error)));
+    emit({ event: 'started', startedAt, version: app.getVersion(), commit, threads: batch.threads });
+    createWindow();
+    mainWindow.webContents.on('render-process-gone', (_event, details) => fatal(Error(`renderer: ${details.reason}`)));
+    mainWindow.webContents.on('did-fail-load', (_event, code, description) => fatal(Error(`load ${code}: ${description}`)));
+    mainWindow.on('closed', () => { if (!ended) fatal(Error('Batch window closed')); });
+  } catch (err) { fatal(err); }
 }

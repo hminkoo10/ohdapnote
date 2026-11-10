@@ -5,7 +5,7 @@ import Tesseract from '../vendor/tesseract/tesseract.esm.min.js';
 const BASE = new URL('../vendor/tesseract/', import.meta.url).href;
 
 /** 동시에 돌리는 OCR 워커 수 */
-export const OCR_WORKERS = Math.max(1, Math.min(8, Math.floor((globalThis.navigator?.hardwareConcurrency || 2) / 2)));
+export const OCR_WORKERS = globalThis.examBatch?.threads || Math.max(1, Math.min(8, Math.floor((globalThis.navigator?.hardwareConcurrency || 2) / 2)));
 
 /** @type {{lang: string, promise: Promise<any>, busy: boolean, params: Record<string,string>}[]} */
 let slots = [];
