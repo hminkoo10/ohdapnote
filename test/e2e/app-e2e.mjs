@@ -237,7 +237,8 @@ try {
     await win.click('.export-btn[data-mode="problems"]');
     if (background) {
       // 옮기는 창에서 [다른 일 하면서 기다리기] → 위쪽 막대에 보이고, 끝나면 저장 창 대신 [저장하기] 알림
-      await win.click('.gem-modal .modal-footer .btn >> text=다른 일 하면서 기다리기');
+      // 짧은 가짜 응답이 창 애니메이션보다 먼저 끝나도 배경 작업 전환을 누른다.
+      await win.click('.gem-modal .modal-footer .btn >> text=다른 일 하면서 기다리기', { force: true });
       await win.waitForSelector('.job-chip', { timeout: 5000 });
       await waitToast('한글 문서가 준비됐어요', 120000);
       if (existsSync(out)) throw new Error('뒤에서 끝났는데 저장 창을 바로 띄웠습니다');

@@ -26,7 +26,7 @@ const launch = async () => {
 try {
   if (process.env.MOCKEXAM_MEASURE) {
     await launch();
-    win.on('console', (m) => { if (m.text().startsWith('MEASURE ')) console.log(m.text()); });
+    win.on('console', (m) => { if (m.text().startsWith('MEASURE ') || m.type() === 'warning') console.log(m.text()); });
     const archive = process.env.MOCKEXAM_ARCHIVE;
     const entries = readFileSync(join(archive, 'files.jsonl'), 'utf8').trim().split(/\r?\n/).flatMap((line) => { try { return [JSON.parse(line)]; } catch { return []; } });
     const sets = new Map();
@@ -41,8 +41,8 @@ try {
       const wanted = candidates.find((e) => e.file.includes(`고${1 + ([2002,2004,2006,2008,2011].indexOf(year) + ['국어','수학','영어'].indexOf(subject)) % 3}`)) || candidates[0];
       if (wanted) picked.push(wanted);
     }
-    const paths = [...new Set(picked.flatMap((e) => entries.filter((a) => a.page === e.page && a.subject === e.subject && (!/question-/i.test(a.file) || a.file === e.file) && existsSync(join(archive, a.file))).map((a) => join(archive, a.file))))];
-    paths.push(...readdirSync(process.env.MOCKEXAM_HDREAM).filter((n) => /\.pdf$/i.test(n)).map((n) => join(process.env.MOCKEXAM_HDREAM,n)));
+    const paths = [...new Set((process.env.MOCKEXAM_MEASURE_CSAT ? picked.filter((e) => e.year === 2002 && e.subject === '영어') : picked).flatMap((e) => entries.filter((a) => a.page === e.page && a.subject === e.subject && (!/question-/i.test(a.file) || a.file === e.file) && existsSync(join(archive, a.file))).map((a) => join(archive, a.file))))];
+    paths.push(...readdirSync(process.env.MOCKEXAM_HDREAM).filter((n) => /\.pdf$/i.test(n) && (!process.env.MOCKEXAM_MEASURE_CSAT || n.includes('수능') || n.includes('6월') && n.includes('국어'))).map((n) => join(process.env.MOCKEXAM_HDREAM,n)));
     const result = await win.evaluate(async (paths) => {
       const m = await import('./js/mockexam-import.js');
       const plan = await m.inspectExamFolder(paths);
@@ -50,7 +50,7 @@ try {
       const q = await m.importExamFolder(paths, { plan, onProgress: (p) => { if (p.phase === 'exam') console.log('MEASURE ' + p.name); } });
       return q.rows.map((r) => ({ name: r.name, reason: r.reason, result: r.result, error: r.error }));
     }, paths);
-    const out = join(process.env.MOCKEXAM_SHOTS, 'measurement.json');
+    const out = join(process.env.MOCKEXAM_SHOTS, process.env.MOCKEXAM_MEASURE_CSAT ? 'measurement-csat.json' : 'measurement.json');
     writeFileSync(out, JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
   } else {
@@ -62,7 +62,7 @@ try {
       await p.pdf({ path: join(input, name), printBackground: true });
     };
     await pdf('2024학년도 수능 수학 홀수형 문제지.pdf', `<header>2024학년도 대학수학능력시험 수학 영역 홀수형</header>${[1,2,3].map((n) => `<section>${n}. 가짜 문항입니다. 두 수의 합을 구하세요. [3점]<p>① 1　② 2　③ 3　④ 4　⑤ 5</p></section>`).join('')}<div style="break-before:page"><header>2024학년도 대학수학능력시험 수학 영역 (미적분) 홀수형</header>${[23,24].map((n) => `<section>${n}. 가짜 선택 문항입니다. 식의 값을 구하세요. [3점]<p>① 1　② 2　③ 3　④ 4　⑤ 5</p></section>`).join('')}</div>`);
-    await pdf('2024학년도 수능 수학 정답.pdf', '<h1>수학 영역 정답</h1><p>번호 정답 배점</p><p>1 2 3</p><p>2 3 3</p><p>3 4 3</p><h1>미적분</h1><p>번호 정답 배점</p><p>23 1 3</p><p>24 2 3</p>');
+    await pdf('2024학년도 수능 수학 정답.pdf', '<h1>수학 영역 정답 (홀수) 형</h1><p>번호 정답 배점</p><p>1 2 3</p><p>2 3 3</p><p>3 4 3</p><h1>미적분</h1><p>번호 정답 배점</p><p>23 1 3</p><p>24 2 3</p><div style="break-before:page"><h1>수학 영역 정답 (짝수) 형</h1><p>번호 정답 배점</p><p>1 5 3</p><p>2 5 3</p><p>3 5 3</p><h1>미적분</h1><p>번호 정답 배점</p><p>23 5 3</p><p>24 5 3</p></div>');
     await pdf('2024학년도 수능 수학 해설.pdf', '<header>가짜 해설입니다.</header><section>1. 두 수를 더하면 돼요. 설명을 읽고 확인하세요.</section>');
     await pdf('2023년 3월 고1 학평 수학 문제지.pdf', `<header>2023년 3월 고1 전국연합학력평가 수학</header>${[1,2,3].map((n) => `<section>${n}. 두 수의 합을 구하세요. [3점]<p>① 1　② 2　③ 3　④ 4　⑤ 5</p></section>`).join('')}`);
     await p.setContent('<style>body{font:48px monospace;line-height:2;background:white;padding:30px}</style><pre>1       2<br>2       3<br>3       4</pre>');
@@ -103,9 +103,15 @@ try {
   await win.locator('[data-bank-focus="exam"]').selectOption('csat');
   await win.waitForSelector('.bank-row');
   assert.equal(await win.locator('.bank-row').count(), 5);
-  if (shots) await win.screenshot({ path: join(shots, 'bank-filter.png') });
+  assert.match(await win.locator('.bank-list').innerText(), /2024학년도 수능 수학 미적분.*23번/);
+  if (shots) {
+    await win.screenshot({ path: join(shots, 'bank-filter.png') });
+    await win.locator('.bank-row').first().scrollIntoViewIfNeeded();
+    await win.screenshot({ path: join(shots, 'bank-items.png') });
+  }
   const answers = await win.evaluate((id) => window.ohdap.getAnswers(id), q.rows.find((r) => r.metadata.exam === 'csat').bookId);
   assert.equal(Object.keys(answers.items).length, 5);
+  assert.ok(Object.values(answers.items).every((a) => a.answer !== '5'));
   console.log('mockexam-e2e PASS');
   }
 } finally {
