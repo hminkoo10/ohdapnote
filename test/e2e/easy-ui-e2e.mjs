@@ -128,6 +128,7 @@ try {
   await capture('인식결과', '.doc-head .btn, .tabs-row .seg-tab, .cp-actions .btn, .cp-foot .btn, .preview-head .btn');
   await win.click('.seg-tab[data-tab="review"]');
   await win.waitForSelector('.page-overlay .box');
+  assert.equal(await win.locator('.page-overlay .box').first().evaluate((el) => getComputedStyle(el).borderTopStyle), 'solid', '검토 상자 테두리가 보여야 함');
   await capture('페이지검토', '.editor-toolbar .btn, .doc-head .btn');
   await win.locator('.page-overlay .box').first().click();
   const before = await win.locator('.page-overlay .box').count();
