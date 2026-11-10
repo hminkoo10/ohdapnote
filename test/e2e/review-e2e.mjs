@@ -13,7 +13,9 @@ const { PDFDocument, StandardFonts } = require('pdf-lib');
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const OUT = join(ROOT, 'test/e2e/out');
 mkdirSync(OUT, { recursive: true });
-const tmp = mkdtempSync(join(OUT, 'review-temp-'));
+const tempRoot = process.env.OHDAP_USER_DATA || OUT;
+mkdirSync(tempRoot, { recursive: true });
+const tmp = mkdtempSync(join(tempRoot, 'review-temp-'));
 const academy = join(tmp, 'academy');
 const id = 'aaaaaaaa-1234-4000-8000-000000000045';
 const dir = join(academy, 'books', id);
@@ -72,7 +74,12 @@ try {
   await win.click('.seg-tab[data-tab="bank"]');
   await win.waitForSelector('.bank-row');
   console.log('▶ 문항 개수·교재 합계·표시 없는 옛 문항·거르기');
-  assert.match(await win.locator('.bank-book').innerText(), /확인 필요 6군데/);
+  assert.match(await win.locator('.bank-book').innerText(), /확인할 곳 6군데/);
+  await win.locator('.bank-book').getByRole('button', { name: '확인할 곳 6군데' }).click();
+  assert.equal(await win.locator('[data-bank-focus="bookId"]').inputValue(), id);
+  assert.equal(await win.locator('[data-bank-focus="review"]').isChecked(), true);
+  assert.equal(await win.locator('.bank-row').count(), 1);
+  await win.locator('.bank-filters').getByRole('button', { name: '지우기', exact: true }).click();
   assert.match(await win.locator('.bank-row[data-item="problem-1"]').innerText(), /확인 필요 6군데/);
   assert.equal(await win.locator('.bank-row').count(), 2);
   await win.locator('[data-bank-focus="review"]').check();
@@ -265,6 +272,6 @@ try {
 } finally {
   if (app) await app.close().catch(() => {});
   cloud.stop();
-  assert.ok(resolve(tmp).startsWith(resolve(OUT) + sep));
+  assert.ok(resolve(tmp).startsWith(resolve(tempRoot) + sep));
   rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

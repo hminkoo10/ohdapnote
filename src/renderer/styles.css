@@ -59,7 +59,7 @@
   --primary-softer: var(--accent-softer);
   --primary-line: var(--grey200);
 
-  /* 해설(답지): 차분한 청록 */
+  /* 기존 해설 변수는 회색 체계에 연결 */
   --teal: var(--grey600);
   --teal-ink: var(--grey700);
   --teal-soft: var(--grey100);
@@ -84,7 +84,6 @@
   --sh-sm: none;
   --sh: none;
   --sh-lg: 0 12px 32px rgba(25, 31, 40, 0.18);
-  --sh-primary: none;
 
   /* 움직임 */
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -114,7 +113,7 @@ body {
   background: var(--bg);
 }
 body::before {
-  /* 위쪽에만 아주 옅은 살구빛 */
+  /* 화면 바탕 */
   content: '';
   position: fixed;
   inset: 0 0 auto 0;
@@ -154,7 +153,7 @@ textarea {
 }
 ::-webkit-scrollbar-thumb {
   background: rgba(25, 31, 40, 0.14);
-  border-radius: 10px;
+  border-radius: 8px;
   border: 3px solid transparent;
   background-clip: padding-box;
 }
@@ -338,7 +337,7 @@ textarea {
   color: var(--ok);
 }
 .btn-ok:hover:not(:disabled) {
-  background: #d6f0e3;
+  background: var(--success-soft);
   border-color: transparent;
 }
 .btn-danger {
@@ -347,7 +346,7 @@ textarea {
   color: #fff;
 }
 .btn-danger:hover:not(:disabled) {
-  background: #d63c41;
+  background: var(--danger);
   border-color: transparent;
 }
 .ripple {
@@ -385,7 +384,7 @@ textarea {
   box-shadow: none;
 }
 .input::placeholder {
-  color: #667382;
+  color: var(--grey600);
 }
 .input-small {
   height: 32px;
@@ -711,7 +710,7 @@ select.input {
   height: 38px;
   padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   font-size: 17px;
   font-weight: 700;
@@ -810,7 +809,7 @@ select.input {
   border: 2px solid var(--primary);
   border-top-color: transparent;
   border-radius: 50%;
-  animation: spin 250ms linear infinite;
+  animation: spin 900ms linear infinite;
 }
 .job-name {
   min-width: 0;
@@ -946,7 +945,7 @@ select.input {
 }
 @keyframes pop {
   40% {
-    transform: scale(1.14);
+    transform: scale(1);
   }
   100% {
     transform: scale(1);
@@ -1292,18 +1291,18 @@ select.input {
 }
 .review-ink { color: transparent; min-height: 100%; }
 .review-mark {
-  background: #fff3c6;
-  text-decoration: underline 3px #b47b00;
+  background: var(--warning-soft);
+  text-decoration: underline 3px var(--warning);
   text-underline-offset: 3px;
   border-radius: 2px;
 }
-.review-math { outline: 2px solid #b47b00; outline-offset: 1px; background: #fff3c6; }
+.review-math { outline: 2px solid var(--warning); outline-offset: 1px; background: var(--warning-soft); }
 .review-mark-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.review-mark-button { border-bottom: 3px solid #b47b00; white-space: normal; text-align: left; }
-::highlight(answer-review) { text-decoration: underline 3px #b47b00; background-color: #fff3c6; }
-.answer-review-math { outline: 2px solid #b47b00; outline-offset: 2px; background: #fff3c6; }
+.review-mark-button { border-bottom: 3px solid var(--warning); white-space: normal; text-align: left; }
+::highlight(answer-review) { text-decoration: underline 3px var(--warning); background-color: var(--warning-soft); }
+.answer-review-math { outline: 2px solid var(--warning); outline-offset: 2px; background: var(--warning-soft); }
 .answer-review .review-toolbar { position: static; }
-.bank-review-count { color: #705000; background: #fff3c6; padding: 4px 8px; border-radius: 4px; }
+.bank-review-count { color: var(--warning); background: var(--warning-soft); padding: 4px 8px; border-radius: 4px; }
 @media (max-width: 760px) {
   .review-layout { grid-template-columns: minmax(0, 1fr); }
   .review-reference { position: static; grid-row: 1; }
@@ -1365,7 +1364,7 @@ main.home {
   cursor: pointer;
   outline: none;
   animation: rise-in 250ms var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 45ms);
+  animation-delay: 0ms;
   transition:
     transform var(--mid) var(--ease),
     box-shadow var(--mid) var(--ease),
@@ -1403,7 +1402,7 @@ main.home {
   width: 48px;
   height: 48px;
   margin-bottom: 6px;
-  border-radius: 16px;
+  border-radius: 12px;
   background: var(--primary);
   color: #fff;
   box-shadow: none;
@@ -1950,7 +1949,7 @@ main.sheet {
   box-shadow: none;
   border: 1.5px solid transparent;
   animation: rise-in 250ms var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 60ms);
+  animation-delay: 0ms;
   transition:
     border-color var(--mid),
     box-shadow var(--mid);
@@ -1980,7 +1979,7 @@ main.sheet {
 .doc-row.compact .doc-icon {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: 8px;
 }
 .doc-card.drop {
   border-color: var(--primary);
@@ -2315,9 +2314,9 @@ main.sheet {
   min-height: 48px;
   max-height: 120px;
   padding: 6px 10px 6px 14px;
-  background: #fffdf8;
+  background: var(--surface);
   animation: rise-in 250ms var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 35ms);
+  animation-delay: 0ms;
 }
 .cp-pick input {
   width: 16px;
@@ -2378,7 +2377,7 @@ main.sheet {
   padding: 6px 6px 6px 4px;
   border-radius: 12px;
   animation: rise-in 250ms var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 18ms);
+  animation-delay: 0ms;
   transition: background var(--fast);
 }
 .qrow:hover {
@@ -2396,7 +2395,7 @@ main.sheet {
   height: 36px;
   padding-top: 7px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--surface-3);
   color: var(--text-2);
   cursor: pointer;
@@ -2445,7 +2444,7 @@ main.sheet {
   padding: 0 10px;
   justify-content: center;
   border: 1.5px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--surface);
   font-weight: 700;
   font-size: 13.5px;
@@ -2474,7 +2473,7 @@ main.sheet {
 }
 .chip.pop {
   animation: pop 250ms var(--ease) both;
-  animation-delay: var(--d, 0ms);
+  animation-delay: 0ms;
 }
 .chip.noans:not(.on) {
   border-style: dashed;
@@ -2505,7 +2504,7 @@ main.sheet {
   color: var(--warn-ink);
 }
 .chip.missing:hover {
-  background: #ffefcf;
+  background: var(--warning-soft);
 }
 .chip-q {
   display: inline-grid;
@@ -2557,7 +2556,7 @@ main.sheet {
   height: 32px;
   margin-top: 2px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #fff;
   color: var(--warn);
   cursor: pointer;
@@ -2614,7 +2613,7 @@ main.sheet {
   place-items: center;
   width: 50px;
   height: 50px;
-  border-radius: 16px;
+  border-radius: 12px;
   background: var(--surface-3);
   color: var(--text-3);
 }
@@ -2725,7 +2724,7 @@ main.sheet {
   color: var(--text-2);
   cursor: pointer;
   animation: rise-in 250ms var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 50ms);
+  animation-delay: 0ms;
   transition:
     background var(--mid) var(--ease),
     border-color var(--mid),
@@ -3090,7 +3089,7 @@ main.sheet {
   place-items: center;
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.7);
   flex: 0 0 auto;
 }
@@ -3102,7 +3101,7 @@ main.sheet {
   height: 16px;
 }
 .export-btn.working .xb-icon .icon {
-  animation: spin 250ms linear infinite;
+  animation: spin 900ms linear infinite;
 }
 .xb-text {
   display: grid;
@@ -3322,8 +3321,8 @@ main.sheet {
 }
 .box {
   position: absolute;
-  border: 2px solid hsl(var(--hue, 22) 78% 55% / 0.9);
-  background: hsl(var(--hue, 22) 90% 60% / 0.07);
+  border: 2px solid var(--grey700) 78% 55% / 0.9);
+  background: var(--grey700) 90% 60% / 0.07);
   border-radius: 4px;
   cursor: move;
   transition:
@@ -3332,7 +3331,7 @@ main.sheet {
 }
 .page-overlay.fresh .box {
   animation: box-in 250ms var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 30ms);
+  animation-delay: 0ms;
 }
 @keyframes box-in {
   from {
@@ -3341,22 +3340,22 @@ main.sheet {
   }
 }
 .box:hover {
-  background: hsl(var(--hue, 22) 90% 60% / 0.14);
+  background: var(--grey700) 90% 60% / 0.14);
 }
 .box.cont {
   border-style: dashed;
 }
 .box.manual {
-  border-color: hsl(172 60% 38% / 0.95);
+  border-color: var(--grey600);
 }
 .box.selected {
-  background: hsl(var(--hue, 22) 90% 60% / 0.16);
+  background: var(--grey700) 90% 60% / 0.16);
   box-shadow: none;
   z-index: 2;
 }
 .box.ghost {
   border: 2px dashed var(--primary);
-  background: rgba(240, 122, 69, 0.08);
+  background: var(--accent-softer);
   pointer-events: none;
 }
 .box-label {
@@ -3366,7 +3365,7 @@ main.sheet {
   transform: translateY(-100%);
   padding: 1px 7px;
   border-radius: 5px 5px 5px 0;
-  background: hsl(var(--hue, 22) 70% 48%);
+  background: var(--grey700) 70% 48%);
   color: #fff;
   font-size: 11.5px;
   font-weight: 700;
@@ -3374,7 +3373,7 @@ main.sheet {
   pointer-events: none;
 }
 .box.manual .box-label {
-  background: hsl(172 60% 34%);
+  background: var(--grey600);
 }
 .page-overlay.mode-draw .box {
   pointer-events: none;
@@ -3385,7 +3384,7 @@ main.sheet {
   height: 11px;
   border-radius: 3px;
   background: #fff;
-  border: 2px solid hsl(var(--hue, 22) 70% 48%);
+  border: 2px solid var(--grey700) 70% 48%);
 }
 .h-nw {
   left: -6px;
@@ -3417,7 +3416,7 @@ main.sheet {
   cursor: pointer;
   opacity: 0.6;
   animation: fade-in 250ms both;
-  animation-delay: calc(var(--i, 0) * 20ms);
+  animation-delay: 0ms;
   transition:
     opacity var(--fast),
     transform var(--fast),
@@ -3425,7 +3424,7 @@ main.sheet {
 }
 .cand:hover {
   opacity: 1;
-  background: rgba(240, 122, 69, 0.14);
+  background: var(--accent-soft);
   border-color: var(--primary);
   transform: scale(1.08);
 }
@@ -3590,7 +3589,7 @@ main.sheet {
   position: relative;
   width: 100%;
   padding: 13px 40px 13px 18px;
-  border-radius: 16px;
+  border-radius: 12px;
   background: rgba(37, 42, 50, 0.96);
   color: #fff;
   font-size: 13.5px;
@@ -3610,10 +3609,10 @@ main.sheet {
   margin-right: 8px;
   border-radius: 50%;
   vertical-align: 1px;
-  background: #46d18f;
+  background: var(--success);
 }
 .toast-error .toast-msg::before {
-  background: #ff7a72;
+  background: var(--danger);
 }
 .toast.leaving {
   animation: toast-out 240ms var(--ease-in) both;
@@ -3819,7 +3818,7 @@ main.sheet {
   gap: 10px;
   height: 38px;
   padding: 0 12px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--surface-2);
   transition: background var(--mid);
 }
@@ -3846,7 +3845,7 @@ main.sheet {
   background: none;
   width: 14px;
   height: 14px;
-  animation: spin 250ms linear infinite;
+  animation: spin 900ms linear infinite;
 }
 .gem-row[data-state='ok'] .gem-dot {
   background: var(--ok);
@@ -3916,7 +3915,7 @@ main.sheet {
 [data-motion='reduce'] *::before,
 [data-motion='reduce'] *::after {
   animation-duration: 1ms !important;
-  animation-delay: 0ms !important;
+  animation-delay: 0ms;
   animation-iteration-count: 1 !important;
   transition-duration: 1ms !important;
 }
@@ -4147,8 +4146,8 @@ main.sheet {
   white-space: nowrap;
 }
 .subject-badge[data-subject='english'] {
-  background: #eaf0ff;
-  color: #3d55c4;
+  background: var(--grey100);
+  color: var(--grey700);
 }
 .subject-badge[data-subject='korean'] {
   background: var(--teal-soft);
@@ -4229,7 +4228,7 @@ main.sheet {
 .hero-text p, .cn-sub, .nc-student, .nc-date, .bc-date, .home-foot,
 .settings .muted, .export-hint, .empty-hint, .preview-empty,
 .doc-file.muted, .tabs-row > .muted {
-  color: #667382;
+  color: var(--grey600);
 }
 /* 글자 단추가 좁은 창에서도 서로 겹치지 않게 줄바꿈 */
 .tabs-row, .doc-head, .preview-head, .convert-row .seg {
@@ -4265,3 +4264,16 @@ main.sheet {
 .bank-steps { gap: 16px; margin-top: 8px; }
 .bank-steps strong { font-weight: 600; font-size: 13px; }
 .bank-steps p { margin: 4px 0 0; }
+
+.badge, .sum-chip, .sum-chip.warn, .seg-count, .seg-tab.active .seg-count,
+.seg-count.warn, .seg-tab.active .seg-count.warn, .gem-path, .gem-path[data-path], .page-flags {
+  background: transparent; color: var(--text-2); font-weight: 400; border-radius: 4px;
+}
+.sum-chip.warn, .seg-count.warn, .seg-tab.active .seg-count.warn { color: var(--warning); }
+.job-chip, .check-panel { background: var(--surface); border-color: var(--line-2); color: var(--text-2); }
+.export-btn { background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; color: var(--text); }
+.export-btn:hover:not(:disabled) { background: var(--grey50); }
+.export-btn:first-child { background: var(--accent); color: white; border-color: var(--accent); }
+.export-btn:first-child:hover:not(:disabled) { background: var(--accent-hover); filter: none; }
+.doc-icon, .set-card h4 > .icon, .ripple { display: none; }
+.bank-row:hover, .bank-row.active { background: var(--grey50); }
