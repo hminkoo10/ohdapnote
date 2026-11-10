@@ -444,6 +444,12 @@ function renderNode(node, style = {}) {
     }
     case 'accent': {
       const under = node.kind === 'under';
+      // Cambria Math의 선 굵기·간격에 맞추되 대체 글꼴의 장식 문자 폭에는 의존하지 않습니다.
+      // em 단위라 분수·첨자에서도 본체와 함께 줄어듭니다.
+      if (node.kind === 'bar' || under) {
+        const edge = under ? 'bottom' : 'top';
+        return tag('mrow', draw(node.body), ` style="border-${edge}:0.065em solid currentColor;padding-${edge}:0.17em"`);
+      }
       return tag(under ? 'munder' : 'mover', draw(node.body) + tag('mo', escapeXML(ACCENTS[node.kind]), ' stretchy="true"'), ` ${under ? 'accentunder' : 'accent'}="true"`);
     }
     case 'negation': {

@@ -157,15 +157,33 @@ test('hwpeqview: 행렬·쌓기·정렬·빈 칸·중첩 행렬', () => {
 });
 
 test('hwpeqview: 장식 전체·부정·관계', () => {
-  for (const name of ['hat', 'check', 'tilde', 'acute', 'grave', 'dot', 'ddot', 'bar', 'vec', 'dyad', 'arch']) {
+  for (const name of ['hat', 'check', 'tilde', 'acute', 'grave', 'dot', 'ddot', 'vec', 'dyad', 'arch']) {
     assert.match(eqToMathML(`${name} {AB}`), /<mover accent="true">/);
     mathTree(`${name} {AB}`);
   }
-  assert.match(eqToMathML('under {AB}'), /<munder accentunder="true">/);
+  assert.match(eqToMathML('under {AB}'), /border-bottom:0\.065em solid currentColor;padding-bottom:0\.17em/);
   assert.match(eqToMathML('not ='), /<mo>≠<\/mo>/);
   assert.match(eqToMathML('not {in}'), /<mo>∉<\/mo>/);
   assert.match(eqToMathML('not x'), /x̸/);
   assert.doesNotThrow(() => eqToMathML('not constructor'));
+});
+
+test('hwpeqview: 윗줄·밑줄은 본체 폭과 글자 크기를 따르고 중첩 구조를 보존', () => {
+  for (const [kind, edge] of [['bar', 'top'], ['under', 'bottom']]) {
+    for (const body of ['A', '{AB}', 'x', '{z_1}', '{vec {AB}}']) {
+      const xml = eqToMathML(`${kind} ${body}`, { sourceMap: true });
+      assert.ok(xml.includes(`style="border-${edge}:0.065em solid currentColor;padding-${edge}:0.17em"`));
+      assert.doesNotMatch(xml, /[¯‾_]/);
+      assert.match(xml, /data-eq-start=/);
+      mathTree(`${kind} ${body}`);
+    }
+  }
+  for (const script of ['{bar {AB}} over {2}', 'bar {x}^2', 'x^{bar {AB}}', 'sqrt {bar {AB}}', 'bar {bar x}']) {
+    mathTree(script);
+    assert.doesNotMatch(eqToMathML(script), /<mo stretchy="true">¯/);
+  }
+  assert.equal(all(mathTree('bar {z_1}'), 'msub').length, 1);
+  assert.equal(all(mathTree('bar {AB} = vec {AB}'), 'mover').length, 1);
 });
 
 test('hwpeqview: 그리스 문자 전체·대소문자와 화살표 예외', () => {

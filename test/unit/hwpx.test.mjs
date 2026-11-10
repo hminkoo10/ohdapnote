@@ -4,6 +4,20 @@ import zlib from 'node:zlib';
 import { buildHwpx, splitMath, crc32, stripStemLabel } from '../../src/renderer/js/hwpx.js';
 import { convertLatex } from '../../src/renderer/js/hwpeq.js';
 import { makeBlocks } from '../../src/renderer/js/exporter.js';
+import { eqToMathML } from '../../src/renderer/js/hwpeqview.js';
+
+test('윗줄 미리보기 변경과 무관하게 HWPX 스크립트 원문 보존', async () => {
+  const scripts = ['bar A', 'bar {AB}', 'bar x', 'bar {z_1}', 'bar {AB} = vec {AB}', '{bar {AB}} over {2}', 'bar {x}^2', 'hat {x} + bar {x} + vec {a}', 'sqrt {bar {AB}}', '{a} over {b} + bar {AB}', ' under {AB} ', 'x^{bar {AB}}'];
+  const exportScripts = async () => {
+    const bytes = await buildHwpx({ blocks: [{ kind: 'answer', bookId: 'book-1', answerBlocks: scripts.map(eq => ({ type: 'math', eq })) }] });
+    const xml = unzip(bytes).find(e => e.name === 'Contents/section0.xml').data.toString();
+    return [...xml.matchAll(/<hp:script>([^]*?)<\/hp:script>/g)].map(m => unescape(m[1]));
+  };
+  const before = await exportScripts();
+  scripts.forEach(eq => eqToMathML(eq, { sourceMap: true }));
+  assert.deepEqual(await exportScripts(), before);
+  assert.deepEqual(before, scripts);
+});
 
 test('사람 해설: 글·수식 순서, 수식 스크립트 원문, 책 그림을 그대로 넣음', async () => {
   const eq = ' {a} over {b} + LEFT ( x RIGHT ) ';
