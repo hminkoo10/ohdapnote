@@ -148,9 +148,11 @@ try {
   assert.ok(await win.isDisabled(`.bank-row[data-book="${ids.korean}"] input`));
   assert.ok(await win.$(`.bank-book[data-book="${ids.english}"] button`));
   assert.ok(await win.$('.bank-intro'));
+  assert.equal(await win.getByRole('button', { name: '사용 순서', exact: true }).isVisible(), false);
   assert.equal(await win.locator('.bank-steps p:empty').count(), 0);
   await win.locator('.bank-intro').getByRole('button', { name: '닫기', exact: true }).click();
   assert.equal(await win.locator('.bank-intro').count(), 0);
+  assert.equal(await win.getByRole('button', { name: '사용 순서', exact: true }).isVisible(), true);
   await win.getByRole('button', { name: '사용 순서', exact: true }).click();
   assert.ok(await win.$('.bank-intro'));
   assert.equal(await win.locator('.bank-steps p:empty').count(), 0);

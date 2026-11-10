@@ -108,6 +108,7 @@ export function bankView(summaries) {
 function renderBank(root, summaries, books, entries, failed) {
   clear(root);
   const intro = h('div');
+  const introButton = h('button.btn.btn-ghost.btn-small', { hidden: bs.intro, onclick: () => { bs.intro = true; writeLocal('ohdap.bankIntro', false); renderIntro(); } }, '사용 순서');
   const intake = h('details.bank-intake', { open: bs.intake, ontoggle: (e) => { bs.intake = e.target.open; } }, h('summary', icon('bookPlus'), '교재 넣기', null));
   const bookList = h('div.bank-books');
   intake.append(bookList);
@@ -134,6 +135,7 @@ function renderBank(root, summaries, books, entries, failed) {
   };
 
   function renderIntro() {
+    introButton.hidden = bs.intro;
     clear(intro);
     if (!bs.intro) return;
     intro.append(h('section.bank-intro',
@@ -165,7 +167,7 @@ function renderBank(root, summaries, books, entries, failed) {
       else if (!s.problemAnalyzed && !total) card.append(h('p.small.muted', '책 분석이 필요해요'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
       else if (!book) card.append(h('p.small.warn-text', '교재를 읽지 못했어요. 책장에서 확인하세요.'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
       else if (total && n === total) card.append(h('p.small.bank-complete', `${total}문항 다 넣었어요`));
-      else card.append(h('p.small.muted', `${total}문항 중 ${n}문항 넣었어요`), h('button.btn.btn-primary', { onclick: () => attempt(() => putBank(book, { onChange: changed })) }, n || bankTargets(book).some((b) => bestTranscript(book.id, { ...b, src: { files: book.docs.problem.files } })) ? '이어서 넣기' : '문제은행에 넣기'));
+      else card.append(h('p.small.muted', n ? `${total}문항 중 ${n}문항 넣었어요` : `${total}문항 · 아직 안 넣었어요`), h('button.btn.btn-primary', { onclick: () => attempt(() => putBank(book, { onChange: changed })) }, n || bankTargets(book).some((b) => bestTranscript(book.id, { ...b, src: { files: book.docs.problem.files } })) ? '이어서 넣기' : '문제은행에 넣기'));
       if (low) card.append(h('button.btn.btn-ghost.btn-small.bank-review-count', { onclick: () => {
         bs.filters.bookId = s.id; bs.filters.review = true; bs.limit = 200; bs.scroll = 0;
         filters.querySelector('[data-bank-focus="bookId"]').value = s.id;
@@ -305,7 +307,7 @@ function renderBank(root, summaries, books, entries, failed) {
 
   refreshJobs = renderBooks;
   refresh = () => { renderBooks(); renderList(); renderPreview(); renderBasket(); };
-  root.append(h('div.bank-heading', h('h2', '찾아서 시험지로'), h('button.btn.btn-ghost.btn-small', { onclick: () => { bs.intro = true; writeLocal('ohdap.bankIntro', false); renderIntro(); } }, '사용 순서')),
+  root.append(h('div.bank-heading', h('h2', '찾아서 시험지로'), introButton),
     intro, intake, ...failed.map((s) => h('p.warn-text', s)),
     h('div.bank-columns', h('section.bank-main', filters, h('div.bank-heading', h('h3', '문항 목록'), count), list), h('aside.bank-side', preview, basket)));
   renderIntro();
