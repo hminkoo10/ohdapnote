@@ -59,3 +59,10 @@ test('선택 표시·검색·다른 선택 정답 자동 연결 금지', () => {
   assert.equal(matchItems([item],[{...item,id:'a',examSection:{...item.examSection,selection:'기하'}}]).size,0);
   assert.equal(matchItems([item],[{id:'legacy',num:23}]).size,0);
 });
+
+ test('최근 학평의 단답형 구간 중복·쪽 번호는 실제 번호 축으로 제한', () => {
+  const p=page(0,'가짜 학평',[1,2,3,4,5]);
+  const anchors=new Map([[0,[{num:1,col:0,y0:.2},{num:31,col:0,y0:.5}]]]);
+  stabilizeLegacyExamPages([p],anchors,'math',{exam:'edu',year:2025});
+  assert.deepEqual(anchors.get(0).map(c=>c.num),[1,2,3,4,5]);
+});

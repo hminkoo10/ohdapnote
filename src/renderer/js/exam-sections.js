@@ -1,6 +1,6 @@
 // 시험지에서 명시한 머리글만 사용한다. 쪽 수로 선택/홀짝을 추정하지 않는다.
 export function stabilizeLegacyExamPages(pages, anchors, subject, exam) {
-  if (exam?.exam !== 'edu' || exam.year < 2002 || exam.year > 2021) return null;
+  if (exam?.exam !== 'edu' || exam.year < 2002 || exam.year > 2026) return null;
   const hi = subject === 'math' ? 30 : subject === 'english' ? 50 : 60;
   const candidates = new Map();
   const axisGroups = [];
