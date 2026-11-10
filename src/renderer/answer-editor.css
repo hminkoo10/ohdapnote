@@ -50,10 +50,9 @@
   background: var(--grey100);
   outline: 1px dashed var(--grey200);
 }
-.answer-equation-preview.eq-has-warning {
-  border-color: var(--grey600);
-}
-.answer-equation-modal .warn-text {
+.answer-equation-modal .eq-notice {
+  color: var(--text-3);
+  font-weight: 400;
   min-height: 18px;
   margin: 4px 0 8px;
 }
