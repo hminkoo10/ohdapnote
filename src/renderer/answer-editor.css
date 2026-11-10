@@ -2,24 +2,24 @@
 .answer-heading { margin: 12px 0; }
 .answer-heading label { display: flex; align-items: center; gap: 10px; font-weight: 600; }
 .answer-input { width: 200px; max-width: 100%; }
-.answer-status { margin-left: auto; color: #627469; font-size: 12px; }
+.answer-status { margin-left: auto; color: var(--grey700); font-size: 12px; }
 .answer-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr); gap: 16px; }
 .answer-writing, .answer-reference { min-width: 0; }
 .answer-toolbar { padding-bottom: 10px; }
-.answer-document { min-height: 260px; background: #fff; color: #202b32; border: 1px solid #ccd4dc; border-radius: 8px; padding: 18px; font-size: 16px; line-height: 1.9; overflow-wrap: anywhere; white-space: pre-wrap; outline: none; }
-.answer-document:focus { border-color: #397e9a; box-shadow: 0 0 0 2px #397e9a20; }
+.answer-document { min-height: 260px; background: #fff; color: var(--grey700); border: 1px solid var(--grey200); border-radius: 8px; padding: 18px; font-size: 16px; line-height: 1.9; overflow-wrap: anywhere; white-space: pre-wrap; outline: none; }
+.answer-document:focus { border-color: var(--accent); box-shadow: none; }
 .answer-document p { min-height: 1.9em; margin: 0 0 8px; }
-.answer-document > p:only-child:has(> br:only-child)::before { content: attr(data-placeholder); color: #8c939a; pointer-events: none; }
-.answer-document:has(> p:only-child > br:only-child)::before { content: attr(data-placeholder); color: #8c939a; float: left; pointer-events: none; }
+.answer-document > p:only-child:has(> br:only-child)::before { content: attr(data-placeholder); color: var(--grey700); pointer-events: none; }
+.answer-document:has(> p:only-child > br:only-child)::before { content: attr(data-placeholder); color: var(--grey700); float: left; pointer-events: none; }
 .answer-math { display: inline-block; cursor: pointer; padding: 2px 4px; border-radius: 4px; vertical-align: middle; white-space: normal; }
-.answer-math:hover, .answer-math:focus { background: #eaf2fa; outline: 1px solid #a2bfd8; }
+.answer-math:hover, .answer-math:focus { background: var(--grey100); outline: 1px solid var(--grey200); }
 .answer-display { display: block; text-align: center; margin: 12px 0; }
 .answer-figure { margin: 12px 0; cursor: move; }
-.answer-figure:focus { outline: 2px solid #397e9a; }
+.answer-figure:focus { outline: 2px solid var(--accent); }
 .answer-figure img, .answer-reference img { max-width: 100%; height: auto; }
-.answer-reference { background: #f5f7fa; border-radius: 8px; padding: 12px; overflow: auto; }
+.answer-reference { background: var(--grey100); border-radius: 8px; padding: 12px; overflow: auto; }
 .answer-reference h4 { margin-top: 0; }
-.answer-equation-preview { min-height: 90px; padding: 18px; background: #f5f7fa; border: 1px solid #d9e1e8; border-radius: 8px; overflow: auto; margin: 8px 0; font-size: 24px; }
+.answer-equation-preview { min-height: 90px; padding: 18px; background: var(--grey100); border: 1px solid var(--grey200); border-radius: 8px; overflow: auto; margin: 8px 0; font-size: 24px; }
 .answer-equation-script { width: 100%; font-family: monospace; margin: 8px 0; }
 .answer-readonly { min-height: 0; border: 0; padding: 8px 0; }
 .answer-readonly .answer-math { cursor: default; }
@@ -33,7 +33,7 @@
 }
 .eq-guide {
   margin: 0 0 12px;
-  color: #405a68;
+  color: var(--grey700);
   line-height: 1.6;
 }
 .answer-equation-modal .answer-equation-preview {
@@ -43,15 +43,15 @@
   background: #fff;
 }
 .answer-equation-preview [data-eq-start]:hover {
-  background: #e3eff7;
+  background: var(--grey100);
   cursor: text;
 }
 [data-eq-empty] {
-  background: #e3edf5;
-  outline: 1px dashed #91a9bb;
+  background: var(--grey100);
+  outline: 1px dashed var(--grey200);
 }
 .answer-equation-preview.eq-has-warning {
-  border-color: #ba8b3b;
+  border-color: var(--warning);
 }
 .answer-equation-modal .warn-text {
   min-height: 18px;
@@ -64,7 +64,7 @@
   align-items: center;
 }
 .eq-toolbar {
-  border-block: 1px solid #d9e1e8;
+  border-block: 1px solid var(--grey200);
   padding: 10px 0;
 }
 .eq-extra-tools {
@@ -80,8 +80,8 @@
 .eq-picker {
   padding: 12px;
   margin: 8px 0;
-  background: #f3f7fa;
-  border: 1px solid #cbd9e4;
+  background: var(--grey100);
+  border: 1px solid var(--grey200);
   border-radius: 8px;
   max-height: 240px;
   overflow: auto;
@@ -135,7 +135,7 @@
 }
 .eq-help-table th, .eq-help-table td {
   padding: 8px;
-  border-bottom: 1px solid #d9e1e8;
+  border-bottom: 1px solid var(--grey200);
   text-align: left;
 }
 .eq-help-table td:nth-child(2) {

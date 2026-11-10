@@ -7,12 +7,12 @@ import { SUBJECTS, subjectOf, subjectName, contractedSubjects } from './subjects
 import { bankView, rememberBankView } from './bankview.js';
 
 const SPINES = [
-  'linear-gradient(180deg, #ffb27d, #f0743e)',
-  'linear-gradient(180deg, #7fd6c8, #2a9d8f)',
-  'linear-gradient(180deg, #ffa3a3, #e06767)',
-  'linear-gradient(180deg, #a9b8ff, #6878e0)',
-  'linear-gradient(180deg, #ffd27f, #eba13a)',
-  'linear-gradient(180deg, #c3a6ff, #8f6be0)',
+  'var(--grey300)',
+  'var(--grey300)',
+  'var(--grey300)',
+  'var(--grey300)',
+  'var(--grey300)',
+  'var(--grey300)',
 ];
 export function spineFor(id) {
   let hsh = 0;

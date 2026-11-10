@@ -58,8 +58,6 @@
   --primary-soft: var(--accent-soft);
   --primary-softer: var(--accent-softer);
   --primary-line: var(--grey200);
-  --grad-primary: linear-gradient(135deg, #f78c55 0%, #ec6d36 100%);
-  --grad-wash: linear-gradient(180deg, #fde9dc 0%, rgba(253, 233, 220, 0) 100%);
 
   /* 해설(답지): 차분한 청록 */
   --teal: var(--grey600);
@@ -76,26 +74,25 @@
   --ok: var(--success);
   --ok-soft: var(--success-soft);
 
-  --r-xs: 8px;
-  --r-sm: 10px;
-  --r: 14px;
-  --r-lg: 20px;
-  --r-xl: 26px;
+  --r-xs: 4px;
+  --r-sm: 8px;
+  --r: 12px;
+  --r-lg: 12px;
+  --r-xl: 12px;
 
-  --sh-xs: 0 1px 2px rgba(25, 31, 40, 0.05);
-  --sh-sm: 0 1px 2px rgba(25, 31, 40, 0.04), 0 2px 8px rgba(25, 31, 40, 0.04);
-  --sh: 0 2px 4px rgba(25, 31, 40, 0.03), 0 10px 28px -8px rgba(25, 31, 40, 0.1);
-  --sh-lg: 0 24px 60px -20px rgba(25, 31, 40, 0.28), 0 6px 16px -8px rgba(25, 31, 40, 0.12);
-  --sh-primary: 0 8px 20px -8px rgba(236, 109, 54, 0.55);
+  --sh-xs: none;
+  --sh-sm: none;
+  --sh: none;
+  --sh-lg: 0 12px 32px rgba(25, 31, 40, 0.18);
+  --sh-primary: none;
 
   /* 움직임 */
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
-  --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
-  --fast: 140ms;
-  --mid: 260ms;
-  --slow: 480ms;
+  --fast: 150ms;
+  --mid: 200ms;
+  --slow: 250ms;
 
   font-family: 'Pretendard Variable', Pretendard, 'Malgun Gothic', 'Apple SD Gothic Neo', system-ui, sans-serif;
   font-size: 14px;
@@ -122,7 +119,7 @@ body::before {
   position: fixed;
   inset: 0 0 auto 0;
   height: 340px;
-  background: var(--grad-wash);
+  background: var(--bg);
   pointer-events: none;
   z-index: 0;
 }
@@ -147,7 +144,7 @@ textarea {
   padding: 22px 26px;
   background: var(--surface);
   border-radius: var(--r-lg);
-  box-shadow: var(--sh);
+  box-shadow: none;
   font-weight: 600;
 }
 
@@ -284,15 +281,15 @@ textarea {
 }
 .btn-primary {
   border-color: transparent;
-  background: var(--grad-primary);
+  background: var(--primary);
   color: #fff;
-  box-shadow: var(--sh-primary);
+  box-shadow: none;
 }
 .btn-primary:hover:not(:disabled) {
-  background: var(--grad-primary);
+  background: var(--primary);
   border-color: transparent;
   filter: brightness(1.04) saturate(1.05);
-  box-shadow: 0 10px 24px -8px rgba(236, 109, 54, 0.65);
+  box-shadow: none;
 }
 .btn-ghost {
   border-color: transparent;
@@ -360,14 +357,9 @@ textarea {
   opacity: 0.14;
   transform: scale(0);
   pointer-events: none;
-  animation: ripple 560ms var(--ease-out) forwards;
+  animation: none;
 }
-@keyframes ripple {
-  to {
-    transform: scale(1);
-    opacity: 0;
-  }
-}
+
 
 /* ==========================================================================
    입력
@@ -390,7 +382,7 @@ textarea {
 }
 .input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 4px rgba(240, 122, 69, 0.14);
+  box-shadow: none;
 }
 .input::placeholder {
   color: #667382;
@@ -464,8 +456,8 @@ select.input {
   height: 16px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  transition: transform var(--mid) var(--spring);
+  box-shadow: none;
+  transition: transform var(--mid) var(--ease);
 }
 .switch input:checked + .sw {
   background: var(--primary);
@@ -512,7 +504,7 @@ select.input {
 .seg input:checked + span {
   background: var(--surface);
   color: var(--text);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
 }
 
 /* 미끄러지는 표시가 있는 큰 탭 */
@@ -531,10 +523,10 @@ select.input {
   width: 0;
   border-radius: 11px;
   background: var(--surface);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
   transition:
-    transform 420ms var(--ease-out),
-    width 420ms var(--ease-out);
+    transform 250ms var(--ease-out),
+    width 250ms var(--ease-out);
 }
 .seg-tab {
   position: relative;
@@ -568,11 +560,11 @@ select.input {
   min-width: 22px;
   height: 20px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: 4px;
   background: rgba(25, 31, 40, 0.07);
   color: var(--text-3);
   font-size: 11.5px;
-  font-weight: 750;
+  font-weight: 700;
   display: inline-grid;
   place-items: center;
   transition:
@@ -626,7 +618,7 @@ select.input {
 .seg-toggle button.active {
   background: var(--surface);
   color: var(--primary-ink);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
 }
 .mini-seg button.active.teal,
 .seg-toggle button.active.teal {
@@ -634,7 +626,7 @@ select.input {
 }
 .mini-count {
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 700;
   color: var(--text-3);
 }
 
@@ -644,7 +636,7 @@ select.input {
   gap: 6px;
   height: 30px;
   padding: 0 12px;
-  border-radius: 999px;
+  border-radius: 4px;
   background: var(--primary-soft);
   color: var(--primary-ink);
   font-weight: 650;
@@ -684,11 +676,11 @@ select.input {
   height: 30px;
   border-radius: 9px;
   background: #fff url("logo.png") center/cover no-repeat;
-  box-shadow: var(--sh-sm), 0 0 0 1px rgba(25, 31, 40, 0.06);
+  box-shadow: none;
 }
 .brand-name {
   font-size: 17px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.03em;
 }
 .topbar-crumb {
@@ -722,7 +714,7 @@ select.input {
   border-radius: 10px;
   background: transparent;
   font-size: 17px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: -0.025em;
   outline: none;
   transition:
@@ -736,7 +728,7 @@ select.input {
 .title-input:focus {
   background: var(--surface);
   border-color: var(--primary);
-  box-shadow: 0 0 0 4px rgba(240, 122, 69, 0.14);
+  box-shadow: none;
 }
 .student-chip {
   display: inline-flex;
@@ -744,7 +736,7 @@ select.input {
   gap: 4px;
   height: 32px;
   padding: 0 12px 0 10px;
-  border-radius: 999px;
+  border-radius: 4px;
   background: var(--surface);
   border: 1px solid var(--line);
   color: var(--text-3);
@@ -760,7 +752,7 @@ select.input {
 .student-chip:focus-visible {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 4px rgba(240, 122, 69, 0.12);
+  box-shadow: none;
 }
 .student-chip:disabled {
   cursor: default;
@@ -796,20 +788,20 @@ select.input {
   max-width: 260px;
   padding: 0 12px 0 10px;
   border: 1px solid var(--primary-line);
-  border-radius: 999px;
+  border-radius: 4px;
   background: var(--primary-soft);
   color: var(--primary-ink);
   font-weight: 650;
   font-size: 12.5px;
   cursor: pointer;
-  animation: rise-in 260ms var(--ease-out) both;
+  animation: rise-in 250ms var(--ease-out) both;
   transition:
     border-color var(--fast),
     box-shadow var(--mid) var(--ease);
 }
 .job-chip:hover {
   border-color: var(--primary);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
 }
 .job-spin {
   flex: 0 0 auto;
@@ -818,7 +810,7 @@ select.input {
   border: 2px solid var(--primary);
   border-top-color: transparent;
   border-radius: 50%;
-  animation: spin 700ms linear infinite;
+  animation: spin 250ms linear infinite;
 }
 .job-name {
   min-width: 0;
@@ -880,16 +872,16 @@ select.input {
   animation: slide-out-right 200ms var(--ease-in) both;
 }
 .enter-right {
-  animation: slide-in-right 380ms var(--ease-out) both;
+  animation: slide-in-right 250ms var(--ease-out) both;
 }
 .enter-left {
-  animation: slide-in-left 380ms var(--ease-out) both;
+  animation: slide-in-left 250ms var(--ease-out) both;
 }
 .swap-in {
-  animation: rise-in 360ms var(--ease-out) both;
+  animation: rise-in 250ms var(--ease-out) both;
 }
 .leave-collapse {
-  animation: collapse-out 260ms var(--ease) both;
+  animation: collapse-out 250ms var(--ease) both;
   overflow: hidden;
 }
 .leave-pop {
@@ -960,24 +952,13 @@ select.input {
     transform: scale(1);
   }
 }
-@keyframes shimmer {
-  to {
-    background-position: -200% 0;
-  }
-}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
   }
 }
-@keyframes pulse-ring {
-  0% {
-    box-shadow: 0 0 0 0 rgba(227, 154, 45, 0.45);
-  }
-  100% {
-    box-shadow: 0 0 0 9px rgba(227, 154, 45, 0);
-  }
-}
+
 
 /* ==========================================================================
    첫 화면
@@ -1354,7 +1335,7 @@ main.home {
 .hero-text h1 {
   margin: 0 0 8px;
   font-size: 30px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.04em;
 }
 .hero-text p {
@@ -1379,11 +1360,11 @@ main.home {
   border: 1px solid transparent;
   border-radius: var(--r-lg);
   background: var(--surface);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
   text-align: left;
   cursor: pointer;
   outline: none;
-  animation: rise-in 520ms var(--ease-out) both;
+  animation: rise-in 250ms var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 45ms);
   transition:
     transform var(--mid) var(--ease),
@@ -1392,7 +1373,7 @@ main.home {
 }
 .card:hover {
   transform: translateY(-3px);
-  box-shadow: var(--sh);
+  box-shadow: none;
 }
 .card:active {
   transform: translateY(-1px) scale(0.985);
@@ -1423,10 +1404,10 @@ main.home {
   height: 48px;
   margin-bottom: 6px;
   border-radius: 16px;
-  background: var(--grad-primary);
+  background: var(--primary);
   color: #fff;
-  box-shadow: var(--sh-primary);
-  transition: transform var(--slow) var(--spring);
+  box-shadow: none;
+  transition: transform var(--slow) var(--ease);
 }
 .card-new:hover .new-plus {
   transform: translateY(-2px) scale(1.07);
@@ -1437,7 +1418,7 @@ main.home {
 }
 .cn-title {
   font-size: 16px;
-  font-weight: 750;
+  font-weight: 700;
 }
 .cn-sub {
   font-size: 13px;
@@ -1484,7 +1465,7 @@ main.home {
   background: var(--primary-soft);
   color: var(--primary-ink);
   font-size: 17px;
-  font-weight: 800;
+  font-weight: 700;
   flex: 0 0 auto;
 }
 .nc-who {
@@ -1492,7 +1473,7 @@ main.home {
 }
 .nc-title {
   font-size: 16px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: -0.025em;
   white-space: nowrap;
   overflow: hidden;
@@ -1545,7 +1526,7 @@ main.home {
 }
 .nc-count strong {
   font-size: 22px;
-  font-weight: 800;
+  font-weight: 700;
   color: var(--text);
   margin-right: 3px;
   font-variant-numeric: tabular-nums;
@@ -1578,7 +1559,7 @@ main.home {
 }
 .bc-title {
   font-size: 17px;
-  font-weight: 780;
+  font-weight: 700;
   letter-spacing: -0.03em;
   padding-right: 60px;
 }
@@ -1625,7 +1606,7 @@ main.home {
 }
 .stat b {
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
 }
 .stat.teal {
   background: var(--teal-soft);
@@ -1679,7 +1660,7 @@ main.home {
   height: 24px;
   margin-top: -6px;
   padding: 0 9px;
-  border-radius: 999px;
+  border-radius: 4px;
   background: var(--teal-soft);
   color: var(--teal-ink);
   font-size: 12px;
@@ -1786,7 +1767,7 @@ textarea.input {
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
   background: var(--surface);
-  box-shadow: var(--sh-lg);
+  box-shadow: none;
 }
 .student-results[hidden],
 .student-picked[hidden] {
@@ -1894,7 +1875,7 @@ textarea.input {
     background var(--mid) var(--ease),
     border-color var(--mid),
     color var(--mid),
-    transform var(--mid) var(--spring);
+    transform var(--mid) var(--ease);
 }
 .bo-check .icon {
   width: 14px;
@@ -1966,9 +1947,9 @@ main.sheet {
   padding: 16px 18px;
   border-radius: var(--r-lg);
   background: var(--surface);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
   border: 1.5px solid transparent;
-  animation: rise-in 460ms var(--ease-out) both;
+  animation: rise-in 250ms var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 60ms);
   transition:
     border-color var(--mid),
@@ -2003,7 +1984,7 @@ main.sheet {
 }
 .doc-card.drop {
   border-color: var(--primary);
-  box-shadow: 0 0 0 6px rgba(240, 122, 69, 0.12);
+  box-shadow: none;
 }
 .doc-head {
   display: flex;
@@ -2031,7 +2012,7 @@ main.sheet {
 }
 .doc-title {
   font-size: 15px;
-  font-weight: 780;
+  font-weight: 700;
 }
 .doc-file {
   font-size: 12.5px;
@@ -2071,9 +2052,9 @@ main.sheet {
   border-radius: 14px;
   background: var(--surface);
   color: var(--primary);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
   margin-bottom: 4px;
-  transition: transform var(--mid) var(--spring);
+  transition: transform var(--mid) var(--ease);
 }
 .drop-zone:hover .dz-icon {
   transform: translateY(-3px);
@@ -2137,7 +2118,7 @@ main.sheet {
 .sum-main b {
   font-size: 17px;
   color: var(--text);
-  font-weight: 800;
+  font-weight: 700;
 }
 .sum-main .icon {
   width: 16px;
@@ -2187,17 +2168,10 @@ main.sheet {
   height: 100%;
   width: 0;
   border-radius: 999px;
-  background: var(--grad-primary);
-  transition: width 400ms var(--ease);
+  background: var(--primary);
+  transition: width 250ms var(--ease);
 }
-.progress-bar::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s linear infinite;
-}
+
 .progress-label {
   margin-top: 6px;
   color: var(--text-2);
@@ -2224,12 +2198,12 @@ main.sheet {
   justify-content: center;
   text-align: center;
   padding: 50px 20px;
-  animation: rise-in 500ms var(--ease-out) both;
+  animation: rise-in 250ms var(--ease-out) both;
 }
 .empty-state h3 {
   margin: 14px 0 6px;
   font-size: 19px;
-  font-weight: 780;
+  font-weight: 700;
   letter-spacing: -0.03em;
 }
 .empty-state p {
@@ -2271,7 +2245,7 @@ main.sheet {
   padding: 16px;
   border-radius: var(--r-lg);
   background: var(--surface);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
   overflow: auto;
 }
 .result-side,
@@ -2296,7 +2270,7 @@ main.sheet {
   background: var(--ok-soft);
   color: var(--ok);
   font-weight: 650;
-  animation: rise-in 400ms var(--ease-out) both;
+  animation: rise-in 250ms var(--ease-out) both;
 }
 
 .check-panel {
@@ -2305,7 +2279,7 @@ main.sheet {
   background: var(--warn-soft);
   border: 1px solid var(--warn-line);
   overflow: hidden;
-  animation: rise-in 420ms var(--ease-out) both;
+  animation: rise-in 250ms var(--ease-out) both;
 }
 .cp-head {
   display: flex;
@@ -2321,7 +2295,7 @@ main.sheet {
   border-radius: 11px;
   background: #fff;
   color: var(--warn);
-  animation: pulse-ring 1.8s ease-out infinite;
+  animation: none;
 }
 .cp-icon .icon {
   width: 17px;
@@ -2342,7 +2316,7 @@ main.sheet {
   max-height: 120px;
   padding: 6px 10px 6px 14px;
   background: #fffdf8;
-  animation: rise-in 360ms var(--ease-out) both;
+  animation: rise-in 250ms var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 35ms);
 }
 .cp-pick input {
@@ -2358,8 +2332,8 @@ main.sheet {
   border: 0;
   border-radius: 8px;
   background: #fff;
-  box-shadow: var(--sh-xs);
-  font-weight: 780;
+  box-shadow: none;
+  font-weight: 700;
   cursor: pointer;
   transition: transform var(--fast);
 }
@@ -2403,7 +2377,7 @@ main.sheet {
   gap: 10px;
   padding: 6px 6px 6px 4px;
   border-radius: 12px;
-  animation: rise-in 380ms var(--ease-out) both;
+  animation: rise-in 250ms var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 18ms);
   transition: background var(--fast);
 }
@@ -2411,7 +2385,7 @@ main.sheet {
   background: var(--surface-2);
 }
 .qrow.flagged {
-  background: linear-gradient(90deg, var(--warn-soft), transparent 70%);
+  background: var(--surface-2);
 }
 .qpage {
   flex: 0 0 62px;
@@ -2443,7 +2417,7 @@ main.sheet {
   color: #fff;
 }
 .qpage-num {
-  font-weight: 800;
+  font-weight: 700;
   font-size: 14.5px;
   font-variant-numeric: tabular-nums;
 }
@@ -2494,12 +2468,12 @@ main.sheet {
 }
 .chip.on {
   border-color: transparent;
-  background: var(--grad-primary);
+  background: var(--primary);
   color: #fff;
-  box-shadow: 0 4px 12px -4px rgba(236, 109, 54, 0.6);
+  box-shadow: none;
 }
 .chip.pop {
-  animation: pop 360ms var(--spring) both;
+  animation: pop 250ms var(--ease) both;
   animation-delay: var(--d, 0ms);
 }
 .chip.noans:not(.on) {
@@ -2507,15 +2481,13 @@ main.sheet {
   color: var(--text-3);
 }
 .chip.noans.on {
-  background: linear-gradient(135deg, #f5a37c, #ee8556);
+  background: var(--surface-2);
 }
 .chip.focus {
-  box-shadow: 0 0 0 3px rgba(25, 31, 40, 0.14);
+  box-shadow: none;
 }
 .chip.on.focus {
-  box-shadow:
-    0 0 0 3px rgba(240, 122, 69, 0.28),
-    0 4px 12px -4px rgba(236, 109, 54, 0.6);
+  box-shadow: none;
 }
 .chip.manual:not(.on)::after {
   content: '';
@@ -2544,7 +2516,7 @@ main.sheet {
   background: var(--warn);
   color: #fff;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 700;
   margin-left: 2px;
 }
 .chip-pre {
@@ -2589,7 +2561,7 @@ main.sheet {
   background: #fff;
   color: var(--warn);
   cursor: pointer;
-  box-shadow: var(--sh-xs);
+  box-shadow: none;
   transition: transform var(--fast);
 }
 .qflag:hover {
@@ -2622,7 +2594,7 @@ main.sheet {
   flex-direction: column;
   border-radius: var(--r-lg);
   background: var(--surface);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
   overflow: hidden;
 }
 .preview-empty {
@@ -2655,7 +2627,7 @@ main.sheet {
   animation: fade-in 220ms both;
 }
 .preview-head strong {
-  font-weight: 750;
+  font-weight: 700;
   white-space: nowrap;
 }
 .preview-head.ans {
@@ -2673,7 +2645,7 @@ main.sheet {
   background: var(--primary-soft);
   color: var(--primary-ink);
   font-size: 11.5px;
-  font-weight: 750;
+  font-weight: 700;
   flex: 0 0 auto;
 }
 .tag.teal {
@@ -2689,9 +2661,9 @@ main.sheet {
   min-height: 90px;
   overflow: auto;
   padding: 10px 12px;
-  background: linear-gradient(90deg, var(--surface-3) 0%, var(--surface-2) 40%, var(--surface-3) 80%);
+  background: var(--surface-2);
   background-size: 200% 100%;
-  animation: shimmer 1.3s linear infinite;
+  animation: none;
 }
 .preview-scroll.ready {
   background: #fff;
@@ -2704,8 +2676,8 @@ main.sheet {
   opacity: 0;
   transform: translateY(6px) scale(0.99);
   transition:
-    opacity 320ms var(--ease),
-    transform 420ms var(--ease-out);
+    opacity 250ms var(--ease),
+    transform 250ms var(--ease-out);
 }
 .preview-img.loaded {
   opacity: 1;
@@ -2752,7 +2724,7 @@ main.sheet {
   font-weight: 700;
   color: var(--text-2);
   cursor: pointer;
-  animation: rise-in 420ms var(--ease-out) both;
+  animation: rise-in 250ms var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 50ms);
   transition:
     background var(--mid) var(--ease),
@@ -2770,7 +2742,7 @@ main.sheet {
 .book-tab.active {
   background: var(--surface);
   color: var(--text);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
   border-color: var(--line);
 }
 .bt-spine {
@@ -2781,14 +2753,14 @@ main.sheet {
 }
 .bt-count {
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   color: var(--primary-ink);
 }
 .bt-count:empty {
   display: none;
 }
 .bt-count.bump {
-  animation: pop 360ms var(--spring);
+  animation: pop 250ms var(--ease);
 }
 .bt-x {
   display: grid;
@@ -2849,7 +2821,7 @@ main.sheet {
   padding: 16px;
   border-radius: var(--r-lg);
   background: var(--surface);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
 }
 .export-head {
   display: flex;
@@ -2859,7 +2831,7 @@ main.sheet {
 .export-head h3 {
   margin: 0;
   font-size: 16px;
-  font-weight: 780;
+  font-weight: 700;
   letter-spacing: -0.03em;
 }
 .sel-count {
@@ -2868,7 +2840,7 @@ main.sheet {
 }
 .sel-count strong {
   font-size: 20px;
-  font-weight: 800;
+  font-weight: 700;
   color: var(--primary-ink);
   margin-right: 2px;
 }
@@ -2900,7 +2872,7 @@ main.sheet {
   font-weight: 650;
   color: var(--text-2);
   cursor: pointer;
-  animation: pop 300ms var(--spring) both;
+  animation: pop 250ms var(--ease) both;
   transition: background var(--fast);
 }
 .sel-chip::before {
@@ -2944,7 +2916,7 @@ main.sheet {
   align-items: center;
   gap: 7px;
   padding: 11px 13px;
-  font-weight: 720;
+  font-weight: 700;
   cursor: pointer;
   list-style: none;
 }
@@ -2965,7 +2937,7 @@ main.sheet {
   padding: 10px 12px 11px;
   border-radius: 8px;
   background: #fff;
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
   font-size: 9px;
   color: #333;
 }
@@ -2978,7 +2950,7 @@ main.sheet {
 .em-title {
   text-align: center;
   font-size: 15px;
-  font-weight: 800;
+  font-weight: 700;
   color: #111;
   margin: 3px 0 5px;
   letter-spacing: -0.03em;
@@ -3094,16 +3066,16 @@ main.sheet {
     box-shadow var(--mid) var(--ease);
 }
 .export-btn:first-child {
-  background: var(--grad-primary);
+  background: var(--primary);
   color: #fff;
-  box-shadow: var(--sh-primary);
+  box-shadow: none;
 }
 .export-btn:hover:not(:disabled) {
   background: var(--primary-soft);
   transform: translateY(-1px);
 }
 .export-btn:first-child:hover:not(:disabled) {
-  background: var(--grad-primary);
+  background: var(--primary);
   filter: brightness(1.04);
 }
 .export-btn:active:not(:disabled) {
@@ -3130,7 +3102,7 @@ main.sheet {
   height: 16px;
 }
 .export-btn.working .xb-icon .icon {
-  animation: spin 900ms linear infinite;
+  animation: spin 250ms linear infinite;
 }
 .xb-text {
   display: grid;
@@ -3139,7 +3111,7 @@ main.sheet {
 }
 .xb-text b {
   font-size: 13.5px;
-  font-weight: 780;
+  font-weight: 700;
 }
 .xb-text small {
   font-size: 11.5px;
@@ -3170,7 +3142,7 @@ main.sheet {
   padding: 12px;
   border-radius: var(--r-lg);
   background: var(--surface);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
 }
 .editor-side .seg-toggle {
   display: flex;
@@ -3223,7 +3195,7 @@ main.sheet {
 }
 .pr-miss {
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 700;
   color: var(--warn-ink);
   background: var(--warn-soft);
   border-radius: 6px;
@@ -3252,7 +3224,7 @@ main.sheet {
   padding: 8px 10px;
   border-radius: var(--r);
   background: var(--surface);
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
 }
 .tb-group {
   display: flex;
@@ -3284,7 +3256,7 @@ main.sheet {
 }
 .tb-pagelabel {
   margin-left: 6px;
-  font-weight: 750;
+  font-weight: 700;
 }
 .tb-zoom {
   width: 40px;
@@ -3316,13 +3288,13 @@ main.sheet {
   flex: 0 0 auto;
   background: #fff;
   border-radius: 4px;
-  box-shadow: var(--sh);
+  box-shadow: none;
 }
 .page-wrap.enter-next {
-  animation: page-next 380ms var(--ease-out) both;
+  animation: page-next 250ms var(--ease-out) both;
 }
 .page-wrap.enter-prev {
-  animation: page-prev 380ms var(--ease-out) both;
+  animation: page-prev 250ms var(--ease-out) both;
 }
 @keyframes page-next {
   from {
@@ -3359,7 +3331,7 @@ main.sheet {
     box-shadow var(--mid) var(--ease);
 }
 .page-overlay.fresh .box {
-  animation: box-in 420ms var(--ease-out) both;
+  animation: box-in 250ms var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 30ms);
 }
 @keyframes box-in {
@@ -3379,7 +3351,7 @@ main.sheet {
 }
 .box.selected {
   background: hsl(var(--hue, 22) 90% 60% / 0.16);
-  box-shadow: 0 0 0 4px hsl(var(--hue, 22) 90% 60% / 0.25);
+  box-shadow: none;
   z-index: 2;
 }
 .box.ghost {
@@ -3397,7 +3369,7 @@ main.sheet {
   background: hsl(var(--hue, 22) 70% 48%);
   color: #fff;
   font-size: 11.5px;
-  font-weight: 750;
+  font-weight: 700;
   white-space: nowrap;
   pointer-events: none;
 }
@@ -3444,7 +3416,7 @@ main.sheet {
   background: rgba(255, 255, 255, 0.2);
   cursor: pointer;
   opacity: 0.6;
-  animation: fade-in 300ms both;
+  animation: fade-in 250ms both;
   animation-delay: calc(var(--i, 0) * 20ms);
   transition:
     opacity var(--fast),
@@ -3461,7 +3433,7 @@ main.sheet {
   opacity: 1;
   border-color: var(--warn);
   background: rgba(227, 154, 45, 0.14);
-  animation: pulse-ring 1.6s ease-out infinite;
+  animation: none;
 }
 .cand-label {
   position: absolute;
@@ -3473,7 +3445,7 @@ main.sheet {
   background: var(--text);
   color: #fff;
   font-size: 10.5px;
-  font-weight: 750;
+  font-weight: 700;
   white-space: nowrap;
   opacity: 0;
   transition: opacity var(--fast);
@@ -3511,8 +3483,8 @@ main.sheet {
   overflow: hidden;
   border-radius: var(--r-xl);
   background: var(--surface);
-  box-shadow: var(--sh-lg);
-  animation: modal-in 420ms var(--ease-out) both;
+  box-shadow: none;
+  animation: modal-in 250ms var(--ease-out) both;
 }
 .modal-overlay.closing .modal {
   animation: modal-out 180ms var(--ease-in) both;
@@ -3538,7 +3510,7 @@ main.sheet {
 .modal-header h3 {
   margin: 0;
   font-size: 19px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.035em;
 }
 .modal-x {
@@ -3553,7 +3525,7 @@ main.sheet {
   cursor: pointer;
   transition:
     background var(--fast),
-    transform var(--mid) var(--spring);
+    transform var(--mid) var(--ease);
 }
 .modal-x:hover {
   background: var(--surface-3);
@@ -3626,8 +3598,8 @@ main.sheet {
   word-break: keep-all;
   overflow-wrap: anywhere;
   white-space: pre-line;
-  box-shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.5);
-  animation: toast-in 460ms var(--ease-out) both;
+  box-shadow: none;
+  animation: toast-in 250ms var(--ease-out) both;
 }
 .toast-success .toast-msg::before,
 .toast-error .toast-msg::before {
@@ -3715,7 +3687,7 @@ main.sheet {
   gap: 8px;
   margin: 0 0 6px;
   font-size: 14.5px;
-  font-weight: 780;
+  font-weight: 700;
 }
 .settings h4 .icon {
   width: 17px;
@@ -3794,7 +3766,7 @@ main.sheet {
   padding: 4px 0 8px;
   color: var(--text-2);
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 700;
   cursor: pointer;
   list-style: none;
 }
@@ -3874,7 +3846,7 @@ main.sheet {
   background: none;
   width: 14px;
   height: 14px;
-  animation: spin 700ms linear infinite;
+  animation: spin 250ms linear infinite;
 }
 .gem-row[data-state='ok'] .gem-dot {
   background: var(--ok);
@@ -3901,7 +3873,7 @@ main.sheet {
   background: var(--surface-3);
   color: var(--text-2);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 700;
   flex: 0 0 auto;
 }
 .gem-path:empty {
@@ -4063,7 +4035,7 @@ main.sheet {
   margin: 0 1px;
   color: var(--text);
   font-size: 18px;
-  font-weight: 800;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
@@ -4075,7 +4047,7 @@ main.sheet {
   gap: 5px;
   height: 24px;
   padding: 0 9px;
-  border-radius: 999px;
+  border-radius: 4px;
   background: var(--warn-soft);
   color: var(--warn-ink);
   font-size: 12px;
@@ -4102,7 +4074,7 @@ main.sheet {
   margin: 0;
   color: var(--text-2);
   font-size: 16px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: -0.025em;
 }
 .student-group.gone,
@@ -4138,7 +4110,7 @@ main.sheet {
 .sh-who h2 {
   margin: 0;
   font-size: 20px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.035em;
 }
 .sh-who p {
@@ -4167,7 +4139,7 @@ main.sheet {
   align-items: center;
   height: 22px;
   padding: 0 9px;
-  border-radius: 999px;
+  border-radius: 4px;
   background: var(--primary-soft);
   color: var(--primary-ink);
   font-size: 12px;
@@ -4263,3 +4235,13 @@ main.sheet {
 .tabs-row, .doc-head, .preview-head, .convert-row .seg {
   flex-wrap: wrap;
 }
+
+/* 업무 화면의 공통 표면 */
+.btn, .input, select, textarea { border-radius: 8px; }
+.btn:not(.btn-primary):not(.btn-danger):not(.btn-ghost) { background: var(--surface); border: 1px solid var(--line-2); }
+.btn-primary:active { background: var(--accent-pressed); }
+.book-card, .doc-card, .student-card, .note-card { border: 1px solid var(--line-2); border-radius: 12px; }
+.empty-art { display: none; }
+.empty-state { padding: 24px 20px; }
+.empty-state h3 { font-weight: 600; }
+.modal, .toast, .dropdown, .context-menu { box-shadow: var(--sh-lg); }
