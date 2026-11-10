@@ -27,7 +27,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
     const errors = parseEq(script.value).errors;
     const typo = errors.length === 1 && errors[0].code === 'unknown-word' ? errors[0] : null;
     warning.textContent = typo
-      ? '\u0060' + script.value.slice(typo.start, typo.end) + '\u0060 을(를) 확인하세요. 지금 모양으로도 들어가요.'
+      ? script.value.slice(typo.start, typo.end) + ' 부분을 확인하세요. 지금 모양으로도 들어가요.'
       : errors.length ? '괄호·명령을 확인하세요. 지금 모양으로도 들어가요.' : '';
   };
   const apply = (result) => {

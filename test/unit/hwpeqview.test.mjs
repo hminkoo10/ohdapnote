@@ -256,7 +256,7 @@ test('hwpeqview: 불완전 입력 복구와 진단·모르는 명령 보존', ()
   const unknown = parseEq('mystery {x}');
   assert.equal(unknown.children[0].unknown, true);
   assert.equal(unknown.error, false);
-  assert.ok(unknown.errors.some(error => error.code === 'unknown-word'));
+  assert.deepEqual(unknown.errors, []);
   assert.equal(eqToText('mystery {x}'), 'mysteryx');
 });
 
@@ -332,11 +332,13 @@ test('hwpeqview: 기존 변환기의 모든 LaTeX·실측 예시를 다시 그�
   assert.ok(count >= 120, `예시 ${count}개`);
 });
 
-test('hwpeqview: 점 이름은 경고 없이 보존하고 명령 오타는 경고', () => {
-  for (const script of ['bar {AB}', 'vec {AB}', 'ABC', "A'B", "AB'C", 'overline {PQ}', 'bar {x}', 'hat {x}', '{{a} over {b}}']) {
+test('hwpeqview: 변수 묶음은 보존하고 가까운 명령 오타만 경고', () => {
+  for (const script of ['dx', 'dy', 'ab', 'xy', 'abc', 'pq', 'Ab', 'nPr', 'AB', 'ABC', "A'B", 'overline {PQ}', 'bar {x}',
+    'int _{0} ^{1} f(x) dx', 'dy over dx', '2ab + xy', 'pq + qr',
+    'bar {AB}', 'vec {AB}', "AB'C", 'hat {x}', '{{a} over {b}}', 'fraq', 'unknownword']) {
     assert.deepEqual(parseEq(script).errors, [], script);
   }
-  for (const script of ['sqr {x}', 'ovr', 'fraq']) {
+  for (const script of ['sqr {x}', 'ovr', 'sqtr', 'ovre', 'matirx', 'lmi', 'SQR {x}', 'sqqrt', 'sqat', 'alhpa']) {
     assert.ok(parseEq(script).errors.some(e => e.code === 'unknown-word' && e.severity === 'warning'), script);
   }
 });

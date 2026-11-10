@@ -38,6 +38,28 @@ const FONTS = new Set(['rm', 'it', 'bold', 'rmbold', 'bf']);
 const UNSUPPORTED = new Set('longdiv ladder sladder phantom identical image reimage iso dsum xor hleft laplace lslant rslant att hund thou well base benzene ohm'.split(' '));
 const SCRIPT_KEYS = { '^': 'sup', sup: 'sup', to: 'sup', '_': 'sub', sub: 'sub', from: 'sub', lsup: 'lsup', lsub: 'lsub' };
 const INFIX = new Set(['over', 'atop', 'choose']);
+const ROOTS = new Set(['sqrt', 'root']);
+const COMMAND_NAMES = new Set([
+  ...[SCRIPT_KEYS, ACCENTS, BIG, GREEK, SYMBOLS, EXACT_SYMBOLS].flatMap(Object.keys),
+  ...FUNCTIONS, ...TABLES, ...FONTS, ...UNSUPPORTED, ...INFIX, ...ROOTS,
+].map(name => name.toLowerCase()));
+
+function likelyCommandTypo(word) {
+  if (word.length < 3 || COMMAND_NAMES.has(word)) return false;
+  for (const name of COMMAND_NAMES) {
+    if (name.length < 3 || Math.abs(name.length - word.length) > 1) continue;
+    let i = 0;
+    while (i < Math.min(name.length, word.length) && name[i] === word[i]) i++;
+    // 세 글자 명령은 자리바꿈만: abc와 arc 같은 변수 묶음의 오경고를 줄입니다.
+    if (name.length === word.length && word[i] === name[i + 1] && word[i + 1] === name[i]
+        && word.slice(i + 2) === name.slice(i + 2)) return true;
+    if (name.length < 4) continue;
+    if (name.length === word.length && word.slice(i + 1) === name.slice(i + 1)) return true;
+    if (name.length > word.length && word.slice(i) === name.slice(i + 1)) return true;
+    if (name.length < word.length && word.slice(i + 1) === name.slice(i)) return true;
+  }
+  return false;
+}
 const CLOSE = new Set(['}', ')', ']']);
 const MAX_DEPTH = 96;
 const has = (obj, key) => Object.hasOwn(obj, key);
@@ -255,7 +277,7 @@ class Parser {
       this.i--;
       return make('empty', start, start);
     }
-    if (key === 'sqrt' || key === 'root') {
+    if (ROOTS.has(key)) {
       let index;
       if (key === 'root') {
         index = this.argument(stops);
@@ -308,9 +330,8 @@ class Parser {
     const glyph = symbol(value);
     if (glyph !== undefined) return make(has(GREEK, key) || key.startsWith('var') ? 'identifier' : 'operator', start, end, { value: glyph });
     if (kind === 'word') {
-      // 대문자 점 이름(프라임은 별도 토큰)과 overline 표기는 허용하고, 소문자 명령 오타는 경고합니다.
       const unknown = value.length > 1;
-      if (unknown && !/^[A-Z]+$/.test(value) && key !== 'overline') this.issue('unknown-word', start, end, 'warning');
+      if (likelyCommandTypo(key)) this.issue('unknown-word', start, end, 'warning');
       return make('identifier', start, end, { value, unknown });
     }
     return make(/[\p{L}]/u.test(value) ? 'identifier' : 'operator', start, end, { value: value === "'" ? '′' : value });

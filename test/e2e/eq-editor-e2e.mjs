@@ -268,7 +268,7 @@ try {
   assert.equal(await eqModal().locator('.eq-notice').innerText(), '');
   const border = await preview().evaluate(el => getComputedStyle(el).borderColor);
   await fill('sqr {x}');
-  assert.equal(await eqModal().locator('.eq-notice').innerText(), '\u0060sqr\u0060 을(를) 확인하세요. 지금 모양으로도 들어가요.');
+  assert.equal(await eqModal().locator('.eq-notice').innerText(), 'sqr 부분을 확인하세요. 지금 모양으로도 들어가요.');
   assert.equal(await preview().evaluate(el => getComputedStyle(el).borderColor), border);
   assert.deepEqual(await eqModal().locator('.eq-notice').evaluate(el => ({ color: getComputedStyle(el).color, weight: getComputedStyle(el).fontWeight })), { color: 'rgb(107, 118, 132)', weight: '400' });
   await fill('"<script>" + sqrt { unknownword');
