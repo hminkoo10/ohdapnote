@@ -16,7 +16,15 @@ export function planExamImport(files, books = [], subjects = ['math']) {
     }
     if (!m.exam || !m.year || !m.month || !m.grade || !m.subject) { skipped.push(...g.files.map((f) => f.path)); continue; }
     const extras = groups.filter((o) => o !== g && ['exam','year','month','grade','subject'].every(k=>o.metadata[k] === m[k]) && (!o.metadata.selection || o.metadata.selection === m.selection) && (!o.metadata.form || o.metadata.form === m.form)).flatMap((o) => o.files.filter((f) => ['answerKey', 'solution'].includes(f.metadata.part)));
-    const common = files.filter(f => !f.metadata?.subject && /공통|전과목|전영역|통합|모의고사[_ -]*(?:정답|해설)/.test(f.filename || '') && ['answerKey', 'solution'].includes(f.metadata?.part) && ['exam','year','month','grade'].every(k => f.metadata[k] === m[k]));
+    const common = files.filter(f => {
+      const named = identifyExam({ filename: f.filename });
+      if (named.subject || !/공통|전과목|전영역|통합|모의고사[_ -]*(?:정답|해설)/.test(f.filename || '') || !['answerKey','solution'].includes(f.metadata?.part)) return false;
+      if (!['year','month','grade'].every(k => f.metadata[k] === m[k])) return false;
+      if (f.metadata.exam) return f.metadata.exam === m.exam;
+      // 종류만 빠진 명시적 합본: 같은 일자의 시험 종류가 하나일 때만 연결한다.
+      const exams = new Set(groups.filter(o => ['year','month','grade'].every(k => o.metadata[k] === m[k]) && o.metadata.exam && o.files.some(f => f.metadata.part === 'question')).map(o => o.metadata.exam));
+      return exams.size === 1 && exams.has(m.exam);
+    }).map(f => ({ ...f, metadata: { ...f.metadata, subject: null } }));
     g.files = [...new Map([...g.files, ...extras, ...common].map(f=>[f.localPath || f.path || f.filename,f])).values()];
     const odd = groups.some((o) => examKey(o.metadata) === examKey(m) && o.metadata.form === '홀');
     const hashDuplicate = g.files.some((f) => f.metadata?.part === 'question' && books.some((b) => b.exam?.source?.sha256 === f.sha256));

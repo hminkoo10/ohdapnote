@@ -84,3 +84,16 @@ test('가나형 공통 해설은 양쪽 후보, 명시한 다른 형 해설은 �
   assert.ok(na.files.some(f=>f.filename===files[2].filename));
   assert.ok(!ga.files.some(f=>f.filename===files[3].filename));
 });
+
+test('명시적 공통 답지의 시험 종류만 없으면 같은 날짜의 유일한 종류에 연결', () => {
+  const names=['2005년 11월 고2 학평 수학 가형 문제.pdf','2005년 11월 고2 학평 국어 문제.pdf','2005년 11월 고2 공통 정답 해설.pdf'];
+  const files=names.map(n=>({...f(n),metadata:identifyExam({filename:n})}));
+  files[2].metadata.subject='korean'; // 합본 첫 페이지의 과목을 읽은 경우
+  const p=planExamImport(files,[],['math','korean']);
+  assert.equal(p.rows.length,2);
+  assert.ok(p.rows.every(r=>r.files.some(f=>f.filename===names[2]&&f.metadata.subject===null)));
+  const other={...files[0],filename:'다른 종류 문제.pdf',metadata:{...files[0].metadata,exam:'kice'}};
+  assert.ok(planExamImport([...files,other],[],['math','korean']).rows.every(r=>!r.files.some(f=>f.filename===names[2])));
+  const wrong={...files[2],metadata:{...files[2].metadata,exam:'csat'}};
+  assert.ok(planExamImport([...files.slice(0,2),wrong],[],['math','korean']).rows.every(r=>!r.files.some(f=>f.filename===names[2])));
+});
