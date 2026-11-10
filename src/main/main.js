@@ -1720,7 +1720,9 @@ async function runExamBatch() {
     if (batchArgumentError) throw batchArgumentError;
     await fsp.mkdir(batch.output, { recursive: true });
     await fsp.access(batch.output, fs.constants.W_OK);
-    const commit = require('node:child_process').execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path.join(__dirname, '../..'), encoding: 'utf8', windowsHide: true }).trim();
+    // git 없이 풀어 놓은 소스(서버 배포본)에서는 OHDAP_COMMIT 으로 받는다.
+    let commit = process.env.OHDAP_COMMIT || null;
+    if (!commit) try { commit = require('node:child_process').execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path.join(__dirname, '../..'), encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { commit = null; }
     await app.whenReady();
     Menu.setApplicationMenu(null);
     registerAppProtocol();
