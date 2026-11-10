@@ -156,3 +156,10 @@ test('점 번호와 답이 붙은 옛 표는 읽고 뒤 해설은 제외', () =>
   const r=parseAnswerKey('언어 영역 [정답] 1.③ 2.① 3.⑤ [해설] 4.②',{tablesOnly:true});
   assert.deepEqual(Object.values(r.answers.korean).map(e=>e.answer),['3','1','5']);
 });
+
+test('따옴표 가형과 옛 선택 단원 26번 정답표 연결', () => {
+  const r=parseAnswerKey('수리 영역 수리‘가’형 정답 1 ① 2 ② 3 ③ 해설 본문\n미적분과 통계 정답 26 ② 27 ③ 28 ④ 29 ⑤ 30 12 해설 26 1',{tablesOnly:true});
+  assert.equal(r.answers['math|가형'][26].answer,'2');
+  assert.equal(r.answers['math|가형'][30].answer,'12');
+  assert.equal(r.answers['math|미적분'],undefined);
+});

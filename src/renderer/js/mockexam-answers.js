@@ -52,7 +52,7 @@ export function parseAnswerKey(input, { subject = null, selection = null, tables
   }
   const source = typeof input === 'string' ? input : input.map((i) => i.str + (i.hasEOL ? '\n' : ' ')).join('');
   // 정답 PUA 숫자 바로 뒤에 다음 문항번호가 붙는 PDF도 경계를 잃지 않는다.
-  const normalized = source.replace(/(\d{1,2}[.)])(?=[①-⑤➀-➄❶-❺])/g, '$1 ').replace(/[➀-➄❶-❺]/g, c => '①②③④⑤'[(c.codePointAt(0) >= 0x2780 ? c.codePointAt(0) - 0x2780 : c.codePointAt(0) - 0x2776)]);
+  const normalized = source.replace(/([가나AB])[’'”"]\s*형/g, '$1형').replace(/(\d{1,2}[.)])(?=[①-⑤➀-➄❶-❺])/g, '$1 ').replace(/[➀-➄❶-❺]/g, c => '①②③④⑤'[(c.codePointAt(0) >= 0x2780 ? c.codePointAt(0) - 0x2780 : c.codePointAt(0) - 0x2776)]);
   const text = normalizeHancomText(normalized.replace(/([\uE034-\uE03D])(?=\d)/g, '$1 ')).replace(/예[․·ㆍ.]체능(?:계)?/g, '예체능');
   const answers = {};
   const warnings = [];
@@ -64,7 +64,8 @@ export function parseAnswerKey(input, { subject = null, selection = null, tables
   const read = (chunk) => {
     if (!current) return;
     // 정답표 뒤의 해설 숫자는 답이 아니다. 제목의 '정답 및 해설'은 건너뛴다.
-    const firstAnswer = /\b1[.)]?\s+[①-⑤]/.exec(chunk);
+    const optionTail = current === 'math' && ['가형','나형','A형','B형'].includes(selected) && /정\s*답\s+26[.)]?\s+[①-⑤]\s+27[.)]?\s+[①-⑤]\s+28[.)]?\s+[①-⑤]/.test(chunk);
+    const firstAnswer = (optionTail ? /\b26[.)]?\s+[①-⑤]/ : /\b1[.)]?\s+[①-⑤]/).exec(chunk);
     if (firstAnswer) {
       const tail = chunk.slice(firstAnswer.index);
       const end = /해\s*설|풀\s*이|출제|정답률/.exec(tail);
@@ -74,7 +75,7 @@ export function parseAnswerKey(input, { subject = null, selection = null, tables
     const key = selected ? `${current}|${selected}` : current;
     const pointsColumn = /문항\s*(?:번호)?\s*정\s*답\s*배\s*점|번호\s*정\s*답\s*배\s*점/.test(chunk);
     // 해설 쪽의 계산 숫자를 정답으로 만들지 않는다. 명시적 표 또는 1·2·3 답 연속 확인.
-    if (tablesOnly && !pointsColumn && !/\b1[.)]?\s+[①-⑤]\s+2[.)]?\s+[①-⑤]\s+3[.)]?\s+[①-⑤]/.test(chunk)) return;
+    if (tablesOnly && !pointsColumn && !optionTail && !/\b1[.)]?\s+[①-⑤]\s+2[.)]?\s+[①-⑤]\s+3[.)]?\s+[①-⑤]/.test(chunk)) return;
     const pattern = pointsColumn ? /(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})\s+([1-9](?:\.\d+)?)\b/g : /(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})(?!\d)/g;
     for (const m of chunk.matchAll(pattern)) {
       const number = +m[1];
