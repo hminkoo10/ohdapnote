@@ -1,5 +1,5 @@
 import { h, clear, modal } from './ui.js';
-import { listLow, nextLow, moveLow, clearLow, setLow } from './lowconf.js';
+import { countLow, listLow, nextLow, moveLow, clearLow, setLow } from './lowconf.js';
 
 export const REVIEW_HELP = '노란 밑줄·테두리: 잘못 읽었을 수 있는 곳';
 
@@ -148,7 +148,7 @@ export function reviewPanel(blocks, getStack, redraw) {
     let at = list.findIndex((p) => p.block === current?.block && p.index === current?.index);
     if (at < 0) { current = list[0] || null; at = current ? 0 : -1; }
     else current = list[at];
-    count.textContent = `${at + 1}/${list.length}`;
+    count.textContent = countLow(blocks) === list.length ? `${at + 1}/${list.length}` : `${countLow(blocks)}개 확인 · 위치 ${at + 1}/${list.length}`;
     count.setAttribute('aria-label', list.length ? `확인이 필요한 곳 ${list.length}군데 중 ${at + 1}번째` : '확인이 필요한 곳이 없습니다.');
     previous.disabled = next.disabled = okay.disabled = !list.length;
     if (repaint) fields.forEach((field) => field.paint());

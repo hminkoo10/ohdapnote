@@ -1,4 +1,4 @@
-import { saveExamTranscripts } from './mockexam-save.js';
+import { saveExamTranscripts, examScanEntry } from './mockexam-save.js';
 // 교재의 문제·지문을 문제은행에 넣기. 기본은 이 컴퓨터의 PDF 글자·OCR만 사용
 import { h, modal, toast } from './ui.js';
 import { api, nav, state, getSources, holdSource, findJob, jobDialog, geminiReady, aiOptions, restartGuard } from './shared.js';
@@ -175,9 +175,10 @@ export async function transcribeExam(book, { signal, onProgress } = {}) {
           try { entry = { ...await scanTranscribe(await renderStack(blockSegs(b), TRANSCRIBE_WIDTH), { number: b.item.passage ? '' : b.item.number, signal, api }), model: 'ocr' }; }
           catch (err) {
             if (signal?.aborted) throw err;
-            entry = { blocks: [{ type: 'para', text: '원본을 확인하세요.', low: [{ start: 0, end: 10, reason: 'ocr' }] }], model: 'ocr', reliable: false, reasons: [err.message] };
+            entry = { blocks: [], model: 'ocr', reliable: false, reasons: [err.message] };
           }
         }
+        if (entry.model === 'ocr') entry = examScanEntry(entry);
         signal?.throwIfAborted();
         store.items[transcriptKey(b) + (entry.model === 'pdf' ? '|pdf' : '|local')] = { ...entry, at: Date.now() };
         store.dirty = true;

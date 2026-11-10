@@ -12,7 +12,7 @@ export function transcriptKey(block) {
 export function pickTranscript(items, key) {
   for (const [suffix, path] of [['|edit', 'edit'], ['', 'ai'], ['|local', 'ocr'], ['|pdf', 'pdf']]) {
     const entry = items?.[key + suffix];
-    if (entry?.blocks?.length) return { entry, path };
+    if (entry?.blocks?.length) return { entry, path: path !== 'edit' && entry.model === 'pdf' ? 'pdf' : path };
   }
   return null;
 }

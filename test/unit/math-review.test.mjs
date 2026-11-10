@@ -34,3 +34,13 @@ test('한 식 편집으로 문항 전체 수식 묶음이 확인 처리되지 �
   const blocks=groupMathReview([math('x ^ {2}'),math('y ^ {3}')]);
   assert.equal(moveLow(blocks[0].low,'x ^ {2}','x ^ {4}').length,1);
 });
+
+test('원본 그림 묶음 하나로 세되 모든 조각 다음 확인·저장 유지', () => {
+  const f=()=>({type:'figure',box:{x:0,y:0,w:1,h:1},low:[{reason:'ocr'}]});
+  const out=groupMathReview([f(),f(),{...f(),low:[{reason:'math',detail:'분수선 미확인'}]}]);
+  assert.equal(countLow(out),2);
+  let p=nextLow(out); assert.equal(p.block,0);
+  p=nextLow(out,p); assert.equal(p.block,1);
+  p=nextLow(out,p); assert.equal(p.block,2);
+  assert.equal(countLow(sanitizeTranscripts({items:{q:{blocks:out}}}).items.q.blocks),2);
+});

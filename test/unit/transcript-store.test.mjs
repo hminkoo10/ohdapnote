@@ -30,3 +30,9 @@ test('문제은행·오답노트 열쇠 호환: 같은 원본·영역, 추가 �
   assert.notEqual(transcriptKey(block), transcriptKey({ ...block, role: 'answer' }));
   assert.notEqual(transcriptKey(block), transcriptKey({ ...block, src: { files: [{ name: '새원본.pdf' }] } }));
 });
+
+test('옛 로컬 열쇠의 PDF도 실제 경로 표시', () => {
+  const pdf = { blocks: [{type:'para',text:'가짜 PDF 글자'}], model:'pdf' };
+  assert.equal(pickTranscript({'k|local':pdf},'k').path,'pdf');
+  assert.equal(pickTranscript({'k|edit':pdf},'k').path,'edit');
+});

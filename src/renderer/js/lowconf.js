@@ -36,7 +36,12 @@ export function listLow(blocks = []) {
 }
 
 export function countLow(blocks) {
-  return (Array.isArray(blocks) ? blocks : [blocks]).reduce((n, block) => n + (block?.low?.length || 0), 0);
+  const groups = new Set();
+  return (Array.isArray(blocks) ? blocks : [blocks]).reduce((n, block) => n + (block?.low || []).filter(mark => {
+    if (!mark.group) return true;
+    if (groups.has(mark.group)) return false;
+    groups.add(mark.group); return true;
+  }).length, 0);
 }
 
 /** 마지막 다음은 처음으로, 처음 이전은 마지막으로 돌아감. */

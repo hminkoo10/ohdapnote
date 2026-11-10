@@ -17,6 +17,7 @@ function sanitizeTranscripts(value) {
         if (range && (!Number.isInteger(mark.start) || !Number.isInteger(mark.end) || mark.start < 0 || mark.end <= mark.start || mark.end > (block.type === 'math' ? (block.latex || block.eq || '').length : typeof text === 'string' ? text.length : 0))) return [];
         if (block.type === 'para' && !range) return [];
         const out = { reason: ['ocr', 'disagree', 'math'].includes(mark.reason) ? mark.reason : 'ocr' };
+        if (mark.group === 'transcription') out.group = mark.group;
         if (typeof mark.detail === 'string') out.detail = mark.detail.slice(0, 200);
         if (range) Object.assign(out, { start: mark.start, end: mark.end });
         if (block.type === 'choices') out.item = mark.item;
