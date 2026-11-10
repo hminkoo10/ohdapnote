@@ -4245,3 +4245,13 @@ main.sheet {
 .empty-state { padding: 24px 20px; }
 .empty-state h3 { font-weight: 600; }
 .modal, .toast, .dropdown, .context-menu { box-shadow: var(--sh-lg); }
+
+/* 개수·과목·완료는 색 이름표 대신 보통 글자로 표시 */
+.stat, .stat.teal, .stat.muted, .share-badge, .share-badge.private,
+.subject-badge, .subject-badge[data-subject], .purge-badge, .sel-count,
+.bank-complete, .bank-path { background: transparent; color: var(--text-2); border: 0; border-radius: 4px; font-weight: 400; box-shadow: none; }
+.stat b { font-weight: 500; }
+.stat.warn, .bank-review-count { color: var(--warning); background: transparent; padding: 0; font-weight: 400; }
+.tag, .tag.teal, .tag.soft { background: var(--grey100); color: var(--grey700); border-radius: 4px; font-weight: 400; }
+.subject-opt .subject-badge { background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; }
+.subject-opt input:checked + .subject-badge { border-color: var(--grey700); background: var(--grey100); }
