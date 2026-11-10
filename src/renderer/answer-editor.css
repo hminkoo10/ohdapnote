@@ -7,7 +7,7 @@
 .answer-writing, .answer-reference { min-width: 0; }
 .answer-toolbar { padding-bottom: 10px; }
 .answer-document { min-height: 260px; background: #fff; color: var(--grey700); border: 1px solid var(--grey200); border-radius: 8px; padding: 18px; font-size: 16px; line-height: 1.9; overflow-wrap: anywhere; white-space: pre-wrap; outline: none; }
-.answer-document:focus { border-color: var(--accent); box-shadow: none; }
+.answer-document:focus { border-color: var(--grey600); box-shadow: none; }
 .answer-document p { min-height: 1.9em; margin: 0 0 8px; }
 .answer-document > p:only-child:has(> br:only-child)::before { content: attr(data-placeholder); color: var(--grey700); pointer-events: none; }
 .answer-document:has(> p:only-child > br:only-child)::before { content: attr(data-placeholder); color: var(--grey700); float: left; pointer-events: none; }
@@ -15,7 +15,7 @@
 .answer-math:hover, .answer-math:focus { background: var(--grey100); outline: 1px solid var(--grey200); }
 .answer-display { display: block; text-align: center; margin: 12px 0; }
 .answer-figure { margin: 12px 0; cursor: move; }
-.answer-figure:focus { outline: 2px solid var(--accent); }
+.answer-figure:focus { outline: 2px solid var(--grey600); }
 .answer-figure img, .answer-reference img { max-width: 100%; height: auto; }
 .answer-reference { background: var(--grey100); border-radius: 8px; padding: 12px; overflow: auto; }
 .answer-reference h4 { margin-top: 0; }
@@ -51,7 +51,7 @@
   outline: 1px dashed var(--grey200);
 }
 .answer-equation-preview.eq-has-warning {
-  border-color: var(--warning);
+  border-color: var(--grey600);
 }
 .answer-equation-modal .warn-text {
   min-height: 18px;

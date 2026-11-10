@@ -29,7 +29,7 @@ export function answerReview(editor, readDocument, changed, getStack) {
   };
   const update = () => {
     entries = [];
-    editor.querySelectorAll('.answer-review-math').forEach((node) => node.classList.remove('answer-review-math'));
+    editor.querySelectorAll('.answer-review-math').forEach((node) => node.classList.remove('answer-review-math', 'answer-review-current'));
     const ranges = [];
     for (const node of editor.children) {
       let low;
@@ -55,6 +55,9 @@ export function answerReview(editor, readDocument, changed, getStack) {
     }
     CSS.highlights.set('answer-review', new Highlight(...ranges));
     selected = Math.min(selected, Math.max(0, entries.length - 1));
+    const active = entries[selected];
+    CSS.highlights.set('answer-review-current', new Highlight(...(active?.range ? [active.range] : [])));
+    if (active?.node.classList.contains('answer-review-math')) active.node.classList.add('answer-review-current');
     clear(controls);
     source.element.hidden = !entries.length;
     if (!entries.length) return;
@@ -98,7 +101,7 @@ export function answerReview(editor, readDocument, changed, getStack) {
         node.dataset.original = JSON.stringify(after);
       }
     },
-    close() { source.close(); editor.removeEventListener('click', point); CSS.highlights.delete('answer-review'); },
+    close() { source.close(); editor.removeEventListener('click', point); CSS.highlights.delete('answer-review'); CSS.highlights.delete('answer-review-current'); },
   };
 }
 

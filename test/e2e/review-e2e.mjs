@@ -88,7 +88,7 @@ try {
   await win.locator('.bank-main').evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await shot('list');
   await openEditor();
-  const hint = '노란 밑줄·테두리: 잘못 읽었을 수 있는 곳';
+  const hint = '점선 밑줄: 잘못 읽었을 수 있는 곳 · 진한 밑줄: 지금 확인할 곳';
   assert.equal(await win.locator('.review-modal .review-help').innerText(), hint);
   assert.ok(await win.locator('.review-modal .review-help').evaluate((el) => el.getBoundingClientRect().height <= parseFloat(getComputedStyle(el).lineHeight) + 1));
   assert.doesNotMatch(await win.locator('.review-modal').innerText(), /수식 입력:|고친 글은 한글/);
@@ -103,6 +103,9 @@ try {
   assert.ok(await win.locator('.review-mark:not(.review-math)').count() >= 3);
   assert.equal(await win.locator('.review-math').count(), 2);
   assert.equal(await count(), '1/6');
+  assert.equal(await win.locator('.review-mark.current').first().evaluate((el) => getComputedStyle(el).textDecorationStyle), 'solid');
+  assert.equal(await win.locator('.review-mark:not(.current)').first().evaluate((el) => getComputedStyle(el).textDecorationStyle), 'dotted');
+  assert.equal(await win.locator('.review-math').first().evaluate((el) => getComputedStyle(el).outlineStyle), 'none');
   const toolbar = win.locator('.review-toolbar');
   for (const name of ['다음 확인할 곳', '이전', '맞아요', '원본 보기', '되돌리기']) assert.ok(await toolbar.getByRole('button', { name, exact: true }).isVisible());
   assert.equal(await toolbar.getByRole('button', { name: '다음 확인할 곳', exact: true }).evaluate((el) => getComputedStyle(el).height), '38px');
