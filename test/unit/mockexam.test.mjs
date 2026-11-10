@@ -140,3 +140,9 @@ test('해설 본문 숫자는 정답 아님, 예·체능계 정답 제목은 인
   const r=parseAnswerKey('수리 영역 [예·체능계 정답] 1. ① 2. ② 3. ③ 해설 3 5',{subject:'math',tablesOnly:true});
   assert.equal(Object.keys(r.answers['math|예체능']).length,3);
 });
+
+test('가형 표 안의 옛 세부 과목 머리글은 같은 형의 정답으로 유지', () => {
+  const r=parseAnswerKey('수리 영역 가형 정답 1 ① 2 ② 3 ③ 미적분과 통계 26 ④ 27 ⑤',{subject:'math',selection:'가형',tablesOnly:true});
+  assert.equal(r.answers['math|가형'][26].answer,'4');
+  assert.equal(r.answers['math|미적분'],undefined);
+});

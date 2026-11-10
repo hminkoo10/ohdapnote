@@ -92,8 +92,10 @@ export function parseAnswerKey(input, { subject = null, selection = null, tables
     if (isPrivateChar(chunk)) warnings.push(`${key}: 미확인 PUA`);
   };
   for (const m of text.matchAll(headers)) {
-    read(text.slice(last, m.index));
     const label = m[0].replace(/\s/g, '');
+    // 옛 가나형 내부의 '미적분과 통계' 등은 새 선택 답안 묶음이 아니다.
+    if (current === 'math' && ['가형','나형','A형','B형','인문계','자연계','예체능'].includes(selected || selection) && ['미적분','기하','확률과통계'].includes(label)) continue;
+    read(text.slice(last, m.index));
     if (selections.includes(label)) selected = label;
     else {
       current = /^(국어|언어)/.test(label) ? 'korean' : /^(수학|수리)/.test(label) ? 'math' : /^(영어|외국어)/.test(label) ? 'english' : null;
