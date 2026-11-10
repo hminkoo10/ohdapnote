@@ -15,7 +15,7 @@ export function planExamImport(files, books = [], subjects = ['math']) {
       continue;
     }
     if (!m.exam || !m.year || !m.month || !m.grade || !m.subject) { skipped.push(...g.files.map((f) => f.path)); continue; }
-    const extras = groups.filter((o) => o !== g && examKey(o.metadata) === examKey(m) && (!o.metadata.form || o.metadata.form === m.form)).flatMap((o) => o.files.filter((f) => ['answerKey', 'solution'].includes(f.metadata.part)));
+    const extras = groups.filter((o) => o !== g && ['exam','year','month','grade','subject'].every(k=>o.metadata[k] === m[k]) && (!o.metadata.selection || o.metadata.selection === m.selection) && (!o.metadata.form || o.metadata.form === m.form)).flatMap((o) => o.files.filter((f) => ['answerKey', 'solution'].includes(f.metadata.part)));
     const common = files.filter(f => !f.metadata?.subject && /공통|전과목|전영역|통합|모의고사[_ -]*(?:정답|해설)/.test(f.filename || '') && ['answerKey', 'solution'].includes(f.metadata?.part) && ['exam','year','month','grade'].every(k => f.metadata[k] === m[k]));
     g.files = [...new Map([...g.files, ...extras, ...common].map(f=>[f.localPath || f.path || f.filename,f])).values()];
     const odd = groups.some((o) => examKey(o.metadata) === examKey(m) && o.metadata.form === '홀');

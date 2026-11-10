@@ -73,3 +73,13 @@ test('과목 해설이 있으면 전 과목 합본을 답지에 중복 첨부하
   assert.deepEqual(examAnswerFiles([specific,common],'math'),[specific]);
   assert.deepEqual(examAnswerFiles([common],'math'),[common]);
 });
+
+test('가나형 공통 해설은 양쪽 후보, 명시한 다른 형 해설은 제외', () => {
+  const files=['가형 문제','나형 문제','정답 해설','나형 해설'].map(part=>f(`2005년 11월 고2 학평 수학 ${part}.pdf`));
+  const rows=planExamImport(files).rows;
+  const ga=rows.find(r=>r.metadata.selection==='가형');
+  const na=rows.find(r=>r.metadata.selection==='나형');
+  assert.ok(ga.files.some(f=>f.filename===files[2].filename));
+  assert.ok(na.files.some(f=>f.filename===files[2].filename));
+  assert.ok(!ga.files.some(f=>f.filename===files[3].filename));
+});
