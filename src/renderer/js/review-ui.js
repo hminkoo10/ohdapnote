@@ -43,7 +43,7 @@ export function reviewInput(block, { item, label, onSelect, onChange } = {}) {
     ink.append(document.createTextNode('\u200b'));
     for (const { mark, index } of intervals) {
       const snippet = text.slice(mark.start ?? 0, mark.end ?? text.length).slice(0, 22) || '수식';
-      buttons.append(h('button.btn.btn-small.review-mark-button', { type: 'button', onclick: () => onSelect?.(index, true), onmouseenter: () => onSelect?.(index, false) }, `확인: ${snippet}`));
+      buttons.append(h('button.btn.btn-small.review-mark-button', { type: 'button', onclick: () => onSelect?.(index, true), onmouseenter: () => onSelect?.(index, false) }, mark.detail || `확인: ${snippet}`));
     }
     syncScroll();
   };

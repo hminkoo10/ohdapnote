@@ -10,13 +10,14 @@ function sanitizeTranscripts(value) {
     for (const block of entry.blocks) {
       if (!block || typeof block !== 'object' || !Object.hasOwn(block, 'low')) continue;
       const low = Array.isArray(block.low) && !block.runs ? block.low.slice(0, 2000).flatMap((mark) => {
-        if (!mark || typeof mark !== 'object' || Array.isArray(mark) || !['para', 'math', 'choices'].includes(block.type)) return [];
+        if (!mark || typeof mark !== 'object' || Array.isArray(mark) || !['para', 'math', 'choices', 'figure'].includes(block.type)) return [];
         if (block.type === 'choices' && (!Number.isInteger(mark.item) || mark.item < 0 || mark.item >= (block.items?.length || 0))) return [];
         const text = block.type === 'choices' ? block.items[mark.item] : block.text;
         const range = mark.start !== undefined || mark.end !== undefined;
         if (range && (!Number.isInteger(mark.start) || !Number.isInteger(mark.end) || mark.start < 0 || mark.end <= mark.start || mark.end > (block.type === 'math' ? (block.latex || block.eq || '').length : typeof text === 'string' ? text.length : 0))) return [];
         if (block.type === 'para' && !range) return [];
         const out = { reason: ['ocr', 'disagree', 'math'].includes(mark.reason) ? mark.reason : 'ocr' };
+        if (typeof mark.detail === 'string') out.detail = mark.detail.slice(0, 200);
         if (range) Object.assign(out, { start: mark.start, end: mark.end });
         if (block.type === 'choices') out.item = mark.item;
         if (Number.isFinite(mark.conf) && mark.conf >= 0 && mark.conf <= 1) out.conf = mark.conf;

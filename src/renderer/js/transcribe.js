@@ -4,6 +4,7 @@ import { buildHwpx, renderStack, cropImage, blockSegs } from './hwpx.js';
 import { geminiTranscribeBatch, canvasToBase64Jpeg } from './gemini.js';
 import { scanTranscribe } from './scanocr.js';
 import { transcribeParts } from './pdfmath.js';
+import { groupMathReview } from './math-review.js';
 import { transcriptKey, pickTranscript, trimTranscripts } from './transcript-store.js';
 import { subjectOf } from './subjects.js';
 import { countLow } from './lowconf.js';
@@ -108,7 +109,7 @@ export async function pdfTranscribe(segs, { plain = false } = {}) {
     y += s.hPt * scale + 12;
   }
   try {
-    return transcribeParts(parts, { plain });
+    return groupMathReview(transcribeParts(parts, { plain }));
   } catch (err) {
     console.warn('PDF 글자로 옮기지 못함', err);
     return null;

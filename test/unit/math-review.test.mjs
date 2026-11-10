@@ -1,0 +1,20 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { groupMathReview } from '../../src/renderer/js/math-review.js';
+import { countLow, nextLow, clearLow } from '../../src/renderer/js/lowconf.js';
+import { sanitizeTranscripts } from '../../src/main/transcript-review.js';
+const math = (eq) => ({ type: 'math', eq, low: [{ reason: 'math' }] });
+test('단순 수식 무표시, 복원 수식 문항당 하나, 모호한 구조·그림 개별 유지', () => {
+  const input = [math('x'), math('123'), math('f(x)'), math('x ^ {2}'), math('{a} over {b}'), math('cases {x & y}'), {type:'figure', box:{x:0,y:0,w:1,h:1},low:[{reason:'math',detail:'불명 기호'}]}];
+  const out = groupMathReview(input);
+  assert.equal(countLow(out), 3);
+  assert.ok(out.slice(0,3).every(b => !b.low));
+  assert.match(out[3].low[0].detail, /수식 2개/);
+  assert.equal(nextLow(out).block,3);
+  out[3].low = clearLow(out[3].low,0);
+  assert.equal(nextLow(out).block,5);
+  assert.equal(countLow(input),7);
+  const clean = sanitizeTranscripts({items:{q:{blocks:groupMathReview(input)}}});
+  assert.equal(countLow(clean.items.q.blocks),3);
+  assert.match(clean.items.q.blocks[3].low[0].detail,/수식 2개/);
+});
