@@ -1,4 +1,4 @@
-// 한 문항의 복원된 한컴 수식만 묶는다. 보류 그림·불명 기호·여러 줄은 개별 확인.
+// 문항의 원본 비교를 묶어 센다. 위치는 유지하고 불명 기호·여러 줄은 별도 확인.
 export function groupMathReview(blocks) {
   if (!Array.isArray(blocks)) return blocks;
   let first, firstMark, count = 0;

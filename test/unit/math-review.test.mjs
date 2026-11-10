@@ -44,3 +44,17 @@ test('원본 그림 묶음 하나로 세되 모든 조각 다음 확인·저장 
   p=nextLow(out,p); assert.equal(p.block,2);
   assert.equal(countLow(sanitizeTranscripts({items:{q:{blocks:out}}}).items.q.blocks),2);
 });
+
+test('본문 OCR·복원 수식·원본은 같은 비교 묶음, 불일치·모호한 구조 별도', () => {
+  const out=groupMathReview([
+    {type:'para',text:'가짜 본문',low:[{reason:'ocr'}]},math('sqrt x'),
+    {type:'figure',box:{x:0,y:0,w:1,h:1},low:[{reason:'math'}]},
+    math('cases {x & y}'),
+    {type:'para',text:'가짜 불일치',low:[{start:0,end:2,reason:'disagree'}]},
+  ]);
+  assert.equal(countLow(out),3);
+  let p=null;const seen=[];
+  for(let i=0;i<5;i++){p=nextLow(out,p);seen.push(p.block);}
+  assert.deepEqual(seen,[0,1,2,3,4]);
+  assert.equal(countLow(sanitizeTranscripts({items:{q:{blocks:out}}}).items.q.blocks),3);
+});
