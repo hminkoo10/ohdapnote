@@ -31,3 +31,12 @@ export function examImportItems(items) {
   return items.some((i) => i.examSection?.form === '홀')
     ? items.filter((i) => i.examSection?.form !== '짝') : items;
 }
+
+// 과목별 해설이 있으면 전 과목 합본을 답지에 중복으로 붙이지 않는다.
+// 합본은 정답 읽기의 차선 후보로만 남긴다.
+export function examAnswerFiles(files, subject) {
+  const solutions = files.filter(f=>f.metadata.part === 'solution');
+  const candidates = solutions.length ? solutions : files.filter(f=>f.metadata.part === 'answerKey');
+  const specific = candidates.filter(f=>f.metadata.subject === subject);
+  return specific.length ? specific : candidates;
+}

@@ -1,7 +1,7 @@
 ﻿import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { planExamImport, examBookName, examImportItems } from '../../src/renderer/js/mockexam-plan.js';
+import { planExamImport, examBookName, examImportItems, examAnswerFiles } from '../../src/renderer/js/mockexam-plan.js';
 import { identifyExam, examForm } from '../../src/renderer/js/mockexam.js';
 const { readExamZip } = createRequire(import.meta.url)('../../src/main/mockexam-files.js');
 const f = (name, sha256 = name) => ({ filename: name, path: name, sha256 });
@@ -64,4 +64,11 @@ test('괄호로 감싼 정답표 홀짝 머리글 식별', () => {
 test('해시 이름의 영문 해설도 역할 식별', () => {
   assert.equal(identifyExam({filename:'explanation-0123456789.pdf'}).part,'solution');
   assert.equal(identifyExam({filename:'explanation-0123456789.pdf',path:'2014년 3월 고2 학평/수학A/explanation-0123456789.pdf'}).selection,'A형');
+});
+
+test('과목 해설이 있으면 전 과목 합본을 답지에 중복 첨부하지 않음', () => {
+  const specific={metadata:{part:'solution',subject:'math'}};
+  const common={metadata:{part:'solution',subject:null}};
+  assert.deepEqual(examAnswerFiles([specific,common],'math'),[specific]);
+  assert.deepEqual(examAnswerFiles([common],'math'),[common]);
 });

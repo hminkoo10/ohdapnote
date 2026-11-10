@@ -17,7 +17,7 @@
   "scripts": {
     "postinstall": "node scripts/copy-vendor.mjs",
     "start": "electron .",
-    "test": "node --test \"test/unit/*.test.mjs\"",
+    "test": "node --test --test-concurrency=2 \"test/unit/*.test.mjs\"",
     "test:fixtures": "node test/fixtures/make-fixtures.mjs && node test/fixtures/make-books.mjs && node test/fixtures/make-passages.mjs",
     "test:detect": "node test/e2e/detect-fixtures.mjs",
     "test:books": "node test/e2e/books-test.mjs",

@@ -1,6 +1,6 @@
 import { api, state, getSources, dropSources, restartGuard } from './shared.js';
 import { identifyExam, examForm } from './mockexam.js';
-import { planExamImport, examImportItems } from './mockexam-plan.js';
+import { planExamImport, examImportItems, examAnswerFiles } from './mockexam-plan.js';
 import { newDoc } from './store.js';
 import { analyzeDocument } from './analyze.js';
 import { parseAnswerKey, answerKeyToAnswers } from './mockexam-answers.js';
@@ -113,8 +113,7 @@ export async function importExamFolder(paths, { onProgress = () => {}, signal, p
         book.exam = { ...row.metadata, source: { kind: 'file', name: question[0].filename, sha256: question[0].sha256 } };
         await api.saveBook(book);
         await attach(book, 'problem', question);
-        const solutions = row.files.filter((f) => f.metadata.part === 'solution');
-        await attach(book, 'answer', solutions.length ? solutions : row.files.filter((f) => f.metadata.part === 'answerKey'));
+        await attach(book, 'answer', examAnswerFiles(row.files, book.subject));
         const sources = await getSources(book);
         for (const role of ['problem', 'answer']) {
           const doc = book.docs[role], src = sources[role];
