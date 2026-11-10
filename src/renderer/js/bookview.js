@@ -521,7 +521,7 @@ async function importFiles(role, paths, { add = false } = {}) {
   const b = bs.book;
   if (!canSave(b)) return;
   if (bookBusy(b)) {
-    toast('이 책의 작업이 끝난 뒤에 파일을 바꿔 주세요.');
+    toast('이 책의 작업이 끝난 뒤에 파일을 바꾸세요.');
     return;
   }
   const old = b.docs[role];
@@ -541,7 +541,7 @@ async function importFiles(role, paths, { add = false } = {}) {
     rematch();
     bs.role = role;
     render();
-    toast(`${role === 'problem' ? '문제집을' : '답지를'} 올렸어요. [${ROLE_NAME[role]} 분석]을 눌러 주세요.`, { type: 'success' });
+    toast(`${role === 'problem' ? '문제집을' : '답지를'} 올렸어요. [${ROLE_NAME[role]} 분석]을 누르세요.`, { type: 'success' });
   } catch (err) {
     toast(errMsg(err), { type: 'error', timeout: 8000 });
   }
@@ -577,7 +577,7 @@ async function addMoreFiles(role, paths) {
       render();
     }
     if (doc.analyzedAt && pages.length) await analyzeRole(role, { only: pages });
-    else toast(`${ROLE_NAME[role]}에 ${pages.length}쪽을 더했어요.${doc.analyzedAt ? '' : ` [${ROLE_NAME[role]} 분석]을 눌러 주세요.`}`, { type: 'success' });
+    else toast(`${ROLE_NAME[role]}에 ${pages.length}쪽을 더했어요.${doc.analyzedAt ? '' : ` [${ROLE_NAME[role]} 분석]을 누르세요.`}`, { type: 'success' });
   } catch (err) {
     toast(errMsg(err), { type: 'error', timeout: 8000 });
   }

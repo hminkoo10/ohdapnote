@@ -26,7 +26,7 @@ export function bookFileUrl(bookId, name) {
 
 export async function fetchBytes(url) {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`책 파일을 받지 못했어요. 인터넷 연결을 확인하고 다시 열어 주세요. (${res.status})`);
+  if (!res.ok) throw new Error(`책 파일을 받지 못했어요. 인터넷 연결을 확인하고 다시 여세요. (${res.status})`);
   return new Uint8Array(await res.arrayBuffer());
 }
 

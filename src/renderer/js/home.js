@@ -690,7 +690,7 @@ export async function createNote(allBooks, { student: preset = null } = {}) {
         primary: true,
         onClick: () => {
           if (!picked.size) {
-            toast('책을 하나 이상 골라 주세요.', { type: 'error' });
+            toast('책을 하나 이상 고르세요.', { type: 'error' });
             return false;
           }
           const name = student.input.value.trim();
@@ -765,7 +765,7 @@ export function studentSearch(students, { picked: preset = null } = {}) {
         ),
       ),
     );
-    if (more) list.append(h('div.student-more', `${STUDENT_MAX}명까지 보여요. 이름을 더 적어 주세요.`));
+    if (more) list.append(h('div.student-more', `${STUDENT_MAX}명까지 보여요. 이름을 더 적으세요.`));
     list.hidden = false;
     list.scrollTop = 0;
     window.addEventListener('keydown', onEsc, true);
@@ -887,7 +887,7 @@ async function editStudent(st = null) {
         onClick: async () => {
           const name = nameInput.value.trim();
           if (!name) {
-            toast('학생 이름을 적어 주세요.', { type: 'error' });
+            toast('학생 이름을 적으세요.', { type: 'error' });
             return false;
           }
           const btn = form.closest('.modal')?.querySelector('.modal-footer .btn-primary');

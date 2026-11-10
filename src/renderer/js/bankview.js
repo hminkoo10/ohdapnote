@@ -342,7 +342,7 @@ async function editTranscript(e, block) {
   const store = async (reset) => {
     if (busy) return false;
     if (!open(e)) { toast('학원 계약에 없는 과목이라 보기만 할 수 있어요.'); return false; }
-    if (!reset && !blocksToText(blocks)) { toast('글이나 수식 칸에 내용을 적어 주세요.'); return false; }
+    if (!reset && !blocksToText(blocks)) { toast('글이나 수식 칸에 내용을 적으세요.'); return false; }
     busy = true;
     try {
       if (reset) await clearEditedTranscript(e.bookId, block);
@@ -412,7 +412,7 @@ async function exportBank(mode, all) {
     const old = exportRun;
     const job = findJob('hwpx:bank');
     if (old.sig === sig) { job?.open(); return; }
-    if (!job) { toast('앞 시험지를 만드는 중이에요. 끝나면 다시 눌러 주세요.'); return; }
+    if (!job) { toast('앞 시험지를 만드는 중이에요. 끝나면 다시 누르세요.'); return; }
     toast('바구니가 바뀌어서 만들던 한글 문서를 멈추고 다시 만들어요.');
     job.cancel();
     await old.promise;

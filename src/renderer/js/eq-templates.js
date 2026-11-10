@@ -40,8 +40,8 @@ export const SYMBOL_GROUPS = [
 ];
 
 export function matrixTemplate(kind = 'matrix', rows = 2, columns = 2) {
-  if (!['matrix', 'pmatrix', 'bmatrix', 'dmatrix'].includes(kind)) throw new Error('행렬 종류를 골라 주세요.');
-  if (![rows, columns].every((n) => Number.isInteger(n) && n >= 1 && n <= 10)) throw new Error('줄과 칸은 1~10개로 골라 주세요.');
+  if (!['matrix', 'pmatrix', 'bmatrix', 'dmatrix'].includes(kind)) throw new Error('행렬 종류를 고르세요.');
+  if (![rows, columns].every((n) => Number.isInteger(n) && n >= 1 && n <= 10)) throw new Error('줄과 칸은 1~10개로 고르세요.');
   return `${kind} {${Array.from({ length: rows }, () => Array(columns).fill('{}').join(' & ')).join(' # ')}}`;
 }
 

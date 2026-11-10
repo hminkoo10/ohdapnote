@@ -615,7 +615,7 @@ function examTeacherField() {
   const members = ns.teacherMembers;
   const name = examInfo().teacher;
   const input = h('input.input.input-small', {
-    value: name, placeholder: '선생님 이름을 써 주세요', dataset: { key: 'teacher' },
+    value: name, placeholder: '선생님 이름을 쓰세요', dataset: { key: 'teacher' },
     'aria-label': members.length ? '직접 쓸 선생님 이름' : '선생님', readOnly: ns.readonly,
     oninput: () => {
       n.teacher = input.value.trim();
@@ -939,7 +939,7 @@ async function buildExport(mode) {
   const n = ns.note;
   const entries = allEntries();
   if (!entries.length) {
-    toast('먼저 표에서 문항을 골라 주세요.', { type: 'error' });
+    toast('먼저 표에서 문항을 고르세요.', { type: 'error' });
     return;
   }
   // 고른 책들의 원본 파일 열기

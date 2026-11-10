@@ -101,7 +101,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
     input.addEventListener('change', async () => {
       try {
         const file = input.files[0]; if (!file) return;
-        if (file.size > 200000) throw new Error('200KB 이하 파일을 골라 주세요.');
+        if (file.size > 200000) throw new Error('200KB 이하 파일을 고르세요.');
         await callback(await file.text());
       } catch (error) { warn(error); }
     });
@@ -125,7 +125,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
     })), items, h('div.eq-extra-tools', button('JSON 저장', '', () => saveFile('자주 쓰는 수식.json', JSON.stringify(list, null, 2), 'json').catch(warn)),
       button('JSON 불러오기', '', () => readFile('.json', async (text) => {
         const imported = JSON.parse(text);
-        if (!valid(imported) || list.length + imported.length > 50) throw new Error('이름과 수식이 있는 목록을 50개 이내로 골라 주세요.');
+        if (!valid(imported) || list.length + imported.length > 50) throw new Error('이름과 수식이 있는 목록을 50개 이내로 고르세요.');
         list.push(...imported); store();
       })))));
   };

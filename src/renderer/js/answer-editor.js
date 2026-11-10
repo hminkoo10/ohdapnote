@@ -108,7 +108,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
   const sourceBook = book;
   book = await api.getBook(book.id);
   item = book.docs?.problem?.items?.find((current) => current.id === item.id);
-  if (!item) throw new Error('문항이 바뀌었어요. 책을 다시 열어 주세요.');
+  if (!item) throw new Error('문항이 바뀌었어요. 책을 다시 여세요.');
   let editable = writable(book);
   let saved = (await api.getAnswers(book.id)).items[item.id] || { answer: '', blocks: [] };
   let draft = { answer: saved.answer, blocks: saved.blocks };
@@ -119,7 +119,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
   answerItem ||= findItem(book.docs.answer, computeMatches(book).get(item.id));
   const status = h('span.answer-status', { role: 'status' }, editable ? '저장됨' : '보기만');
   const answer = h('input.input.answer-input', { value: draft.answer, maxlength: 200, placeholder: '예: ③, 12, x=2', 'aria-label': '정답', readOnly: !editable });
-  const editor = h('div.answer-document', { contenteditable: editable ? 'true' : 'false', role: 'textbox', 'aria-label': '해설', 'aria-multiline': 'true', spellcheck: false, dataset: { placeholder: '여기에 해설을 써 주세요. 그림도 붙여 넣을 수 있어요.' } });
+  const editor = h('div.answer-document', { contenteditable: editable ? 'true' : 'false', role: 'textbox', 'aria-label': '해설', 'aria-multiline': 'true', spellcheck: false, dataset: { placeholder: '여기에 해설을 쓰세요. 그림도 붙여 넣을 수 있어요.' } });
   const undo = h('button.btn.btn-small', { onclick: () => travel(false) }, '되돌리기');
   const redo = h('button.btn.btn-small', { onclick: () => travel(true) }, '다시 하기');
   let selection = null;
@@ -196,7 +196,7 @@ export async function openAnswerEditor({ book, item, sources, answerItem, onChan
     }
   }
   const putImage = async (file) => {
-    if (file.size > 8 * 1024 * 1024) throw new Error('그림은 8MB 이하로 넣어 주세요.');
+    if (file.size > 8 * 1024 * 1024) throw new Error('그림은 8MB 이하로 넣으세요.');
     const name = await api.putAnswerImage(book.id, new Uint8Array(await file.arrayBuffer()));
     const url = await api.getAnswerImage(book.id, name);
     images.set(name, url);
