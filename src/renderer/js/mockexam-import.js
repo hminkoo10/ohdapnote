@@ -17,7 +17,7 @@ export async function inspectExamFolder(paths) {
   const files = [];
   for (const f of scanned.files) {
     let metadata = identifyExam(f);
-    if (/\.pdf$/i.test(f.filename) && (!metadata.exam || !metadata.subject || !metadata.year || metadata.part === 'other' || (metadata.exam === 'edu' && metadata.year <= 2016 && /^[AB]형$/.test(metadata.selection || '')) || (['csat', 'kice'].includes(metadata.exam) && !metadata.schoolYear))) {
+    if (/\.pdf$/i.test(f.filename) && (!metadata.exam || !metadata.subject || !metadata.year || metadata.part === 'other' || (metadata.exam === 'edu' && metadata.subject === 'math' && metadata.year <= 2016 && /^[AB]형$/.test(metadata.selection || '')) || (['csat', 'kice'].includes(metadata.exam) && !metadata.schoolYear))) {
       let src, url;
       try {
         url = URL.createObjectURL(new Blob([await api.scanExamRead(f.localPath)]));
