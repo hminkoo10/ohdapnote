@@ -18,3 +18,14 @@ test('단순 수식 무표시, 복원 수식 문항당 하나, 모호한 구조�
   assert.equal(countLow(clean.items.q.blocks),3);
   assert.match(clean.items.q.blocks[3].low[0].detail,/수식 2개/);
 });
+
+test('문단·보기 안의 한 줄 식도 단순 식 제외 후 같은 문항 묶음', () => {
+  const out=groupMathReview([
+    {type:'para',text:'값 $f(x)$',low:[{start:0,end:8,reason:'math'}]},
+    {type:'choices',items:['$x^{2}$','$1$'],low:[{item:0,start:0,end:7,reason:'math'},{item:1,start:0,end:3,reason:'math'}]},
+    math('sqrt x'),
+  ]);
+  assert.equal(countLow(out),1);
+  assert.match(out[1].low[0].detail,/수식 2개/);
+  assert.equal(out[1].low[0].item,0);
+});

@@ -3,6 +3,7 @@
 
 import * as pdfjsLib from '../vendor/pdfjs/pdf.min.mjs';
 import { readPageLayer } from './pdfmath.js';
+import { isPrivateChar, normalizeHancomText, resolvePdfFontName } from './hancom.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdfjs/pdf.worker.min.mjs', import.meta.url).href;
 
@@ -229,6 +230,7 @@ export class DocSource {
       return key;
     };
     const tokens = [];
+    if (content.items.some(item => isPrivateChar(item.str || ''))) await page.getOperatorList();
     for (const item of content.items) {
       if (!item.str || !item.str.trim()) continue;
       const tx = pdfjsLib.Util.transform(vp.transform, item.transform);
@@ -241,7 +243,7 @@ export class DocSource {
       const baseline = tx[5];
       const top = baseline - fontH * 0.82;
       const bottom = baseline + fontH * 0.2;
-      const str = item.str;
+      const str = normalizeHancomText(item.str, resolvePdfFontName(page, item.fontName));
       const len = str.length;
       // 한 항목 안의 단어들을 글자 수 비율로 나눔
       const re = /\S+/g;

@@ -31,9 +31,12 @@ export function stabilizeLegacyExamPages(pages, anchors, subject, exam) {
   }
   // 번호가 실제 글자층에 충분히 있을 때만 교체. 스캔은 기존 OCR 후보를 보존.
   const digital = [...candidates.values()].flat().length >= 5;
+  const strongNumbers = new Set([...candidates.values()].flat().map(c=>c.num));
   const seen = new Set(), sections = new Map();
   for (const page of pages) {
-    const list = digital && page.tokens?.length ? candidates.get(page.index) : anchors.get(page.index) || [];
+    const original = anchors.get(page.index) || [];
+    const recovered = original.filter(c=>!strongNumbers.has(c.num) && axes.some(x=>Math.abs(x-c.x0)<.025));
+    const list = digital && page.tokens?.length ? [...candidates.get(page.index), ...recovered] : original;
     const chosen = list.filter(c => c.num >= 1 && c.num <= hi).sort((a,b) => a.col-b.col || a.y0-b.y0);
     anchors.set(page.index, chosen.filter(c => { if(seen.has(c.num)) return false; seen.add(c.num); return true; }));
     sections.set(page.index, { subject, selection:exam.selection || null, form:exam.form || null });
