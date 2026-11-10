@@ -35,7 +35,7 @@ export function stabilizeLegacyExamPages(pages, anchors, subject, exam) {
   const seen = new Set(), sections = new Map();
   for (const page of pages) {
     const original = anchors.get(page.index) || [];
-    const recovered = original.filter(c=>!strongNumbers.has(c.num) && axes.some(x=>Math.abs(x-c.x0)<.025));
+    const recovered = original.filter(c=>!strongNumbers.has(c.num) && !c.prefix);
     const list = digital && page.tokens?.length ? [...candidates.get(page.index), ...recovered] : original;
     const chosen = list.filter(c => c.num >= 1 && c.num <= hi).sort((a,b) => a.col-b.col || a.y0-b.y0);
     anchors.set(page.index, chosen.filter(c => { if(seen.has(c.num)) return false; seen.add(c.num); return true; }));

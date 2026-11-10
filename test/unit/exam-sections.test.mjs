@@ -26,6 +26,13 @@ test('스캔 학평은 OCR 후보 보존, 과목 범위와 중복만 제한', ()
   stabilizeLegacyExamPages([p],anchors,'math',{exam:'edu',year:2006});
   assert.deepEqual(anchors.get(0).map(c=>c.num),[1]);
 });
+
+test('점 번호가 없는 문항의 기존 확정 번호를 잃지 않음', () => {
+  const p=page(0,'가짜 학평',[1,2,3,4,5]);
+  const anchors=new Map([[0,[{num:6,col:0,x0:.17,y0:.7}]]]);
+  stabilizeLegacyExamPages([p],anchors,'math',{exam:'edu',year:2005});
+  assert.deepEqual(anchors.get(0).map(c=>c.num),[1,2,3,4,5,6]);
+});
 test('선택별 번호·본문 숫자 배제·홀짝·반복 결과', () => {
   const pages = [page(0, '2024학년도 대학수학능력시험 홀수형 (화법과작문)', [35,36]), page(1, '(언어와매체)', [35,36,1,2]), page(2, '짝수형 (화법과작문)', [35,36])];
   const run = () => { const anchors = new Map(); const s = stabilizeExamPages(structuredClone(pages), anchors, 'korean'); return { anchors, s }; };
