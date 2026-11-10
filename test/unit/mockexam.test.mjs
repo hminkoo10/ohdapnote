@@ -146,3 +146,8 @@ test('가형 표 안의 옛 세부 과목 머리글은 같은 형의 정답으�
   assert.equal(r.answers['math|가형'][26].answer,'4');
   assert.equal(r.answers['math|미적분'],undefined);
 });
+
+test('다른 유니코드 원문자 정답도 동일한 선택지로 읽음', () => {
+  const r=parseAnswerKey('영어 영역 정답\n1 ➄ 2 ➁ 3 ➀ 4 ❹ 5 ❸',{tablesOnly:true});
+  assert.deepEqual(Object.values(r.answers.english).map(e=>e.answer),['5','2','1','4','3']);
+});
