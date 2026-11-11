@@ -6,10 +6,18 @@ export function trailingNonQuestionPages(rows, pageCount) {
   if (!Number.isInteger(pageCount) || pageCount <= 0) return new Map();
   const byPage = new Map(rows.map(r => [r.index, r]));
   const excluded = new Map();
+  const supported = [];
+  let hasStrongShape = false;
   for (let index = pageCount - 1; index >= 0; index--) {
     const row = byPage.get(index);
-    if (!row || row.restored || (!row.shape && !row.nonQuestion)) break;
-    excluded.set(index, row.shape ? 'answer_table' : row.role);
+    if (!row || row.restored || (!row.shape && !row.nonQuestion && !row.weakShape)) break;
+    supported.push(row);
+    hasStrongShape ||= !!row.shape;
+  }
+  // 확실한 정답표가 없는 묶음은 이전 규칙 그대로 처리합니다.
+  for (const row of supported) {
+    if (!hasStrongShape && !row.shape && !row.nonQuestion) break;
+    excluded.set(row.index, row.shape || (hasStrongShape && row.weakShape) ? 'answer_table' : row.role);
   }
   // 묶음 앞에 실제 문항이 남는 보통 쪽이 없으면 문서 전체를 보호합니다.
   const first = Math.min(...excluded.keys());

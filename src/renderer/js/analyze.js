@@ -874,8 +874,10 @@ export async function analyzeDocument(src, opts) {
       // 여러 쪽에 걸친 문항은 쪽 단위로 분리해 빼지 않습니다.
       const continued = items.some(it => it.rects.some(box => box.page === r.index) &&
         (it.page !== r.index || it.rects.some(box => box.page !== r.index)));
-      const shape = !continued && classifyAnswerTableShape(detected).matchesShape && b.role !== 'problem';
-      return { index: r.index, shape, hasQuestions: detected.length > 0, nonQuestion: !continued && !b.extractQuestions, role: b.role,
+      const classified = classifyAnswerTableShape(detected);
+      const shape = !continued && classified.matchesShape && b.role !== 'problem';
+      const weakShape = !continued && classified.supportsAnswerTable && b.role !== 'problem';
+      return { index: r.index, shape, weakShape, hasQuestions: detected.length > 0, nonQuestion: !continued && !b.extractQuestions, role: b.role,
         restored: !!opts.previousDoc?.pageInfo?.[r.index]?.exclusion?.restored };
     });
     const roles = trailingNonQuestionPages(rows, src.numPages);

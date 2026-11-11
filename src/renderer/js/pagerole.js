@@ -109,9 +109,13 @@ export function classifyAnswerTableShape(items = []) {
     textCoverage:ratio(textCount), shortTextRatio:textCount ? shortCount/textCount : null, sentenceCount };
   const geometryMatch = !invalid && pages.size <= 1 && n > 40 && smallRatio >= .85 && gridRatio >= .7;
   const matchesShape = geometryMatch && sentenceCount === 0;
+  // 약한 모양은 단독 제외 근거가 아닙니다. 기존 모양을 통과한 이웃이 있어야 씁니다.
+  const supportsAnswerTable = !invalid && pages.size <= 1 && n > 40 &&
+    smallRatio >= .8 && gridRatio >= .7 && textCount / n >= .8 &&
+    shortCount / textCount >= .05 && sentenceCount / n <= .05;
   // 모양 후보일 뿐입니다. 실제 제외는 책 끝 연속 묶음에만 적용합니다.
   const isAnswerTable = matchesShape;
-  return { isAnswerTable, matchesShape, role:isAnswerTable ? 'answer_table' : 'unknown', features,
+  return { isAnswerTable, matchesShape, supportsAnswerTable, role:isAnswerTable ? 'answer_table' : 'unknown', features,
     reason: invalid || pages.size > 1 ? '입력 불명확: 문항 보존' :
       sentenceCount ? '상자 안 지시문·서술문: 문항 보존' :
       isAnswerTable ? '작은 격자, 문장 단서 없음: 끝 묶음 확인 필요' : '정답표 모양 근거 부족: 문항 보존' };
