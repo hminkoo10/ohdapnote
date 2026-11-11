@@ -72,3 +72,43 @@ export function routePageItems(items, classification) {
   return { questions: classification.extractQuestions ? [...items] : [],
     retainedNonQuestions: classification.extractQuestions ? [] : [...items], classification };
 }
+
+// 앱의 한 쪽 검출 배열만 받습니다. rects는 쪽 비율 좌표입니다.
+// 번호 값·연속·정답 대응은 읽지 않습니다. 여러 쪽/잘못된 상자는 보수적으로 보존합니다.
+export function classifyAnswerTableShape(items = []) {
+  const boxes = [], pages = new Set();
+  let invalid = !Array.isArray(items), textCount = 0, shortCount = 0;
+  for (const item of Array.isArray(items) ? items : []) {
+    if (item?.page != null) pages.add(item.page);
+    if (!Array.isArray(item?.rects) || item.rects.length !== 1) { invalid = true; continue; }
+    const r = item.rects[0];
+    if (!r || ![r.x,r.y,r.w,r.h].every(Number.isFinite) || r.x < 0 || r.y < 0 ||
+        r.w <= 0 || r.h <= 0 || r.x+r.w > 1.000001 || r.y+r.h > 1.000001) { invalid = true; continue; }
+    if (r.page != null) pages.add(r.page);
+    boxes.push(r);
+    // number는 검출 앵커이지 상자 안 글이 아니므로 대용하지 않습니다.
+    if (typeof item.text === 'string') {
+      textCount++;
+      const text = item.text.replace(/\s/g, '');
+      if (text.length > 0 && text.length <= 12 && /^[0-9①-⑤.,()]+$/.test(text)) shortCount++;
+    }
+  }
+  const n = boxes.length, ratio = count => n ? count/n : 0;
+  const quantiles = key => {
+    const values = boxes.map(key).sort((a,b)=>a-b);
+    return [0.1,0.5,0.9].map(q => n ? values[Math.floor((n-1)*q)] : null);
+  };
+  const smallRatio = ratio(boxes.filter(r => r.h <= .04 && r.w*r.h <= .012).length);
+  // 같은 열의 다른 행과 같은 행의 다른 열이 모두 있어야 격자 지지로 셉니다.
+  const gridRatio = ratio(boxes.filter((r,i) =>
+    boxes.some((s,j)=>i!==j && Math.abs(r.x-s.x)<=.012 && Math.abs(r.y-s.y)>.008) &&
+    boxes.some((s,j)=>i!==j && Math.abs(r.y-s.y)<=.006 && Math.abs(r.x-s.x)>.04)).length);
+  const features = { boxCount:n, widthQuantiles:quantiles(r=>r.w), heightQuantiles:quantiles(r=>r.h),
+    areaQuantiles:quantiles(r=>r.w*r.h), smallRatio, gridRatio,
+    textCoverage:ratio(textCount), shortTextRatio:textCount ? shortCount/textCount : null };
+  // dev에서 고정한 기하 문턱. 글은 선택 진단값이며 누락/오독에 기대어 판정하지 않습니다.
+  const isAnswerTable = !invalid && pages.size <= 1 && n > 40 && smallRatio >= .85 && gridRatio >= .7;
+  return { isAnswerTable, role:isAnswerTable ? 'answer_table' : 'unknown', features,
+    reason: invalid || pages.size > 1 ? '입력 불명확: 문항 보존' :
+      isAnswerTable ? '다수의 작은 검출 상자가 양축 격자로 정렬됨' : '정답표 모양 근거 부족: 문항 보존' };
+}
