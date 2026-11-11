@@ -185,7 +185,7 @@ try {
   await win.keyboard.press('Control+n'); await win.keyboard.press('Control+m');
   await win.waitForSelector('.answer-equation-modal');
   await win.locator('.answer-equation-script').fill('sqrt {');
-  assert.match(await win.locator('.answer-equation-modal .warn-text').innerText(), /확인/);
+  assert.match(await win.locator('.answer-equation-modal .eq-notice').innerText(), /확인/);
   await shot('equation');
   await win.keyboard.press('Escape');
   await win.getByRole('button', { name: '버리기', exact: true }).click();
