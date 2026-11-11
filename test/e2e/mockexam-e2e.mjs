@@ -5,12 +5,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdi
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { setPriority, constants } from 'node:os';
+import { setPriority, constants, tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 const require = createRequire(import.meta.url);
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const tmp = mkdtempSync('C:/temp/gcc-tmp/ohdap-mockexam-');
+const tmp = mkdtempSync(join(tmpdir(), 'ohdap-mockexam-'));
 const userData = join(tmp, 'user'), academy = join(tmp, 'academy');
 mkdirSync(userData); const input = join(tmp, 'input'); mkdirSync(input);
 const shots = process.env.MOCKEXAM_SHOTS;
@@ -118,6 +118,6 @@ try {
   }
 } finally {
   await app?.close(); cloud.stop();
-  assert.ok(resolve(tmp).startsWith('C:\\temp\\gcc-tmp\\ohdap-mockexam-'));
+  assert.ok(resolve(tmp).startsWith(join(resolve(tmpdir()), 'ohdap-mockexam-')));
   try { rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { console.log('남은 임시 폴더:', tmp); }
 }
