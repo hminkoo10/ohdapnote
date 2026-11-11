@@ -5,7 +5,7 @@ import { api, state, nav, getSources, holdSource, itemImage, findJob, jobListene
 import { SUBJECTS, subjectName, contractedSubjects, subjectOpen } from './subjects.js';
 import { pageLabel } from './store.js';
 import { buildPdf, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS, CONVERT_MODES } from './exporter.js';
-import { bankEntries, filterBank, orderPicked, makeBankBlocks, bankTargets, passageItem, blocksToText, choiceMark } from './bank.js';
+import { bankEntries, filterBank, librarySelected, orderPicked, makeBankBlocks, bankTargets, passageItem, blocksToText, choiceMark } from './bank.js';
 import { loadTranscripts, bestTranscript, setEditedTranscript, clearEditedTranscript, exportHwpx } from './transcribe.js';
 import { putBank } from './bank-transcribe.js';
 import { answerEditorButton, showAnswerPreview } from './answer-editor.js';
@@ -72,10 +72,11 @@ export function bankView(summaries) {
     const unread = new Set();
     for (const id of cache.keys()) if (!summaries.some((b) => b.id === id)) cache.delete(id);
     for (const summary of summaries) {
+      if (summary.library) continue;
       if (!summary.problemCount && !summary.problemAnalyzed) continue;
       try {
         let cached = cache.get(summary.id);
-        if (!cached || cached.updatedAt !== summary.updatedAt) {
+        if (!cached || cached.updatedAt !== summary.updatedAt || !!cached.book.$library !== !!summary.library) {
           cached = { updatedAt: summary.updatedAt, book: await api.getBook(summary.id) };
           cache.set(summary.id, cached);
         }
@@ -91,7 +92,7 @@ export function bankView(summaries) {
     if (active !== root) return;
     const entries = bankEntries(books);
     const valid = new Set(entries.map(keyOf));
-    bs.picked = bs.picked.filter((p) => valid.has(pickedKey(p)) || unread.has(p.bookId));
+    bs.picked = bs.picked.filter((p) => valid.has(pickedKey(p)) || unread.has(p.bookId) || summaries.some((s) => s.library && s.id === p.bookId));
     persist();
     renderBank(root, summaries, books, entries, failed);
     requestAnimationFrame(() => {
@@ -152,7 +153,9 @@ function renderBank(root, summaries, books, entries, failed) {
   function renderBooks() {
     clear(bookList);
     if (!summaries.length) bookList.append(h('p.muted', '아직 등록한 교재가 없어요.'));
-    for (const s of summaries) {
+    const libraries = summaries.filter((s) => s.library);
+    if (libraries.length) bookList.append(h('p.small.muted', `마고 모의고사 ${libraries.length}권 (계약 과목)`));
+    for (const s of summaries.filter((s) => !s.library)) {
       const book = books.find((b) => b.id === s.id);
       const items = entries.filter((e) => e.bookId === s.id);
       const n = items.filter((e) => result(e) && (!e.stemKey || result(e, passageItem(e.item)))).length;
@@ -180,7 +183,38 @@ function renderBank(root, summaries, books, entries, failed) {
     }
   }
 
-  const updateFilter = debounce(() => { if (root.isConnected) { bs.limit = 200; bs.scroll = 0; renderList(); } }, 180);
+  let loadRun = 0;
+  const loading = h('p.small.muted', { hidden: true });
+  const loadLibrary = async () => {
+    const run = ++loadRun;
+    const selected = summaries.filter((s) => s.library && s.subjectOpen !== false && subjectOpen(s, state.appInfo) && (librarySelected(s, bs.filters) || bs.picked.some((p) => p.bookId === s.id)));
+    if (!selected.length) { loading.hidden = true; return; }
+    const needed = selected.filter((s) => !cache.has(s.id) || cache.get(s.id).updatedAt !== s.updatedAt);
+    loading.hidden = !needed.length;
+    for (let i = 0; i < selected.length; i++) {
+      if (run !== loadRun || active !== root) return;
+      const summary = selected[i];
+      let cached = cache.get(summary.id);
+      if (!cached || cached.updatedAt !== summary.updatedAt || !!cached.book.$library !== !!summary.library) {
+        loading.textContent = `모의고사를 불러오는 중 ${i + 1} / ${selected.length}`;
+        try {
+          const book = await api.getBook(summary.id);
+          book.$answers = await api.getAnswers(summary.id);
+          await loadTranscripts(summary.id, { reload: true });
+          cached = { updatedAt: summary.updatedAt, book };
+          cache.set(summary.id, cached);
+        } catch (err) { if (run === loadRun) { loading.textContent = '모의고사를 읽지 못했어요. 다시 고르세요.'; loading.hidden = false; } return; }
+      }
+      Object.assign(cached.book, { $library: true, $canEdit: false, $subjectOpen: summary.subjectOpen, subjectOpen: summary.subjectOpen, name: summary.name, subject: summary.subject });
+      const at = books.findIndex((b) => b.id === summary.id);
+      if (at < 0) books.push(cached.book); else books[at] = cached.book;
+    }
+    if (run !== loadRun || active !== root) return;
+    entries.splice(0, entries.length, ...bankEntries(books));
+    loading.hidden = true;
+    renderList(); renderBasket(); renderPreview();
+  };
+  const updateFilter = debounce(() => { if (root.isConnected) { bs.limit = 200; bs.scroll = 0; renderList(); loadLibrary().catch(fail); } }, 180);
   const field = (key, label, placeholder) => h('label.bank-filter', h('span.small', label), h('input.input', {
     value: bs.filters[key], placeholder, type: 'search', dataset: { bankFocus: key },
     oninput: (e) => { bs.filters[key] = e.target.value; updateFilter(); },
@@ -191,10 +225,11 @@ function renderBank(root, summaries, books, entries, failed) {
   const subjects = SUBJECTS.filter((s) => contractedSubjects(state.appInfo).includes(s.code) || summaries.some((b) => (b.subject || 'math') === s.code));
   filters.append(
     ...(subjects.length > 1 ? [selectFilter('subject', '과목', [['', '모든 과목'], ...subjects.map((s) => [s.code, s.name])])] : []),
-    selectFilter('exam', '모의고사', [['', '모든 교재'], ['all', '모의고사 전체'], ['csat', '수능'], ['kice', '모평'], ['edu', '학평']]),
+    selectFilter('exam', '모의고사', [['', '모든 교재'], ['all', '모의고사 전체'], ['csat', '수능'], ['kice', '모평'], ['edu', '학평'], ...(summaries.some((s) => s.library) ? [['library', '마고 모의고사']] : [])]),
     field('year', '연도', '예: 2024'),
+    selectFilter('month', '월', [['', '모든 월'], ...[3, 4, 6, 7, 9, 10, 11].map((m) => [String(m), `${m}월`])]),
     selectFilter('grade', '학년', [['', '모든 학년'], ['1', '고1'], ['2', '고2'], ['3', '고3']]),
-    selectFilter('bookId', '책', [['', '모든 교재'], ...summaries.map((b) => [b.id, b.name])]),
+    selectFilter('bookId', '책', [['', '모든 교재'], ...summaries.filter((b) => !b.library).map((b) => [b.id, b.name])]),
     field('page', '쪽', '예: 12 또는 12-15'), field('number', '번호', '예: 3 또는 3-7'), field('text', '글자로 찾기', '예: 이차함수, 빈칸'),
     h('label.bank-check', h('input', { type: 'checkbox', checked: bs.filters.review, dataset: { bankFocus: 'review' }, onchange: (ev) => { bs.filters.review = ev.target.checked; updateFilter.flush(); } }), '확인할 문항만'),
     h('button.btn', { onclick: () => { Object.keys(bs.filters).forEach((k) => { bs.filters[k] = k === 'review' ? false : ''; }); filters.querySelectorAll('input, select').forEach((el) => { if (el.type === 'checkbox') el.checked = false; else el.value = ''; }); updateFilter.flush(); } }, '지우기'));
@@ -204,9 +239,10 @@ function renderBank(root, summaries, books, entries, failed) {
     clear(list);
     const found = filterBank(entries, bs.filters, textOf).filter((e) => !bs.filters.review || reviewCount(e));
     count.textContent = `${found.length}문항`;
-    if (!summaries.length || !entries.length && !Object.values(bs.filters).some(Boolean)) {
+    if (summaries.some((s) => s.library) && !bs.filters.exam && !String(bs.filters.year || '').trim()) list.append(h('p.small.muted', '마고 모의고사는 시험 종류나 연도를 고르면 보여요.'));
+    if (!summaries.length || !entries.length && !Object.values(bs.filters).some(Boolean) && !summaries.some((s) => s.library)) {
       list.append(h('div.empty-state', h('p', '책장에서 교재를 등록하고 분석하세요.'), h('button.btn.btn-primary', { onclick: () => nav.home({ tab: 'books' }) }, '책장으로')));
-    } else if (!found.length) list.append(h('div.empty-state', h('p', '맞는 문항이 없어요. 찾는 말을 줄이거나 바꿔 보세요')));
+    } else if (!found.length && !(summaries.some((s) => s.library) && !bs.filters.exam && !String(bs.filters.year || '').trim())) list.append(h('div.empty-state', h('p', '맞는 문항이 없어요. 찾는 말을 줄이거나 바꿔 보세요')));
     let bookId = null;
     let bookGroup = null;
     let previousStem = '';
@@ -215,7 +251,7 @@ function renderBank(root, summaries, books, entries, failed) {
       if (bookId !== e.bookId) {
         bookId = e.bookId;
         previousStem = '';
-        bookGroup = h('section.bank-book-group', h('h3', e.bookName, h('span.small.muted', subjectName(e.subject))));
+        bookGroup = h('section.bank-book-group', h('h3', e.bookName, h('span.small.muted', `${subjectName(e.subject)}${e.bookObj.$library ? ' · 마고' : ''}`)));
         list.append(bookGroup);
       }
       if (e.stemKey && previousStem !== e.stemKey) {
@@ -264,6 +300,7 @@ function renderBank(root, summaries, books, entries, failed) {
       const [problem, answer] = await Promise.all([itemImage(src.problem, e.item, 700, { stem: e.item.stem }), e.answer ? itemImage(src.answer, e.answer, 700) : null]);
       if (run !== previewRun || !root.isConnected) return;
       clear(preview).append(h('h3', `${e.bookName} · ${itemName(e.item)}`));
+      if (e.bookObj.$library) preview.append(h('p.small.muted', '마고 공용 책장 · 읽기 전용'), h('button.btn.btn-ghost.btn-small', { onclick: (ev) => { const button = ev.currentTarget; button.disabled = true; attempt(async () => { try { const copy = await api.copyBook(e.bookId); toast('내 책으로 복사했어요.'); nav.book(copy.id); } finally { button.disabled = false; } }); } }, '내 책으로 복사'));
       if (!open(e)) preview.append(h('p.readonly-banner', '학원 계약에 없는 과목 · 보기만'));
       if (problem) preview.append(h('img.bank-image', { src: problem, alt: '지문을 포함한 문제 그림' }));
       if (answer) preview.append(h('h4', '짝 해설'), h('img.bank-image', { src: answer, alt: '짝 해설 그림' }));
@@ -286,14 +323,14 @@ function renderBank(root, summaries, books, entries, failed) {
     const panel = h('div.bank-transcript', { dataset: { passage: String(!!item.passage) } },
       h('div.bank-heading', h('h4', item.passage ? `${itemName(item)} · 옮긴 글` : '옮긴 글'),
         r ? h('span.small.muted', pathName[r.path]) : null,
-        open(e) ? h('button.btn.btn-small', { onclick: () => attempt(() => editTranscript(e, block)) }, '글 고치기') : null,
-        !item.passage ? answerEditorButton({ book: e.bookObj, item: e.item, answerItem: e.answer, onChange: changed }) : null));
+        open(e) && !e.bookObj.$library ? h('button.btn.btn-small', { onclick: () => attempt(() => editTranscript(e, block)) }, '글 고치기') : null,
+        !item.passage && !e.bookObj.$library ? answerEditorButton({ book: e.bookObj, item: e.item, answerItem: e.answer, onChange: changed }) : null));
     if (r) panel.append(...r.entry.blocks.map((b) => b.type === 'para' ? h('p.bank-para', b.text)
       : b.type === 'math' ? h('div.bank-math', b.latex)
         : b.type === 'choices' ? h('div.bank-choices', b.items.map((v, i) => h('p', `${choiceMark(i)} ${v}`))) : h('p.muted', '[그림]')));
     else {
       panel.append(h('p.small.muted', open(e) ? '아직 글자로 옮긴 결과가 없어요.' : '아직 글자로 옮긴 결과가 없어요.'));
-      if (open(e)) panel.append(h('button.btn', { onclick: () => attempt(() => putBank(e.bookObj, { item: e.item, onChange: changed })) }, '이 문항만 옮기기'));
+      if (open(e) && !e.bookObj.$library) panel.append(h('button.btn', { onclick: () => attempt(() => putBank(e.bookObj, { item: e.item, onChange: changed })) }, '이 문항만 옮기기'));
     }
     return panel;
   }
@@ -314,9 +351,10 @@ function renderBank(root, summaries, books, entries, failed) {
   refresh = () => { renderBooks(); renderList(); renderPreview(); renderBasket(); };
   root.append(h('div.bank-heading', h('h2', '찾아서 시험지로'), introButton),
     intro, intake, ...failed.map((s) => h('p.warn-text', s)),
-    h('div.bank-columns', h('section.bank-main', filters, h('div.bank-heading', h('h3', '문항 목록'), count), list), h('aside.bank-side', preview, basket)));
+    h('div.bank-columns', h('section.bank-main', filters, loading, h('div.bank-heading', h('h3', '문항 목록'), count), list), h('aside.bank-side', preview, basket)));
   renderIntro();
   refresh();
+  loadLibrary().catch(fail);
 }
 
 async function editTranscript(e, block) {

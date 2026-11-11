@@ -75,7 +75,7 @@ export async function showHome({ tab } = {}) {
   const segBtn = (key, ic, label, n) =>
     h(`button.seg-tab${homeTab === key ? '.active' : ''}`, { dataset: { tab: key }, onclick: () => switchTab(key) }, icon(ic), h('span', label), h('span.seg-count', String(n)));
   const thumb = h('span.seg-thumb');
-  const tabs = h('nav.seg-tabs', thumb, segBtn('notes', 'notebook', '학생 오답노트', notes.length), segBtn('books', 'library', '책장', books.length), segBtn('bank', 'layers', '문제은행', books.reduce((n, b) => n + (b.problemCount || 0), 0)), segBtn('students', 'user', '학생 명단', active.length));
+  const tabs = h('nav.seg-tabs', thumb, segBtn('notes', 'notebook', '학생 오답노트', notes.length), segBtn('books', 'library', '책장', books.filter((b) => !b.library).length), segBtn('bank', 'layers', '문제은행', books.reduce((n, b) => n + (b.problemCount || 0), 0)), segBtn('students', 'user', '학생 명단', active.length));
   const [heroTitle, heroSub] = heroText(homeTab);
 
   root.append(
@@ -408,9 +408,9 @@ export async function showHome({ tab } = {}) {
 
   // 학원 공간: 내 책장(내가 만든 책 — 학원 공유든 나만 보기든) / 공유 책장(다른 선생님이 학원에 공유한 책). 학원이 없으면 책장 하나
   function booksGrid() {
-    if (!state.appInfo.academy) return bookCards(books, true);
-    const mine = books.filter((b) => b.mine);
-    const others = books.filter((b) => !b.mine);
+    if (!state.appInfo.academy) return bookCards(books.filter((b) => !b.library), true);
+    const mine = books.filter((b) => !b.library && b.mine);
+    const others = books.filter((b) => !b.library && !b.mine);
     const shelfBtn = (key, ic, label, n) =>
       h(`button.seg-tab${shelf === key ? '.active' : ''}`, { dataset: { shelf: key }, onclick: () => switchShelf(key) }, icon(ic), h('span', label), h('span.seg-count', String(n)));
     const tabs = h('nav.seg-tabs.shelf-tabs', h('span.seg-thumb'), shelfBtn('mine', 'user', '내 책장', mine.length), shelfBtn('shared', 'school', '공유 책장', others.length));

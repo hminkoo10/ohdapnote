@@ -49,12 +49,25 @@ const matchesRange = (value, query) => {
   return String(value) === q;
 };
 
-export function filterBank(entries, { exam = '', year = '', grade = '', subject = '', bookId = '', page = '', number = '', text = '' } = {}, textOf = () => '') {
+/** 공용 책장은 시험 종류 또는 연도를 고른 뒤에만 읽음. */
+export function librarySelected(book, filters = {}) {
+  return !!(filters.exam || String(filters.year || '').trim()) && examMatches(book, filters);
+}
+export function examMatches(book, { exam = '', year = '', grade = '', month = '', subject = '', bookId = '' } = {}) {
+  const meta = book.exam;
+  const library = book.library || book.$library;
+  return (!exam || (exam === 'library' ? !!library : !!meta && (exam === 'all' || meta.exam === exam)))
+    && (!year || String(meta?.schoolYear || meta?.year) === String(year).trim())
+    && (!grade || String(meta?.grade) === String(grade))
+    && (!month || String(meta?.exam === 'csat' ? 11 : meta?.month) === String(month))
+    && (!subject || (book.subject || 'math') === subject) && (!bookId || book.id === bookId);
+}
+export function filterBank(entries, filters = {}, textOf = () => '') {
+  const { page = '', number = '', text = '' } = filters;
   const q = compact(text);
   const n = String(number).trim().replace(/^[^\d]+\s*/, '').replace(/번$/, '').trim();
-  return entries.filter((e) => (!exam || !!e.bookObj.exam && (exam === 'all' || e.bookObj.exam.exam === exam))
-    && (!year || String(e.bookObj.exam?.schoolYear || e.bookObj.exam?.year) === String(year))
-    && (!grade || String(e.bookObj.exam?.grade) === String(grade)) && (!subject || e.subject === subject) && (!bookId || e.bookId === bookId)
+  return entries.filter((e) => (!(e.bookObj.$library || e.bookObj.library) || librarySelected(e.bookObj, filters))
+    && examMatches(e.bookObj, filters)
     && matchesRange(bookPage(e.bookObj?.docs.problem, e.item.page), page)
     && matchesRange(e.item.number, n) && (!q || compact(`${itemName(e.item)} ${textOf(e)}`).includes(q)));
 }

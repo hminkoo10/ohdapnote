@@ -1,8 +1,8 @@
 // E2E 용 통합 클라우드 흉내: 학원 명단·학원 AI 파일(academy-info.json)을 쓰고, 프로그램이 requests/ 에 남긴 부탁에 답함
 //   학생 추가·고치기(rev 가 다르면 conflict)·지우기·되살리기, 열 때만 받는 파일(이미 있으면 그대로 · 없으면 missing)
 //   통합 클라우드 docs/INTEGRATION.md 4-1 · 4-2 와 같은 모양
-import { mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, existsSync, copyFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -12,10 +12,11 @@ const DAY = 24 * 60 * 60 * 1000;
  *   subjects: 학원이 계약한 과목 (없으면 academy.subjects 를 싣지 않음 — 옛 통합 클라우드처럼)
  * → { env: 앱에 넘길 환경 변수, as(user): 누구로 켜는지, students(), student(id), edit(id, patch): 다른 곳에서 고친 것처럼, setAi(ai), setSubjects(list), stop() }
  */
-export function fakeCloud({ dir, academyDir, members, purgeDays = 30, subjects = null }) {
+export function fakeCloud({ dir, academyDir, members, purgeDays = 30, subjects = null, libraryDir = '', librarySourceDir = '' }) {
   const requestDir = join(dir, 'requests');
   const infoFile = join(dir, 'academy-info.json');
   mkdirSync(requestDir, { recursive: true });
+  const requests = [];
   const students = new Map();
   let me = members[0];
   let ai = null;
@@ -73,7 +74,14 @@ export function fakeCloud({ dir, academyDir, members, purgeDays = 30, subjects =
     if (body.op === 'students.delete') return setDeleted(body.id, true);
     if (body.op === 'students.restore') return setDeleted(body.id, false);
     if (body.op) return { ok: false, error: '모르는 부탁', errorCode: 'unknown_op' };
-    const missing = (body.paths || []).filter((p) => !existsSync(join(academyDir, ...p.split('/'))));
+    requests.push(body);
+    const root = body.library ? libraryDir : academyDir;
+    if (body.library && librarySourceDir) for (const p of body.paths || []) {
+      const to = join(root, ...p.split('/'));
+      const from = join(librarySourceDir, ...p.split('/'));
+      if (!existsSync(to) && existsSync(from)) { mkdirSync(dirname(to), { recursive: true }); copyFileSync(from, to); }
+    }
+    const missing = (body.paths || []).filter((p) => !root || !existsSync(join(root, ...p.split('/'))));
     return { ok: !missing.length, missing };
   }
 
@@ -103,7 +111,8 @@ export function fakeCloud({ dir, academyDir, members, purgeDays = 30, subjects =
 
   writeInfo();
   return {
-    env: { MAGOEDU_REQUEST_DIR: requestDir, MAGOEDU_ACADEMY_INFO: infoFile },
+    requests,
+    env: { MAGOEDU_LIBRARY_DIR: libraryDir, MAGOEDU_REQUEST_DIR: requestDir, MAGOEDU_ACADEMY_INFO: infoFile },
     as(user) {
       me = members.find((m) => m.id === user) || me;
       writeInfo();

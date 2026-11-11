@@ -197,5 +197,7 @@ try {
   console.log(`RESULT easy-ui: ${passed} passed, 0 failed`);
 } finally {
   await app?.close();
-  rmSync(tmp, { recursive: true, force: true });
+  if (process.platform === 'win32') {
+    execFileSync('powershell.exe', ['-NoProfile', '-Command', "try { Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:OHDAP_TEST_CLEANUP, 'OnlyErrorDialogs', 'SendToRecycleBin') } catch { Write-Output $env:OHDAP_TEST_CLEANUP }"], { env: { ...process.env, OHDAP_TEST_CLEANUP: tmp } });
+  } else rmSync(tmp, { recursive: true, force: true });
 }

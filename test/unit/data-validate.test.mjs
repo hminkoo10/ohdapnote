@@ -571,3 +571,37 @@ test('일반 외부 링크 IPC: 기존 https 제한 유지', async () => {
   await m.handlers.get('shell:openExternal')(null, 'https://school.example');
   assert.deepEqual(m.opened, ['https://school.example']);
 });
+
+
+test('공용 책장 실제 IPC: 위치 우선순위·모든 쓰기 거절·손상 JSON 보존', async () => {
+  const m = loadMain({ academy: true });
+  m.session.libraryDir = path.join(m.dir, 'library');
+  m.registerIpc();
+  const id = 'exam-0123456789abcdef';
+  const dir = path.join(m.session.libraryDir, 'books', id);
+  const book = { id, name: '합성 공용', subject: 'math', docs: { problem: { files: [], items: [{ id: 'q1' }] } } };
+  writeJson(path.join(dir, 'book.json'), book);
+  const get = () => m.handlers.get('books:get')(null, id);
+  assert.equal((await get()).$library, true);
+  assert.equal((await get()).$canEdit, false);
+  const summaries = await m.handlers.get('books:list')();
+  assert.equal(summaries[0].library, true);
+  assert.equal(summaries[0].mine, false);
+  assert.equal(summaries[0].shared, false);
+  for (const [name, args] of [['books:save', [book]], ['books:delete', [id]], ['books:setShared', [{ id, shared: false }]], ['books:renameItems', [{ bookId: id }]], ['books:saveTranscripts', [{ bookId: id, data: {} }]], ['answers:save', [{ bookId: id, itemId: 'q1', data: { answer: '1', blocks: [] } }]], ['answers:putImage', [{ bookId: id }]]]) {
+    await assert.rejects(async () => m.handlers.get(name)(null, ...args), /마고 공용 책장/, name);
+  }
+  for (const name of ['books:saveSync', 'answers:saveSync']) {
+    const event = {};
+    m.handlers.get(name)(event, name === 'books:saveSync' ? book : { bookId: id, itemId: 'q1', data: {} });
+    assert.equal(event.returnValue, false);
+  }
+  writeFileSync(path.join(dir, 'transcripts.json'), '{invalid');
+  assert.deepEqual(await m.mergedTranscripts(id), {});
+  assert.equal(readFileSync(path.join(dir, 'transcripts.json'), 'utf8'), '{invalid');
+  assert.deepEqual(readdirSync(dir).sort(), ['book.json', 'transcripts.json']);
+  writeJson(path.join(m.session.academyDir, 'members/dev/books', id, 'book.json'), { ...book, name: '내 책' });
+  assert.equal((await get()).name, '내 책');
+  writeJson(path.join(m.session.academyDir, 'books', id, 'book.json'), { ...book, name: '학원 책' });
+  assert.equal((await get()).name, '학원 책');
+});

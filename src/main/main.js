@@ -14,6 +14,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const { createFileQueue } = require('./file-queue');
+const { libraryLocation, assertLibraryWritable, createSummaryCache } = require('./library');
+const librarySummaries = createSummaryCache();
 const withJsonFile = createFileQueue();
 const crypto = require('node:crypto');
 const log = require('electron-log/main');
@@ -162,10 +164,10 @@ function newBookDir(id, shared = true) {
  */
 function locateBook(id) {
   const shared = newBookDir(id);
-  if (!academyMode() || fs.existsSync(path.join(shared, 'book.json'))) return { dir: shared, place: 'shared' };
-  const mine = path.join(myBooksDir(), id);
+  if (fs.existsSync(path.join(shared, 'book.json'))) return { dir: shared, place: 'shared' };
+  const mine = academyMode() ? path.join(myBooksDir(), id) : shared;
   if (fs.existsSync(path.join(mine, 'book.json'))) return { dir: mine, place: 'private' };
-  if (isManager()) {
+  if (academyMode() && isManager()) {
     let uids = [];
     try {
       uids = fs.readdirSync(membersDir(), { withFileTypes: true }).filter((e) => e.isDirectory() && /^[A-Za-z0-9-]{1,64}$/.test(e.name) && e.name !== me.id).map((e) => e.name);
@@ -177,7 +179,7 @@ function locateBook(id) {
       if (fs.existsSync(path.join(dir, 'book.json'))) return { dir, place: 'others' };
     }
   }
-  return { dir: shared, place: 'shared' };
+  return libraryLocation(session.libraryDir, id) || { dir: shared, place: 'shared' };
 }
 const bookDir = (id) => locateBook(id).dir;
 const bookFile = (id) => path.join(bookDir(id), 'book.json');
@@ -223,21 +225,23 @@ function safeJoin(base, rel) {
   return resolved;
 }
 
-const cleanJson = (value, sanitize, file) => cleanValue(value, sanitize, file, log);
+const inLibrary = (file) => !!session?.libraryDir && !path.relative(path.resolve(session.libraryDir), path.resolve(file)).startsWith('..') && !path.isAbsolute(path.relative(session.libraryDir, file));
+const badJson = (file) => { if (!inLibrary(file)) invalidJson(file, log); };
+const cleanJson = (value, sanitize, file) => inLibrary(file) ? sanitize(value) : cleanValue(value, sanitize, file, log);
 
 const MAX_DATA_JSON = 256 * 1024 * 1024; // 쪽수가 많은 책도 읽게 넉넉히 (너무 큰 파일만 거름)
 async function readJson(file, fallback, sanitize = sanitizeData) {
   return withJsonFile(file, async () => {
   try {
     if ((await fsp.stat(file)).size > MAX_DATA_JSON) {
-      invalidJson(file, log);
+      badJson(file);
       return fallback;
     }
     const value = JSON.parse(await fsp.readFile(file, 'utf8'));
     const clean = cleanJson(value, sanitize, file);
     return clean == null ? fallback : clean;
   } catch (err) {
-    if (err.code !== 'ENOENT') invalidJson(file, log);
+    if (err.code !== 'ENOENT') badJson(file);
     return fallback;
   }
   });
@@ -246,14 +250,14 @@ async function readJson(file, fallback, sanitize = sanitizeData) {
 function readJsonSync(file, fallback = null, sanitize = sanitizeData) {
   try {
     if (fs.statSync(file).size > MAX_DATA_JSON) {
-      invalidJson(file, log);
+      badJson(file);
       return fallback;
     }
     const value = JSON.parse(fs.readFileSync(file, 'utf8'));
     const clean = cleanJson(value, sanitize, file);
     return clean == null ? fallback : clean;
   } catch (err) {
-    if (err.code !== 'ENOENT') invalidJson(file, log);
+    if (err.code !== 'ENOENT') badJson(file);
     return fallback;
   }
 }
@@ -474,19 +478,22 @@ const fetching = new Map(); // 학원 공간 경로 → 받는 중 (Promise)
 
 /** 아직 받지 않은 원본을 통합 클라우드에 받아 달라고 하고 기다림 → { ok, missing, error? } */
 async function fetchBookFiles(id, names) {
-  const dir = bookDir(id);
-  const rels = [...new Set(names)].filter((n) => n && !fs.existsSync(safeJoin(dir, n))).map((n) => cloudRel(safeJoin(dir, n)));
+  const { dir, place } = locateBook(id);
+  const library = place === 'library';
+  const rel = (file) => library ? path.relative(session.libraryDir, file).split(path.sep).join('/') : cloudRel(file);
+  const rels = [...new Set(names)].filter((n) => n && !fs.existsSync(safeJoin(dir, n))).map((n) => rel(safeJoin(dir, n)));
   if (!rels.length) return { ok: true, missing: [] };
-  const fresh = rels.filter((r) => !fetching.has(r));
+  const fetchKey = (r) => `${library ? 'library' : 'academy'}:${r}`;
+  const fresh = rels.filter((r) => !fetching.has(fetchKey(r)));
   if (fresh.length) {
     send('files:fetching', { bookId: id, count: fresh.length });
-    const p = cloud.requestFiles(session, fresh).finally(() => {
-      for (const r of fresh) fetching.delete(r);
+    const p = (library ? cloud.requestLibraryFiles(session, fresh) : cloud.requestFiles(session, fresh)).finally(() => {
+      for (const r of fresh) fetching.delete(fetchKey(r));
       send('files:fetched', { bookId: id });
     });
-    for (const r of fresh) fetching.set(r, p);
+    for (const r of fresh) fetching.set(fetchKey(r), p);
   }
-  const results = await Promise.all([...new Set(rels.map((r) => fetching.get(r)).filter(Boolean))]);
+  const results = await Promise.all([...new Set(rels.map((r) => fetching.get(fetchKey(r))).filter(Boolean))]);
   const missing = rels.filter((r) => results.some((x) => x.ok !== true || (x.missing != null && !Array.isArray(x.missing)) || x.missing?.includes(r)));
   return { ok: !missing.length, missing, error: results.find((x) => x.error)?.error };
 }
@@ -615,7 +622,7 @@ function canEdit(obj) {
 }
 
 /** 책을 고칠 수 있는지: 다른 선생님의 나만 보기 책(members/<그 사람>/)은 그 사람만 고침 — 원장도 보기만. 계약에서 빠진 과목은 아무도 */
-const canEditBook = (book, place) => canEdit(book) && place !== 'others' && subjectOpen(book);
+const canEditBook = (book, place) => canEdit(book) && place !== 'others' && place !== 'library' && subjectOpen(book);
 
 /** 화면에 넘길 때만 붙이는 값($로 시작)은 저장하지 않음 */
 function stripMeta(obj) {
@@ -637,7 +644,8 @@ function summarizeBook(book, place = 'shared') {
     subjectOpen: subjectOpen(book), // 학원이 이 과목을 계약했는지 (아니면 보기만)
     canEdit: canEditBook(book, place),
     shared: academyMode() && place === 'shared', // 학원 공유 (끄면 나만 보기 — 원장은 볼 수 있음)
-    mine: !academyMode() || book.createdBy?.id === me.id, // 내 책장 (학원 공간에서)
+    library: place === 'library',
+    mine: place !== 'library' && (!academyMode() || book.createdBy?.id === me.id), // 내 책장 (학원 공간에서)
     problemFile: docs.problem?.originalName || '',
     answerFile: docs.answer?.originalName || '',
     problemCount: count(docs.problem),
@@ -698,9 +706,14 @@ async function listBooks() {
   const inDir = async (dir, place) =>
     (await listJson(dir, (e) => (e.isDirectory() && isValidId(e.name) ? path.join(dir, e.name, 'book.json') : null), sanitizeBook)).map((book) => ({ book, place }));
   const shared = await inDir(booksDir(), 'shared');
-  if (!academyMode()) return shared;
-  const ids = new Set(shared.map((x) => x.book.id)); // 두 곳에 다 있으면 locateBook 처럼 학원 공유 쪽
-  return [...shared, ...(await inDir(myBooksDir(), 'private')).filter((x) => !ids.has(x.book.id))];
+  const ids = new Set(shared.map((x) => x.book.id));
+  const local = [...shared, ...(academyMode() ? await inDir(myBooksDir(), 'private') : []).filter((x) => !ids.has(x.book.id))];
+  const localIds = new Set(local.map((x) => x.book.id));
+  const library = await librarySummaries.list(session.libraryDir, async (file) => {
+    const book = await readJson(file, null, sanitizeBook);
+    return book ? summarizeBook(book, 'library') : null;
+  });
+  return [...local, ...library.filter((summary) => !localIds.has(summary.id) && subjectOpen(summary)).map((summary) => ({ summary, place: 'library' }))];
 }
 const listNotesOf = (uid) => listJson(notesDirOf(uid), (e) => (e.isFile() && JSON_ID.test(e.name) ? path.join(notesDirOf(uid), e.name) : null), sanitizeNote);
 const listStudents = () => listJson(studentsDir(), (e) => (e.isFile() && JSON_ID.test(e.name) ? path.join(studentsDir(), e.name) : null), sanitizeStudent);
@@ -950,7 +963,7 @@ function sanitizeTranscripts(v) {
 /** 책의 수식 변환 결과 + 내가 따로 만든 것 */
 async function mergedTranscripts(id) {
   const shared = await readJson(path.join(bookDir(id), 'transcripts.json'), {}, sanitizeTranscripts);
-  const mine = academyMode() ? await readJson(myTranscriptsFile(id), {}, sanitizeTranscripts) : {};
+  const mine = academyMode() && locateBook(id).place !== 'library' ? await readJson(myTranscriptsFile(id), {}, sanitizeTranscripts) : {};
   if (!Object.keys(mine).length) return shared || {};
   return { ...shared, ...mine, items: { ...(shared?.items || {}), ...mine.items } };
 }
@@ -1031,7 +1044,7 @@ function registerIpc() {
 
   // ---- 책 ----
   handle('books:list', async () => {
-    const list = (await listBooks()).map(({ book, place }) => summarizeBook(book, place));
+    const list = (await listBooks()).map(({ book, place, summary }) => summary ? { ...summary, subjectOpen: subjectOpen(summary) } : summarizeBook(book, place));
     list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     return list;
   });
@@ -1062,12 +1075,13 @@ function registerIpc() {
     const { dir, place } = locateBook(id);
     const book = await readJson(path.join(dir, 'book.json'), null, sanitizeBook);
     if (!book) throw new Error('책을 찾을 수 없습니다.');
-    return { ...book, $canEdit: canEditBook(book, place), $shared: academyMode() && place === 'shared', $subjectOpen: subjectOpen(book), $answers: readAnswers(id) };
+    return { ...book, ...(place === 'library' ? { $library: true } : {}), $canEdit: canEditBook(book, place), $shared: academyMode() && place === 'shared', $subjectOpen: subjectOpen(book), $answers: readAnswers(id) };
   });
 
   /** 지금 저장된 책을 고칠 수 있는지 (만든 사람은 바뀌지 않음) → 저장된 책 */
   function checkBookWrite(id) {
     const { dir, place } = locateBook(id);
+    assertLibraryWritable(place);
     const cur = readJsonSync(path.join(dir, 'book.json'), null, sanitizeBook);
     if (cur && !subjectOpen(cur)) throw new Error(SUBJECT_CLOSED);
     if (cur && !canEditBook(cur, place)) throw new Error(place === 'others' ? '나만 보기 책은 만든 선생님만 고칠 수 있어요.' : '만든 사람과 원장만 고칠 수 있어요.');
@@ -1208,6 +1222,8 @@ function registerIpc() {
     }
     const tr = await mergedTranscripts(id);
     if (Object.keys(tr.items || {}).length) await writeJsonAtomic(path.join(to, 'transcripts.json'), tr);
+    const answers = readAnswers(id);
+    if (Object.keys(answers.items || {}).length) await writeJsonAtomic(path.join(to, 'answers.json'), answers);
     const copy = { ...stripMeta(book), id: newId, name: `${book.name || '책'} (복사본)`, createdBy: createdByMe(), createdAt: now, updatedAt: now };
     await writeJsonAtomic(path.join(to, 'book.json'), copy);
     return summarizeBook(copy);
@@ -1220,6 +1236,7 @@ function registerIpc() {
   handle('books:setShared', async (_e, { id, shared } = {}) => {
     if (!academyMode()) throw new Error('학원 공간에서만 공유를 바꿀 수 있어요.');
     const { dir: from, place } = locateBook(id);
+    assertLibraryWritable(place);
     const book = readJsonSync(path.join(from, 'book.json'), null, sanitizeBook);
     if (!book) throw new Error('책을 찾을 수 없습니다.');
     if (place === 'others' || book.createdBy?.id !== me.id) throw new Error('책을 만든 사람만 공유를 바꿀 수 있어요.');
@@ -1246,6 +1263,7 @@ function registerIpc() {
   handle('books:renameItems', async (_e, { bookId, renames, removed }) => {
     if (!isValidId(bookId)) return 0;
     const { dir, place } = locateBook(bookId);
+    assertLibraryWritable(place);
     const book = readJsonSync(path.join(dir, 'book.json'), null, sanitizeBook);
     if (!book || !canEditBook(book, place)) return 0;
     const r = loadRenames(bookId);
@@ -1474,6 +1492,7 @@ function registerIpc() {
   handle('books:saveTranscripts', async (_e, { bookId, data } = {}) => {
     data = sanitizeTranscripts(data) || {};
     const { dir, place } = locateBook(bookId);
+    assertLibraryWritable(place);
     if (!fs.existsSync(dir)) return false; // 그 사이 지워진 책
     const cur = readJsonSync(path.join(dir, 'book.json'), null, sanitizeBook);
     if (!subjectOpen(cur)) return false; // 계약에서 빠진 과목: 보기만
@@ -1607,17 +1626,17 @@ function markOwn(file) {
 }
 
 function watchData() {
-  const roots = session.academyDir ? [session.academyDir, session.dataDir] : [session.dataDir];
+  const roots = [...new Set([session.academyDir, session.dataDir, session.libraryDir].filter(Boolean))];
   for (const root of roots) {
     try {
-      fs.mkdirSync(root, { recursive: true });
+      if (root !== session.libraryDir) fs.mkdirSync(root, { recursive: true });
       const w = fs.watch(root, { recursive: true }, (_type, name) => {
         if (!name) return;
         const abs = path.resolve(root, String(name));
         if (/\.(tmp|magoedu-dl|part)$/i.test(abs)) return;
         if (Date.now() - (ownWrites.get(abs) || 0) < OWN_MS) return;
         try {
-          if (fs.statSync(abs).isDirectory()) return; // 안의 파일이 바뀌면 폴더도 알려 옴 (파일 쪽 알림으로 충분)
+          if (fs.statSync(abs).isDirectory() && !inLibrary(abs)) return; // 공용 책 폴더 자체가 들어오거나 옮겨져도 알림
         } catch {
           /* 지워짐 → 알림 */
         }
@@ -1648,6 +1667,11 @@ function flushChanges() {
     if (abs === path.resolve(settingsFile())) {
       settingsStore.read(); // 앱 밖에서 고친 것이면 여기서 되돌림 (화면에는 settingsRejected 로 알림)
       out.settings = true;
+      continue;
+    }
+    if (inLibrary(abs)) {
+      const rel = path.relative(session.libraryDir, abs).split(path.sep);
+      if (rel[0] === 'books' && isValidId(rel[1])) out.books.add(rel[1]);
       continue;
     }
     const rel = path.relative(sharedDir(), abs).split(path.sep);
