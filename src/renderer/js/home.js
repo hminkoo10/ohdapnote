@@ -6,20 +6,6 @@ import { topbar } from './chrome.js';
 import { SUBJECTS, subjectOf, subjectName, contractedSubjects } from './subjects.js';
 import { bankView, rememberBankView } from './bankview.js';
 
-const SPINES = [
-  'linear-gradient(180deg, #ffb27d, #f0743e)',
-  'linear-gradient(180deg, #7fd6c8, #2a9d8f)',
-  'linear-gradient(180deg, #ffa3a3, #e06767)',
-  'linear-gradient(180deg, #a9b8ff, #6878e0)',
-  'linear-gradient(180deg, #ffd27f, #eba13a)',
-  'linear-gradient(180deg, #c3a6ff, #8f6be0)',
-];
-export function spineFor(id) {
-  let hsh = 0;
-  for (const ch of String(id)) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;
-  return SPINES[hsh % SPINES.length];
-}
-
 let homeTab = 'notes';
 let shelf = 'mine'; // 책장 안 (학원 공간에서만): mine 내 책장 | shared 공유 책장
 // 학생 오답노트 · 학생 명단 탭에서 보던 것 (실시간으로 다시 그려도 그대로)
@@ -301,7 +287,7 @@ export async function showHome({ tab } = {}) {
         n.bookIds.length
           ? n.bookIds.map((id) => {
               const b = bookById.get(id);
-              return h('span.book-pill', { style: { '--spine': spineFor(id) }, title: b ? null : '지워졌거나 다른 선생님의 나만 보기 교재예요' }, b?.name || '볼 수 없는 교재');
+              return h('span.book-pill', { title: b ? null : '지워졌거나 다른 선생님의 나만 보기 교재예요' }, b?.name || '볼 수 없는 교재');
             })
           : h('span.muted.small', '책 없음'),
       ),
@@ -400,7 +386,7 @@ export async function showHome({ tab } = {}) {
     const q = rosterQ.trim().toLowerCase();
     const shown = students.filter((st) => st.deletedAt && matchStudent(st, q)).sort((a, b) => b.deletedAt - a.deletedAt);
     if (!shown.length) {
-      return [h('div.empty-state', h('div.empty-art', icon('trash')), h('h3', q ? '맞는 학생이 없어요' : '지운 학생이 없어요'), h('p.muted', `삭제 ${purgeDays}일 뒤 오답노트도 완전히 지워져요.`))];
+      return [h('div.empty-state', h('h3', q ? '맞는 학생이 없어요' : '지운 학생이 없어요'), h('p.muted', `삭제 ${purgeDays}일 뒤 오답노트도 완전히 지워져요.`))];
     }
     return [
       h(
@@ -434,7 +420,7 @@ export async function showHome({ tab } = {}) {
 
     function shelfBody() {
       if (shelf === 'mine') return bookCards(mine, true);
-      if (!others.length) return h('div.empty-state', h('div.empty-art', icon('school')), h('h3', '아직 공유된 책이 없어요'), h('p.muted', ''));
+      if (!others.length) return h('div.empty-state', h('h3', '아직 공유된 책이 없어요'));
       return bookCards(others, false);
     }
 
@@ -474,7 +460,7 @@ export async function showHome({ tab } = {}) {
             tabIndex: 0,
             onclick: () => nav.book(b.id),
             onkeydown: (e) => e.key === 'Enter' && nav.book(b.id),
-            style: { '--i': Math.min(i + 1, 14), '--spine': spineFor(b.id) },
+            style: { '--i': Math.min(i + 1, 14) },
           },
           h('div.bc-title', b.name),
           showSubject
@@ -655,7 +641,6 @@ export async function createNote(allBooks, { student: preset = null } = {}) {
     books.map((b) =>
       h(
         `label.book-opt${picked.has(b.id) ? '.on' : ''}`,
-        { style: { '--spine': spineFor(b.id) } },
         h('input', {
           type: 'checkbox',
           checked: picked.has(b.id),
@@ -665,7 +650,6 @@ export async function createNote(allBooks, { student: preset = null } = {}) {
             e.target.closest('.book-opt').classList.toggle('on', e.target.checked);
           },
         }),
-        h('span.bo-spine'),
         h('span.bo-name', b.name),
         h('span.bo-meta', [manySubjects ? subjectName(subjectOf(b)) : '', b.problemCount ? `${b.problemCount}문항` : '분석 전'].filter(Boolean).join(' · ')),
         h('span.bo-check', icon('check')),
@@ -690,7 +674,7 @@ export async function createNote(allBooks, { student: preset = null } = {}) {
         primary: true,
         onClick: () => {
           if (!picked.size) {
-            toast('책을 하나 이상 골라 주세요.', { type: 'error' });
+            toast('책을 하나 이상 고르세요.', { type: 'error' });
             return false;
           }
           const name = student.input.value.trim();
@@ -765,7 +749,7 @@ export function studentSearch(students, { picked: preset = null } = {}) {
         ),
       ),
     );
-    if (more) list.append(h('div.student-more', `${STUDENT_MAX}명까지 보여요. 이름을 더 적어 주세요.`));
+    if (more) list.append(h('div.student-more', `${STUDENT_MAX}명까지 보여요. 이름을 더 적으세요.`));
     list.hidden = false;
     list.scrollTop = 0;
     window.addEventListener('keydown', onEsc, true);
@@ -887,7 +871,7 @@ async function editStudent(st = null) {
         onClick: async () => {
           const name = nameInput.value.trim();
           if (!name) {
-            toast('학생 이름을 적어 주세요.', { type: 'error' });
+            toast('학생 이름을 적으세요.', { type: 'error' });
             return false;
           }
           const btn = form.closest('.modal')?.querySelector('.modal-footer .btn-primary');

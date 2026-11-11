@@ -184,7 +184,7 @@ export function aiSettingsCard(s) {
         h(
           'div.seg',
           [
-            ['academy', '학원 AI 쓰기'],
+            ['academy', '학원 설정 쓰기'],
             ['personal', '내 키 쓰기'],
           ].map(([v, label]) =>
             h(
@@ -211,8 +211,8 @@ export function aiSettingsCard(s) {
     if (!academy) return;
     clear(sourceNote);
     if (source === 'personal') sourceNote.append('');
-    else if (a) sourceNote.append(`학원 AI: ${PROVIDERS[a.provider]?.label || a.provider}${a.model ? ` · ${a.model}` : ''}. `, cloudBtn());
-    else sourceNote.append(`학원 AI 미설정: 내 설정을 써요. ${state.appInfo?.manager ? '통합 클라우드에서 설정하세요.' : '설정은 원장님께 요청하세요.'} `, cloudBtn());
+    else if (a) sourceNote.append(`학원 정밀 인식: ${PROVIDERS[a.provider]?.label || a.provider}${a.model ? ` · ${a.model}` : ''}. `, cloudBtn());
+    else sourceNote.append(`학원 정밀 인식 미설정: 내 설정을 써요. ${state.appInfo?.manager ? '통합 클라우드에서 설정하세요.' : '설정은 원장님께 요청하세요.'} `, cloudBtn());
   };
 
   const show = () => {
@@ -232,7 +232,7 @@ export function aiSettingsCard(s) {
     provider = select.value;
     show();
   });
-  const card = h('section.set-card', h('h4', icon('scan'), '정밀 인식 (AI 서비스 키)', h('span.spacer'), h('label.switch.small', onInput, h('span.sw'), '사용')), offNote, sourceRow, Object.values(panels), adv);
+  const card = h('section.set-card', h('h4', icon('scan'), '정밀 인식 (서비스 키)', h('span.spacer'), h('label.switch.small', onInput, h('span.sw'), '사용')), offNote, sourceRow, Object.values(panels), adv);
   show();
 
   return {

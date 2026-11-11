@@ -30,7 +30,7 @@ export function renderJobBadge(el = document.querySelector('.job-badge')) {
   for (const job of shown) {
     let chip = [...el.children].find((c) => c.dataset.key === job.key);
     if (!chip) {
-      chip = h('button.job-chip', { dataset: { key: job.key }, onclick: () => findJob(job.key)?.open() }, h('span.job-spin'), h('span.job-name'), h('span.job-pct.num'));
+      chip = h('button.job-chip', { dataset: { key: job.key }, onclick: () => findJob(job.key)?.open() }, h('span.job-name'), h('span.job-pct.num'));
       el.append(chip);
     }
     chip.querySelector('.job-name').textContent = job.title;

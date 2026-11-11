@@ -13,7 +13,9 @@ const { PDFDocument, StandardFonts } = require('pdf-lib');
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const OUT = join(ROOT, 'test/e2e/out');
 mkdirSync(OUT, { recursive: true });
-const tmp = mkdtempSync(join(OUT, 'review-temp-'));
+const tempRoot = process.env.OHDAP_USER_DATA || OUT;
+mkdirSync(tempRoot, { recursive: true });
+const tmp = mkdtempSync(join(tempRoot, 'review-temp-'));
 const academy = join(tmp, 'academy');
 const id = 'aaaaaaaa-1234-4000-8000-000000000045';
 const dir = join(academy, 'books', id);
@@ -72,7 +74,12 @@ try {
   await win.click('.seg-tab[data-tab="bank"]');
   await win.waitForSelector('.bank-row');
   console.log('▶ 문항 개수·교재 합계·표시 없는 옛 문항·거르기');
-  assert.match(await win.locator('.bank-book').innerText(), /확인 필요 6군데/);
+  assert.match(await win.locator('.bank-book').innerText(), /확인할 곳 6군데/);
+  await win.locator('.bank-book').getByRole('button', { name: '확인할 곳 6군데' }).click();
+  assert.equal(await win.locator('[data-bank-focus="bookId"]').inputValue(), id);
+  assert.equal(await win.locator('[data-bank-focus="review"]').isChecked(), true);
+  assert.equal(await win.locator('.bank-row').count(), 1);
+  await win.locator('.bank-filters').getByRole('button', { name: '지우기', exact: true }).click();
   assert.match(await win.locator('.bank-row[data-item="problem-1"]').innerText(), /확인 필요 6군데/);
   assert.equal(await win.locator('.bank-row').count(), 2);
   await win.locator('[data-bank-focus="review"]').check();
@@ -81,7 +88,7 @@ try {
   await win.locator('.bank-main').evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await shot('list');
   await openEditor();
-  const hint = '노란 밑줄·테두리: 잘못 읽었을 수 있는 곳';
+  const hint = '점선 밑줄: 잘못 읽었을 수 있는 곳 · 진한 밑줄: 지금 확인할 곳';
   assert.equal(await win.locator('.review-modal .review-help').innerText(), hint);
   assert.ok(await win.locator('.review-modal .review-help').evaluate((el) => el.getBoundingClientRect().height <= parseFloat(getComputedStyle(el).lineHeight) + 1));
   assert.doesNotMatch(await win.locator('.review-modal').innerText(), /수식 입력:|고친 글은 한글/);
@@ -96,6 +103,9 @@ try {
   assert.ok(await win.locator('.review-mark:not(.review-math)').count() >= 3);
   assert.equal(await win.locator('.review-math').count(), 2);
   assert.equal(await count(), '1/6');
+  assert.equal(await win.locator('.review-mark.current').first().evaluate((el) => getComputedStyle(el).textDecorationStyle), 'solid');
+  assert.equal(await win.locator('.review-mark:not(.current)').first().evaluate((el) => getComputedStyle(el).textDecorationStyle), 'dotted');
+  assert.equal(await win.locator('.review-math').first().evaluate((el) => getComputedStyle(el).outlineStyle), 'none');
   const toolbar = win.locator('.review-toolbar');
   for (const name of ['다음 확인할 곳', '이전', '맞아요', '원본 보기', '되돌리기']) assert.ok(await toolbar.getByRole('button', { name, exact: true }).isVisible());
   assert.equal(await toolbar.getByRole('button', { name: '다음 확인할 곳', exact: true }).evaluate((el) => getComputedStyle(el).height), '38px');
@@ -265,9 +275,9 @@ try {
 } finally {
   if (app) await app.close().catch(() => {});
   cloud.stop();
-  assert.ok(resolve(tmp).startsWith(resolve(OUT) + sep));
+  assert.ok(resolve(tmp).startsWith(resolve(tempRoot) + sep));
   if (process.platform === 'win32') {
     const { execFileSync } = await import('node:child_process');
-    execFileSync('powershell.exe', ['-NoProfile', '-Command', "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:OHDAP_TEST_CLEANUP, 'OnlyErrorDialogs', 'SendToRecycleBin')"], { env: { ...process.env, OHDAP_TEST_CLEANUP: tmp } });
+    execFileSync('powershell.exe', ['-NoProfile', '-Command', "try { Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:OHDAP_TEST_CLEANUP, 'OnlyErrorDialogs', 'SendToRecycleBin') } catch { Write-Output $env:OHDAP_TEST_CLEANUP }"], { env: { ...process.env, OHDAP_TEST_CLEANUP: tmp } });
   } else rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

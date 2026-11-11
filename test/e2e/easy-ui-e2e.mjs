@@ -2,7 +2,7 @@
 // OHDAP_REVIEW_DIR을 주면 화면별 두 해상도를 한 PNG에 담음 (원본 캡처는 메모리에만).
 import assert from 'node:assert/strict';
 import { _electron as electron } from '../lib/playwright.mjs';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, copyFileSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, copyFileSync, statSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -31,6 +31,12 @@ const doc = (role) => ({ files: [{ name: `${role}.pdf`, originalName: '수학 �
     rects: [{ page: 0, x: 0.06, y: 0.16 + i * 0.154, w: 0.88, h: 0.11 }] })) });
 writeFileSync(join(dir, 'book.json'), JSON.stringify({ id, kind: 'book', version: 2, subject: 'math', name: '수학 중간고사 대비 연습 교재',
   createdAt: Date.now(), updatedAt: Date.now(), docs: { problem: doc('problem'), answer: doc('answer') }, answerOverrides: {} }));
+const secondId = 'bbbbbbbb-1234-4000-8000-000000000050';
+const secondDir = join(tmp, 'data/shared/books', secondId);
+mkdirSync(secondDir, { recursive: true });
+copyFileSync(join(dir, 'problem.pdf'), join(secondDir, 'problem.pdf'));
+copyFileSync(join(dir, 'answer.pdf'), join(secondDir, 'answer.pdf'));
+writeFileSync(join(secondDir, 'book.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(dir, 'book.json'), 'utf8')), id: secondId, name: '후속 연습 교재' }));
 let app;
 const errors = [];
 let passed = 0;
@@ -128,6 +134,7 @@ try {
   await capture('인식결과', '.doc-head .btn, .tabs-row .seg-tab, .cp-actions .btn, .cp-foot .btn, .preview-head .btn');
   await win.click('.seg-tab[data-tab="review"]');
   await win.waitForSelector('.page-overlay .box');
+  assert.equal(await win.locator('.page-overlay .box').first().evaluate((el) => getComputedStyle(el).borderTopStyle), 'solid', '검토 상자 테두리가 보여야 함');
   await capture('페이지검토', '.editor-toolbar .btn, .doc-head .btn');
   await win.locator('.page-overlay .box').first().click();
   const before = await win.locator('.page-overlay .box').count();
@@ -145,7 +152,7 @@ try {
   await capture('문제은행', '.bank-heading .btn, .bank-intro .btn', async () => {
     await win.locator('main.home').evaluate((el) => el.scrollTop = 0);
   });
-  await win.locator('.bank-check input').first().check();
+  await win.locator('.bank-row .bank-check input').first().check();
   await win.click('.bank-export label:has(input[name="bank-format"][value="hwpx"])');
   await capture('문제은행-내보내기', '.bank-heading .btn, .bank-intro .btn, .bank-book .btn, .bank-export .seg label, .bank-export .export-btn', async () => {
     await win.locator('main.home').evaluate((el) => el.scrollTop = el.scrollHeight);
@@ -161,6 +168,18 @@ try {
   await win.locator('.sel-x').first().click();
   await win.click('.toast-actions .btn:has-text("되돌리기")');
   assert.equal(await win.locator('.sel-chip').count(), chosen); passed++;
+  assert.doesNotMatch(await win.locator('.sel-chip-label').first().innerText(), /수학 중간고사 대비 연습 교재/);
+  const two = await call('createNote', { title: '두 교재 오답', bookIds: [id, secondId] });
+  two.selected[id] = [(await call('getBook', id)).docs.problem.items[0].id]; two.selected[secondId] = ['problem-1'];
+  await call('saveNote', two); await nav('note', two.id);
+  await win.waitForSelector('.sel-chip-label');
+  const labels = await win.locator('.sel-chip-label').allTextContents();
+  assert.ok(labels.some((text) => text.includes('수학 중간고사 대비 연습 교재')));
+  assert.ok(labels.some((text) => text.includes('후속 연습 교재')));
+  assert.equal(await win.locator('.sel-chip-label').first().evaluate((el) => getComputedStyle(el).textOverflow), 'ellipsis'); passed++;
+  await capture('두교재-시험지저장', '.sel-chip-label, .sel-x', async () => {
+    await win.locator('.export-panel .sel-list').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  });
   await win.click('#settings-btn');
   await win.waitForSelector('.settings');
   assert.equal(await win.locator('.set-adv').evaluate((el) => el.open), false); passed++;

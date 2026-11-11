@@ -32,12 +32,34 @@ const EXACT_SYMBOLS = {
 };
 const BIG = { sum: '∑', prod: '∏', coprod: '∐', union: '⋃', inter: '⋂', int: '∫', oint: '∮', dint: '∬', tint: '∭', odint: '∯', otint: '∰' };
 const FUNCTIONS = new Set('sin cos tan cot sec cosec csc arcsin arccos arctan arc sinh cosh tanh coth log ln lg exp Exp lim Lim max min det gcd mod if for and hom ker deg arg dim Pr or'.split(' '));
-const ACCENTS = { hat: '^', check: 'ˇ', tilde: '~', acute: '´', grave: '`', dot: '˙', ddot: '¨', bar: '‾', vec: '→', dyad: '↔', under: '_', arch: '⏜' };
+const ACCENTS = { hat: '^', check: 'ˇ', tilde: '~', acute: '´', grave: '`', dot: '˙', ddot: '¨', bar: '¯', vec: '→', dyad: '↔', under: '_', arch: '⏜' };
 const TABLES = new Set(['matrix', 'pmatrix', 'bmatrix', 'dmatrix', 'pile', 'lpile', 'rpile', 'cases', 'eqalign']);
 const FONTS = new Set(['rm', 'it', 'bold', 'rmbold', 'bf']);
 const UNSUPPORTED = new Set('longdiv ladder sladder phantom identical image reimage iso dsum xor hleft laplace lslant rslant att hund thou well base benzene ohm'.split(' '));
 const SCRIPT_KEYS = { '^': 'sup', sup: 'sup', to: 'sup', '_': 'sub', sub: 'sub', from: 'sub', lsup: 'lsup', lsub: 'lsub' };
 const INFIX = new Set(['over', 'atop', 'choose']);
+const ROOTS = new Set(['sqrt', 'root']);
+const COMMAND_NAMES = new Set([
+  ...[SCRIPT_KEYS, ACCENTS, BIG, GREEK, SYMBOLS, EXACT_SYMBOLS].flatMap(Object.keys),
+  ...FUNCTIONS, ...TABLES, ...FONTS, ...UNSUPPORTED, ...INFIX, ...ROOTS,
+].map(name => name.toLowerCase()));
+
+function likelyCommandTypo(word) {
+  if (word.length < 3 || COMMAND_NAMES.has(word)) return false;
+  for (const name of COMMAND_NAMES) {
+    if (name.length < 3 || Math.abs(name.length - word.length) > 1) continue;
+    let i = 0;
+    while (i < Math.min(name.length, word.length) && name[i] === word[i]) i++;
+    // 세 글자 명령은 자리바꿈만: abc와 arc 같은 변수 묶음의 오경고를 줄입니다.
+    if (name.length === word.length && word[i] === name[i + 1] && word[i + 1] === name[i]
+        && word.slice(i + 2) === name.slice(i + 2)) return true;
+    if (name.length < 4) continue;
+    if (name.length === word.length && word.slice(i + 1) === name.slice(i + 1)) return true;
+    if (name.length > word.length && word.slice(i) === name.slice(i + 1)) return true;
+    if (name.length < word.length && word.slice(i + 1) === name.slice(i)) return true;
+  }
+  return false;
+}
 const CLOSE = new Set(['}', ')', ']']);
 const MAX_DEPTH = 96;
 const has = (obj, key) => Object.hasOwn(obj, key);
@@ -255,7 +277,7 @@ class Parser {
       this.i--;
       return make('empty', start, start);
     }
-    if (key === 'sqrt' || key === 'root') {
+    if (ROOTS.has(key)) {
       let index;
       if (key === 'root') {
         index = this.argument(stops);
@@ -308,9 +330,8 @@ class Parser {
     const glyph = symbol(value);
     if (glyph !== undefined) return make(has(GREEK, key) || key.startsWith('var') ? 'identifier' : 'operator', start, end, { value: glyph });
     if (kind === 'word') {
-      // 임의의 영문 변수와 모르는 명령은 구별할 수 없어 경고만 남기고 원문을 보존합니다.
       const unknown = value.length > 1;
-      if (unknown) this.issue('unknown-word', start, end, 'warning');
+      if (likelyCommandTypo(key)) this.issue('unknown-word', start, end, 'warning');
       return make('identifier', start, end, { value, unknown });
     }
     return make(/[\p{L}]/u.test(value) ? 'identifier' : 'operator', start, end, { value: value === "'" ? '′' : value });
@@ -444,6 +465,12 @@ function renderNode(node, style = {}) {
     }
     case 'accent': {
       const under = node.kind === 'under';
+      // Cambria Math의 선 굵기·간격에 맞추되 대체 글꼴의 장식 문자 폭에는 의존하지 않습니다.
+      // em 단위라 분수·첨자에서도 본체와 함께 줄어듭니다.
+      if (node.kind === 'bar' || under) {
+        const edge = under ? 'bottom' : 'top';
+        return tag('mrow', draw(node.body), ` style="border-${edge}:0.065em solid currentColor;padding-${edge}:0.17em"`);
+      }
       return tag(under ? 'munder' : 'mover', draw(node.body) + tag('mo', escapeXML(ACCENTS[node.kind]), ' stretchy="true"'), ` ${under ? 'accentunder' : 'accent'}="true"`);
     }
     case 'negation': {

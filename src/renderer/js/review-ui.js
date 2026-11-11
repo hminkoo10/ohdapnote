@@ -1,7 +1,7 @@
 import { h, clear, modal } from './ui.js';
 import { countLow, listLow, nextLow, moveLow, clearLow, setLow } from './lowconf.js';
 
-export const REVIEW_HELP = '노란 밑줄·테두리: 잘못 읽었을 수 있는 곳';
+export const REVIEW_HELP = '점선 밑줄: 잘못 읽었을 수 있는 곳 · 진한 밑줄: 지금 확인할 곳';
 
 export function reviewHelpButton(extra = []) {
   return h('button.btn.btn-small', { onclick: () => modal({ title: '확인 표시 도움말', width: 520,
@@ -85,6 +85,10 @@ export function reviewInput(block, { item, label, onSelect, onChange } = {}) {
   return { element: wrap, input, paint, commit,
     dispose() { resize.disconnect(); },
     confirmed() { history = [{ text: before, low: marks().map(({ mark }) => ({ ...mark })) }]; paint(); },
+    setCurrent(index) {
+      ink.querySelectorAll('[data-low-index]').forEach((el) => el.classList.toggle('current', Number(el.dataset.lowIndex) === index));
+      [...buttons.children].forEach((el, at) => el.classList.toggle('current', marks()[at]?.index === index));
+    },
     focus(mark) {
       input.focus({ preventScroll: true });
       input.setSelectionRange(mark.start ?? 0, mark.end ?? input.value.length);
@@ -152,6 +156,7 @@ export function reviewPanel(blocks, getStack, redraw) {
     count.setAttribute('aria-label', list.length ? `확인이 필요한 곳 ${list.length}군데 중 ${at + 1}번째` : '확인이 필요한 곳이 없습니다.');
     previous.disabled = next.disabled = okay.disabled = !list.length;
     if (repaint) fields.forEach((field) => field.paint());
+    fields.forEach((field, key) => field.setCurrent(key === `${current?.block}:${current?.mark.item ?? ''}` ? current.index : -1));
     source.show(current?.mark);
   };
   const select = (block, index, focus = true) => {
@@ -165,7 +170,7 @@ export function reviewPanel(blocks, getStack, redraw) {
   };
   const previous = h('button.btn', { onclick: () => jump(-1), title: '이전 확인할 곳 (Shift+F8)' }, '이전');
   const next = h('button.btn', { onclick: () => jump(1), title: 'F8' }, '다음 확인할 곳');
-  const okay = h('button.btn.btn-primary', { onclick: () => {
+  const okay = h('button.btn', { onclick: () => {
     if (!current) return;
     setLow(blocks[current.block], clearLow(blocks[current.block].low, current.index));
     fields.forEach((field) => field.confirmed());

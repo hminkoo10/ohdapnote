@@ -14,7 +14,9 @@ const { PDFDocument, StandardFonts } = require('pdf-lib');
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const OUT = join(ROOT, 'test/e2e/out');
 mkdirSync(OUT, { recursive: true });
-const tmp = mkdtempSync(join(OUT, 'bank-temp-'));
+const tempRoot = process.env.OHDAP_USER_DATA || OUT;
+mkdirSync(tempRoot, { recursive: true });
+const tmp = mkdtempSync(join(tempRoot, 'bank-temp-'));
 const academy = join(tmp, 'academy');
 const userData = join(tmp, 'local');
 const dataDir = join(tmp, 'data');
@@ -146,10 +148,14 @@ try {
   assert.ok(await win.isDisabled(`.bank-row[data-book="${ids.korean}"] input`));
   assert.ok(await win.$(`.bank-book[data-book="${ids.english}"] button`));
   assert.ok(await win.$('.bank-intro'));
-  await win.click('button:has-text("안내 닫기")');
+  assert.equal(await win.getByRole('button', { name: '사용 순서', exact: true }).isVisible(), false);
+  assert.equal(await win.locator('.bank-steps p:empty').count(), 0);
+  await win.locator('.bank-intro').getByRole('button', { name: '닫기', exact: true }).click();
   assert.equal(await win.locator('.bank-intro').count(), 0);
-  await win.getByRole('button', { name: '처음 안내 다시 보기', exact: true }).click();
+  assert.equal(await win.getByRole('button', { name: '사용 순서', exact: true }).isVisible(), true);
+  await win.getByRole('button', { name: '사용 순서', exact: true }).click();
   assert.ok(await win.$('.bank-intro'));
+  assert.equal(await win.locator('.bank-steps p:empty').count(), 0);
 
   step('일반 글꼴 수학 PDF는 OCR 모델 필요 → 설정 열기 → 넣기 멈춤');
   await expectMissingModel(ids.math);
@@ -420,7 +426,7 @@ try {
   assert.equal(await win.locator('.bank-preview .answer-open').innerText(), '정답·해설 보기');
   assert.doesNotMatch(await win.textContent('.bank-transcript'), /null|undefined|문제은행에 넣기/);
   await clearToasts();
-  await win.screenshot({ path: join(OUT, 'bank-1040.png') });
+  await win.screenshot({ path: join(OUT, 'bank-1040.png'), animations: 'disabled', scale: 'css', timeout: 60000 });
   assert.ok(await win.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && [...document.querySelectorAll('.bank-columns > *')].every((e) => e.getBoundingClientRect().right <= window.innerWidth)), '1040px에서 가로 넘침 없음');
   assert.deepEqual(errors, []);
   console.log('✅ 문제은행 E2E 통과: PDF·HWPX·글 고치기·지문·과목 잠금·공용 저장소·실시간 유지');
@@ -448,7 +454,7 @@ try {
   if (app) await app.close().catch(() => {});
   cloud.stop();
   // 임시 폴더가 이 worktree 안인지 확인하고 정리
-  assert.ok(resolve(tmp).startsWith(resolve(OUT) + sep));
+  assert.ok(resolve(tmp).startsWith(resolve(tempRoot) + sep));
   if (process.platform === 'win32') {
     const { execFileSync } = await import('node:child_process');
     execFileSync('powershell.exe', ['-NoProfile', '-Command', "try { Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:OHDAP_TEST_CLEANUP, 'OnlyErrorDialogs', 'SendToRecycleBin') } catch { Write-Output $env:OHDAP_TEST_CLEANUP }"], { env: { ...process.env, OHDAP_TEST_CLEANUP: tmp } });

@@ -157,15 +157,33 @@ test('hwpeqview: 행렬·쌓기·정렬·빈 칸·중첩 행렬', () => {
 });
 
 test('hwpeqview: 장식 전체·부정·관계', () => {
-  for (const name of ['hat', 'check', 'tilde', 'acute', 'grave', 'dot', 'ddot', 'bar', 'vec', 'dyad', 'arch']) {
+  for (const name of ['hat', 'check', 'tilde', 'acute', 'grave', 'dot', 'ddot', 'vec', 'dyad', 'arch']) {
     assert.match(eqToMathML(`${name} {AB}`), /<mover accent="true">/);
     mathTree(`${name} {AB}`);
   }
-  assert.match(eqToMathML('under {AB}'), /<munder accentunder="true">/);
+  assert.match(eqToMathML('under {AB}'), /border-bottom:0\.065em solid currentColor;padding-bottom:0\.17em/);
   assert.match(eqToMathML('not ='), /<mo>≠<\/mo>/);
   assert.match(eqToMathML('not {in}'), /<mo>∉<\/mo>/);
   assert.match(eqToMathML('not x'), /x̸/);
   assert.doesNotThrow(() => eqToMathML('not constructor'));
+});
+
+test('hwpeqview: 윗줄·밑줄은 본체 폭과 글자 크기를 따르고 중첩 구조를 보존', () => {
+  for (const [kind, edge] of [['bar', 'top'], ['under', 'bottom']]) {
+    for (const body of ['A', '{AB}', 'x', '{z_1}', '{vec {AB}}']) {
+      const xml = eqToMathML(`${kind} ${body}`, { sourceMap: true });
+      assert.ok(xml.includes(`style="border-${edge}:0.065em solid currentColor;padding-${edge}:0.17em"`));
+      assert.doesNotMatch(xml, /[¯‾_]/);
+      assert.match(xml, /data-eq-start=/);
+      mathTree(`${kind} ${body}`);
+    }
+  }
+  for (const script of ['{bar {AB}} over {2}', 'bar {x}^2', 'x^{bar {AB}}', 'sqrt {bar {AB}}', 'bar {bar x}']) {
+    mathTree(script);
+    assert.doesNotMatch(eqToMathML(script), /<mo stretchy="true">¯/);
+  }
+  assert.equal(all(mathTree('bar {z_1}'), 'msub').length, 1);
+  assert.equal(all(mathTree('bar {AB} = vec {AB}'), 'mover').length, 1);
 });
 
 test('hwpeqview: 그리스 문자 전체·대소문자와 화살표 예외', () => {
@@ -238,7 +256,7 @@ test('hwpeqview: 불완전 입력 복구와 진단·모르는 명령 보존', ()
   const unknown = parseEq('mystery {x}');
   assert.equal(unknown.children[0].unknown, true);
   assert.equal(unknown.error, false);
-  assert.ok(unknown.errors.some(error => error.code === 'unknown-word'));
+  assert.deepEqual(unknown.errors, []);
   assert.equal(eqToText('mystery {x}'), 'mysteryx');
 });
 
@@ -314,6 +332,13 @@ test('hwpeqview: 기존 변환기의 모든 LaTeX·실측 예시를 다시 그�
   assert.ok(count >= 120, `예시 ${count}개`);
 });
 
-test('윗줄은 확장 가능한 overline 문자로 표시', () => {
-  assert.match(eqToMathML('bar {AB}'), /‾/);
+test('hwpeqview: 변수 묶음은 보존하고 가까운 명령 오타만 경고', () => {
+  for (const script of ['dx', 'dy', 'ab', 'xy', 'abc', 'pq', 'Ab', 'nPr', 'AB', 'ABC', "A'B", 'overline {PQ}', 'bar {x}',
+    'int _{0} ^{1} f(x) dx', 'dy over dx', '2ab + xy', 'pq + qr',
+    'bar {AB}', 'vec {AB}', "AB'C", 'hat {x}', '{{a} over {b}}', 'fraq', 'unknownword']) {
+    assert.deepEqual(parseEq(script).errors, [], script);
+  }
+  for (const script of ['sqr {x}', 'ovr', 'sqtr', 'ovre', 'matirx', 'lmi', 'SQR {x}', 'sqqrt', 'sqat', 'alhpa']) {
+    assert.ok(parseEq(script).errors.some(e => e.code === 'unknown-word' && e.severity === 'warning'), script);
+  }
 });

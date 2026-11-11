@@ -232,8 +232,7 @@ export async function renderPreview(box, o) {
     box.append(
       h(
         'div.preview-empty',
-        h('span.pe-icon', icon('eye')),
-        h('div', o.emptyText || ['번호를 누르면', h('br'), '문제와 해설을 여기서 볼 수 있어요.']),
+        h('div', o.emptyText || '번호를 누르면 문제와 해설이 보여요.'),
       ),
     );
     return;
@@ -385,7 +384,7 @@ export function renderQTable(table, o) {
           ? h(
               'button.qflag',
               { title: `${(doc.pageInfo?.[page]?.flags || []).join(', ')} — 눌러서 확인`, onclick: () => o.onFlag?.(page) },
-              icon('warn'),
+              '확인',
             )
           : null,
       ),
@@ -403,7 +402,6 @@ export function renderQTable(table, o) {
       },
       m.prefix ? h('span.chip-pre', m.prefix) : null,
       m.digits ? String(m.num).padStart(m.digits, '0') : String(m.num),
-      h('span.chip-q', '?'),
     );
   }
 }

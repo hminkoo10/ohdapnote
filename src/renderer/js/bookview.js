@@ -386,7 +386,7 @@ function docCard(role, i) {
     h(
       'div.doc-head',
       h('span.doc-icon', icon(role === 'problem' ? 'book' : 'bookCheck')),
-      h('div.doc-titles', h('div.doc-title', ROLE_NAME[role]), doc ? h('div.doc-file', { title: doc.originalName }, doc.originalName, h('span.muted', src ? ` · ${src.numPages}쪽` : ' · 여는 중…')) : h('div.doc-file.muted', '아직 파일이 없어요')),
+      h('div.doc-titles', h('div.doc-title', ROLE_NAME[role], doc ? h('span.doc-pages.small.muted', src ? `${src.numPages}쪽` : '여는 중…') : null), doc?.originalName ? h('div.doc-file', { title: doc.originalName }, doc.originalName) : !doc ? h('div.doc-file.muted', '아직 파일이 없어요') : null),
       doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pickMore, disabled: locked, title: '기존 파일·분석 결과는 그대로 남아요' }, icon('plus'), '파일 추가') : null,
       doc && !ro ? h('button.btn.btn-ghost.btn-small', { onclick: pick, disabled: locked }, icon('refresh'), '파일 바꾸기') : null,
     ),
@@ -521,7 +521,7 @@ async function importFiles(role, paths, { add = false } = {}) {
   const b = bs.book;
   if (!canSave(b)) return;
   if (bookBusy(b)) {
-    toast('이 책의 작업이 끝난 뒤에 파일을 바꿔 주세요.');
+    toast('이 책의 작업이 끝난 뒤에 파일을 바꾸세요.');
     return;
   }
   const old = b.docs[role];
@@ -541,7 +541,7 @@ async function importFiles(role, paths, { add = false } = {}) {
     rematch();
     bs.role = role;
     render();
-    toast(`${role === 'problem' ? '문제집을' : '답지를'} 올렸어요. [${ROLE_NAME[role]} 분석]을 눌러 주세요.`, { type: 'success' });
+    toast(`${role === 'problem' ? '문제집을' : '답지를'} 올렸어요. [${ROLE_NAME[role]} 분석]을 누르세요.`, { type: 'success' });
   } catch (err) {
     toast(errMsg(err), { type: 'error', timeout: 8000 });
   }
@@ -577,7 +577,7 @@ async function addMoreFiles(role, paths) {
       render();
     }
     if (doc.analyzedAt && pages.length) await analyzeRole(role, { only: pages });
-    else toast(`${ROLE_NAME[role]}에 ${pages.length}쪽을 더했어요.${doc.analyzedAt ? '' : ` [${ROLE_NAME[role]} 분석]을 눌러 주세요.`}`, { type: 'success' });
+    else toast(`${ROLE_NAME[role]}에 ${pages.length}쪽을 더했어요.${doc.analyzedAt ? '' : ` [${ROLE_NAME[role]} 분석]을 누르세요.`}`, { type: 'success' });
   } catch (err) {
     toast(errMsg(err), { type: 'error', timeout: 8000 });
   }
@@ -707,8 +707,8 @@ function resultView() {
   const role = b.docs[bs.role] ? bs.role : b.docs.problem ? 'problem' : 'answer';
   const doc = b.docs[role];
   if (!doc) {
-    if (bs.readonly) view.append(h('div.empty-state', h('div.empty-art', icon('upload')), h('h3', '아직 올린 파일이 없어요'), h('p.muted', '만든 사람이 파일을 올려야 해요.')));
-    else view.append(h('div.empty-state', h('div.empty-art', icon('upload')), h('h3', '문제집부터 올려 주세요'), h('p.muted', '')));
+    if (bs.readonly) view.append(h('div.empty-state', h('h3', '아직 올린 파일이 없어요'), h('p.muted', '만든 사람이 파일을 올려야 해요.')));
+    else view.append(h('div.empty-state', h('h3', '문제집부터 올리세요')));
     return view;
   }
   const left = h('div.result-main');
@@ -741,7 +741,7 @@ function resultView() {
   left.append(h('div.result-toolbar', roleSeg, h('span.spacer'), h('span.small.muted', '번호를 누르면 미리보기가 열려요')));
 
   if (!doc.analyzedAt) {
-    left.append(h('div.empty-state', h('div.empty-art', icon('scan')), h('h3', '아직 분석 전이에요'), h('p.muted', bs.readonly ? '만든 사람이 분석해야 해요.' : `[${ROLE_NAME[role]} 분석]을 누르세요.`)));
+    left.append(h('div.empty-state', h('h3', '아직 분석 전이에요'), h('p.muted', bs.readonly ? '만든 사람이 분석해야 해요.' : `[${ROLE_NAME[role]} 분석]을 누르세요.`)));
     return view;
   }
 
@@ -1005,7 +1005,7 @@ function reviewView() {
   const ed = getEditor();
   const b = bs.book;
   if (!b.docs.problem && !b.docs.answer) {
-    return h('div.empty-state', h('div.empty-art', icon('files')), h('h3', '먼저 파일을 올려 주세요'), h('p.muted', ''));
+    return h('div.empty-state', h('h3', '먼저 파일을 올리세요'));
   }
   const wrap = h('div.review-view', ed.el);
   const role = b.docs[ed.role] ? ed.role : b.docs.problem ? 'problem' : 'answer';

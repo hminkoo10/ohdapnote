@@ -8,7 +8,7 @@ import { exportHwpx } from './transcribe.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiLabel, findJob, restartGuard, restartPendingChecks } from './shared.js';
 import { topbar } from './chrome.js';
-import { spineFor, studentSearch } from './home.js';
+import { studentSearch } from './home.js';
 import { examTeacher } from './exam-teacher.js';
 import { subjectOf, subjectName } from './subjects.js';
 
@@ -274,8 +274,7 @@ function bookBar() {
     bar.append(
       h(
         `button.book-tab${ns.active === bid ? '.active' : ''}${subjectClosed(b) ? '.subject-closed' : ''}`,
-        { style: { '--spine': spineFor(bid), '--i': i }, onclick: () => switchBook(bid), dataset: { book: bid }, title: !b ? '지워졌거나 다른 선생님의 나만 보기 교재예요' : subjectClosed(b) ? '학원 계약에 없는 과목이라 보기만 해요' : null },
-        h('span.bt-spine'),
+        { style: { '--i': i }, onclick: () => switchBook(bid), dataset: { book: bid }, title: !b ? '지워졌거나 다른 선생님의 나만 보기 교재예요' : subjectClosed(b) ? '학원 계약에 없는 과목이라 보기만 해요' : null },
         h('span.bt-name', b ? b.name : '볼 수 없는 교재'),
         h('span.bt-count', cnt ? String(cnt) : ''),
         ns.readonly ? null : h('span.bt-x', { title: '이 오답노트에서 책 빼기', 'aria-label': '이 오답노트에서 책 빼기', onclick: (e) => { e.stopPropagation(); removeBook(bid); } }, icon('x')),
@@ -315,9 +314,7 @@ async function addBook() {
     rest.map((b) =>
       h(
         'label.book-opt',
-        { style: { '--spine': spineFor(b.id) } },
         h('input', { type: 'checkbox', onchange: (e) => { if (e.target.checked) picked.add(b.id); else picked.delete(b.id); e.target.closest('.book-opt').classList.toggle('on', e.target.checked); } }),
-        h('span.bo-spine'),
         h('span.bo-name', b.name),
         h('span.bo-meta', b.problemCount ? `${b.problemCount}문항` : '분석 전'),
         h('span.bo-check', icon('check')),
@@ -374,14 +371,13 @@ function noteBody() {
       left.append(
         h(
           'div.empty-state',
-          h('div.empty-art', icon('eye')),
           h('h3', '볼 수 없는 교재예요'),
           h('p.muted', '삭제·비공개 교재의 문항은 보이지 않고 내보내기에서도 빠져요.'),
           ro ? null : h('button.btn', { onclick: () => removeBook(ns.active) }, icon('x'), '이 오답노트에서 빼기'),
         ),
       );
-    } else if (ro) left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '아직 책이 없어요')));
-    else left.append(h('div.empty-state', h('div.empty-art', icon('library')), h('h3', '책을 추가하세요'), h('p.muted', '')));
+    } else if (ro) left.append(h('div.empty-state', h('h3', '아직 책이 없어요')));
+    else left.append(h('div.empty-state', h('h3', '책을 추가하세요')));
     setTimeout(renderExportSummary, 0);
     return view;
   }
@@ -389,7 +385,6 @@ function noteBody() {
     left.append(
       h(
         'div.empty-state',
-        h('div.empty-art', icon('scan')),
         h('h3', doc ? '이 책은 아직 분석 전이에요' : '이 책에는 문제집 파일이 없어요'),
         h('p.muted', '책 화면에서 파일을 넣고 분석하세요.'),
         h('button.btn.btn-primary', { onclick: () => nav.book(b.id) }, icon('arrowRight'), '책 화면으로'),
@@ -422,9 +417,7 @@ function noteBody() {
     ),
     h(
       'div.legend.small',
-      h('span', h('span.chip.demo.on', '3'), '고른 문제'),
-      h('span', h('span.chip.demo.noans', '3'), '해설 짝 없음'),
-      h('span', h('span.chip.demo.missing', '4', h('span.chip-q', '?')), '인식 못한 번호'),
+      h('span', '고른 문제 3 · 해설 짝 없음 3 · 인식 못한 번호 4'),
       ro ? null : h('span', '쪽 번호를 누르면 그 쪽 전체 선택'),
     ),
   );
@@ -617,7 +610,7 @@ function examTeacherField() {
   const members = ns.teacherMembers;
   const name = examInfo().teacher;
   const input = h('input.input.input-small', {
-    value: name, placeholder: '선생님 이름을 써 주세요', dataset: { key: 'teacher' },
+    value: name, placeholder: '선생님 이름을 쓰세요', dataset: { key: 'teacher' },
     'aria-label': members.length ? '직접 쓸 선생님 이름' : '선생님', readOnly: ns.readonly,
     oninput: () => {
       n.teacher = input.value.trim();
@@ -694,7 +687,7 @@ function exportPanel() {
       }),
     );
   const anyAnswers = [...ns.books.values()].some((b) => b.docs.answer?.items?.length || b.docs.problem?.items?.some((item) => answerContent(b.$answers?.items[item.id])));
-  const needAns = anyAnswers ? '' : '정답·해설을 직접 쓰거나 답지를 올려 주세요';
+  const needAns = anyAnswers ? '' : '정답·해설을 직접 쓰거나 답지를 올리세요';
   const exportBtn = (mode, title, sub, tip, disabled) =>
     h('button.export-btn', { onclick: () => doExport(mode), dataset: { mode }, disabled, title: tip }, h('span.xb-icon', icon('download')), h('span.xb-text', h('b', title), sub ? h('small', sub) : null));
   return h(
@@ -882,7 +875,6 @@ function renderExportSummary() {
         h(
           'span.sel-chip',
           {
-            style: { '--spine': spineFor(e.bookId) },
             onclick: () => {
               if (ns.active !== e.bookId) {
                 switchBook(e.bookId).then(() => {
@@ -896,7 +888,7 @@ function renderExportSummary() {
             },
             title: `${e.bookObj.name} — 미리보기`,
           },
-          `${pageLabel(e.bookObj.docs.problem, e.problem.page)} ${itemName(e.problem)}`,
+          h('span.sel-chip-label', `${n.bookIds.length > 1 ? `${e.bookObj.name} · ` : ''}${pageLabel(e.bookObj.docs.problem, e.problem.page)} ${itemName(e.problem)}`),
           ns.readonly ? null : h(
             'button.sel-x',
             {
@@ -941,7 +933,7 @@ async function buildExport(mode) {
   const n = ns.note;
   const entries = allEntries();
   if (!entries.length) {
-    toast('먼저 표에서 문항을 골라 주세요.', { type: 'error' });
+    toast('먼저 표에서 문항을 고르세요.', { type: 'error' });
     return;
   }
   // 고른 책들의 원본 파일 열기

@@ -264,8 +264,15 @@ try {
   assert.equal(await script().inputValue(), 'COLOR {18,52,86}{x}');
   assert.equal(await preview().locator('mi').evaluate((el) => getComputedStyle(el).color), 'rgb(18, 52, 86)');
 
+  await fill('bar {AB} = vec {AB} + hat {x} + bar {x} + {{a} over {b}} + bar {AB}');
+  assert.equal(await eqModal().locator('.eq-notice').innerText(), '');
+  const border = await preview().evaluate(el => getComputedStyle(el).borderColor);
+  await fill('sqr {x}');
+  assert.equal(await eqModal().locator('.eq-notice').innerText(), 'sqr 부분을 확인하세요. 지금 모양으로도 들어가요.');
+  assert.equal(await preview().evaluate(el => getComputedStyle(el).borderColor), border);
+  assert.deepEqual(await eqModal().locator('.eq-notice').evaluate(el => ({ color: getComputedStyle(el).color, weight: getComputedStyle(el).fontWeight })), { color: 'rgb(107, 118, 132)', weight: '400' });
   await fill('"<script>" + sqrt { unknownword');
-  assert.match(await eqModal().locator('.warn-text').innerText(), /확인/);
+  assert.match(await eqModal().locator('.eq-notice').innerText(), /확인/);
   assert.equal(await preview().locator('script').count(), 0);
   const before = await script().inputValue();
   const composing = await script().evaluate((el) => {

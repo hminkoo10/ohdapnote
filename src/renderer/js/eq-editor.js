@@ -14,7 +14,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
   const script = h('textarea.input.answer-equation-script', { rows: 4, maxlength: MAX_LENGTH, spellcheck: false, 'aria-label': '한글 수식 스크립트' });
   script.value = eq;
   const preview = h('div.answer-equation-preview', { tabindex: '0', 'aria-label': '바로 보이는 수식' });
-  const warning = h('p.small.warn-text', { role: 'status' });
+  const warning = h('p.small.eq-notice', { role: 'status' });
   const centered = h('input', { type: 'checkbox', checked: display });
   const panel = h('section.eq-picker', { hidden: true, 'aria-label': '틀과 기호 고르기' });
   let replacement = null;
@@ -25,8 +25,10 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
   const paint = () => {
     preview.innerHTML = eqToMathML(script.value, { display: true, sourceMap: true });
     const errors = parseEq(script.value).errors;
-    warning.textContent = errors.length ? '괄호·명령을 확인하세요. 현재 모양으로도 입력돼요.' : '';
-    preview.classList.toggle('eq-has-warning', errors.length > 0);
+    const typo = errors.length === 1 && errors[0].code === 'unknown-word' ? errors[0] : null;
+    warning.textContent = typo
+      ? script.value.slice(typo.start, typo.end) + ' 부분을 확인하세요. 지금 모양으로도 들어가요.'
+      : errors.length ? '괄호·명령을 확인하세요. 지금 모양으로도 들어가요.' : '';
   };
   const apply = (result) => {
     if (result.script.length > MAX_LENGTH) { warn(new Error('수식은 8,000자까지 쓸 수 있어요.')); return false; }
@@ -101,7 +103,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
     input.addEventListener('change', async () => {
       try {
         const file = input.files[0]; if (!file) return;
-        if (file.size > 200000) throw new Error('200KB 이하 파일을 골라 주세요.');
+        if (file.size > 200000) throw new Error('200KB 이하 파일을 고르세요.');
         await callback(await file.text());
       } catch (error) { warn(error); }
     });
@@ -125,7 +127,7 @@ export async function openEquationEditor({ eq = '', display = false, returnScope
     })), items, h('div.eq-extra-tools', button('JSON 저장', '', () => saveFile('자주 쓰는 수식.json', JSON.stringify(list, null, 2), 'json').catch(warn)),
       button('JSON 불러오기', '', () => readFile('.json', async (text) => {
         const imported = JSON.parse(text);
-        if (!valid(imported) || list.length + imported.length > 50) throw new Error('이름과 수식이 있는 목록을 50개 이내로 골라 주세요.');
+        if (!valid(imported) || list.length + imported.length > 50) throw new Error('이름과 수식이 있는 목록을 50개 이내로 고르세요.');
         list.push(...imported); store();
       })))));
   };
