@@ -19,6 +19,40 @@ test('supported symbol commands emit glyphs, not command-name letters',()=>{
  for(const [name,glyph] of Object.entries(symbols))assert.equal(convertLatex('\\'+name).script,glyph);
  assert.equal(convertLatex('x^{\\triangleleft}').script,'x^{\u25c3}');
 });
+
+// 빠진 짝 기호와 함수 이름은 인접 항 사이에서도 손실 없이 보존합니다.
+for(const [name,expected] of Object.entries({
+ triangleright:'x▹y',vdash:'x⊢y',sqsupset:'x⊐y',smile:'x⌣y',
+ flat:'x♭y',natural:'x♮y',jmath:'xȷy',wp:'x℘y',mho:'x℧y',
+ nleq:'x≰y',ngeq:'x≱y',heartsuit:'x♡y',spadesuit:'x♠y',clubsuit:'x♣y',
+ cdotp:'x cdot y',Re:'x Re y',Im:'x Im y',
+})){
+ test('supported command preserves adjacent atoms: '+name,()=>{
+  const r=convertLatex('x \\' + name + ' y');
+  assert.equal(r.script,expected);
+  assert.deepEqual(r.lossyCommands ?? [],[]);
+  if(name==='cdotp')assert.deepEqual(r,convertLatex('x \\cdot y'));
+ });
+}
+
+test('standard mathematical commands have no losses',()=>{
+ const commands=[
+  'alpha','beta','gamma','delta','epsilon','varepsilon','zeta','eta','theta','vartheta',
+  'iota','kappa','lambda','mu','nu','xi','omicron','pi','varpi','rho','varrho','sigma',
+  'varsigma','tau','upsilon','phi','varphi','chi','psi','omega',
+  'Gamma','Delta','Theta','Lambda','Xi','Pi','Sigma','Upsilon','Phi','Psi','Omega',
+  'le','leq','leqq','leqslant','ge','geq','geqq','geqslant','ne','neq','lt','gt',
+  'approx','sim','simeq','equiv','cong','propto','doteq','ll','gg',
+  'in','notin','ni','owns','subset','supset','subseteq','supseteq','subsetneq','supsetneq',
+  'nsubseteq','nsupseteq','cup','cap','setminus','emptyset','varnothing',
+  'to','rightarrow','longrightarrow','mapsto','leftarrow','gets','longleftarrow',
+  'leftrightarrow','longleftrightarrow','Rightarrow','Longrightarrow','implies',
+  'Leftarrow','Longleftarrow','impliedby','Leftrightarrow','Longleftrightarrow','iff','uparrow','downarrow',
+  'angle','triangle','therefore','because','parallel','perp','cdots','lim','sum','int',
+ ];
+ const r=convertLatex(commands.map(c=>'x \\' + c + ' y').join(' + '));
+ assert.deepEqual(r.lossyCommands ?? [],[]);
+});
 test('font wrappers preserve content without command letters',()=>{
  for(const font of ['textsc','textsl','textmd','mathnormal']){
   assert.equal(convertLatex(`\\${font}{c}`).script,'c');

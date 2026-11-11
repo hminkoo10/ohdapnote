@@ -31,7 +31,7 @@ const ACCENT = {
 };
 
 // 한글 수식이 똑바른 글씨로 알아보는 함수 이름
-const FN = new Set(['sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh', 'coth', 'log', 'ln', 'lg', 'exp', 'lim', 'max', 'min', 'det', 'gcd', 'mod', 'arg', 'dim', 'ker', 'hom']);
+const FN = new Set(['sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh', 'coth', 'log', 'ln', 'lg', 'exp', 'lim', 'max', 'min', 'det', 'gcd', 'mod', 'arg', 'dim', 'ker', 'hom', 'Re', 'Im']);
 // 한글 수식에서 다른 뜻이 있는 함수 이름(sup = 위 첨자, inf = ∞ 등)은 따옴표 글자로
 const FN_TEXT = new Set(['sup', 'inf', 'lcm', 'deg', 'Pr', 'liminf', 'limsup', 'sgn', 'arccot']);
 // 아래위 한계가 붙는 큰 연산자
@@ -85,6 +85,13 @@ Object.assign(SYM, {
   dashv: ['\u22a3', 'op'], imath: ['\u0131', 'op'],
   copyright: ['\u00a9', 'op'], sqsubset: ['\u228f', 'op'],
   frown: ['\u2322', 'op'],
+  triangleright: ['\u25b9', 'op'], vdash: ['\u22a2', 'op'],
+  sqsupset: ['\u2290', 'op'], smile: ['\u2323', 'op'],
+  flat: ['\u266d', 'op'], natural: ['\u266e', 'op'],
+  jmath: ['\u0237', 'op'], wp: ['\u2118', 'op'], mho: ['\u2127', 'op'],
+  nleq: ['\u2270', 'op'], ngeq: ['\u2271', 'op'],
+  heartsuit: ['\u2661', 'op'], spadesuit: ['\u2660', 'op'], clubsuit: ['\u2663', 'op'],
+  cdotp: SYM.cdot,
 });
 
 const ENVS = {
