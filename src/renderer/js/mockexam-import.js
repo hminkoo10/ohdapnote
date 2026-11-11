@@ -48,6 +48,7 @@ async function attach(book, role, files) {
 async function readAnswers(book, row, signal) {
   const candidates = row.files.filter((f) => f.metadata.part === 'answerKey');
   candidates.push(...row.files.filter((f) => f.metadata.part === 'solution'));
+  let best = { entries: [], scanned: false };
   for (const file of candidates) {
     // 정답표는 책 문서와 별개로 읽는다. 해설을 answer로 유지한다.
     let src, url;
@@ -71,23 +72,29 @@ async function readAnswers(book, row, signal) {
         const p = parseAnswerKey(content, { subject: file.metadata.subject ? book.subject : null, selection: row.metadata.selection, tablesOnly: file.metadata.part === 'solution' });
         for (const [k, v] of Object.entries(p.answers)) Object.assign(parsed.answers[k] ||= {}, v);
       }
-      let connected = 0;
+      const entries = [];
       for (const item of book.docs.problem.items) {
         const selection = item.examSection?.selection || row.metadata.selection;
         const section = [book.subject, selection].filter(Boolean).join('|');
         const entry = answerKeyToAnswers(parsed, section, { [item.number]: item.id }).items[item.id];
         if (entry) {
           if (scanned) entry.blocks = [{ type: 'para', text: '정답을 확인하세요.', low: [{ start: 0, end: 10, reason: 'ocr' }] }];
-          await api.saveAnswer(book.id, item.id, entry); connected++;
+          entries.push({ id: item.id, entry });
         }
       }
-      if (connected) return { connected, low: scanned ? connected : 0 };
+      if (entries.length > best.entries.length || (entries.length === best.entries.length && best.scanned && !scanned)) best = { entries, scanned };
+      if (entries.length === book.docs.problem.items.length) break;
     } catch (err) {
       if (signal?.aborted || err.name === 'AbortError') throw err;
       // 못 여는 정답표는 다음 정답표·해설을 시도하고, 문제지는 계속 넣는다.
     } finally { await src?.destroy(); URL.revokeObjectURL(url); }
   }
-  return { connected: 0, low: 0 };
+  signal?.throwIfAborted();
+  for (const { id, entry } of best.entries) {
+    signal?.throwIfAborted();
+    await api.saveAnswer(book.id, id, entry);
+  }
+  return { connected: best.entries.length, low: best.scanned ? best.entries.length : 0 };
 }
 // 자동 받기 뒤에도 동일하게 호출: paths가 null이면 마지막 작업을 이어간다.
 export async function importExamFolder(paths, { onProgress = () => {}, signal, plan } = {}) {

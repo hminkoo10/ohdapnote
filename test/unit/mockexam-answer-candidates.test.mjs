@@ -1,0 +1,44 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
+import { parseAnswerKey, answerKeyToAnswers } from '../../src/renderer/js/mockexam-answers.js';
+const source = readFileSync(new URL('../../src/renderer/js/mockexam-import.js', import.meta.url), 'utf8');
+const body = source.slice(source.indexOf('async function readAnswers('), source.indexOf('// 자동 받기'));
+function setup(candidates, count = 3) {
+  const saved = [], read = [];
+  let current;
+  const readAnswers = runInNewContext(`${body}; readAnswers`, {
+    Blob, URL, parseAnswerKey, answerKeyToAnswers, examForm: () => null,
+    api: {
+      scanExamRead: async (path) => { current = candidates[path]; read.push(path); return ''; },
+      saveAnswer: async (_book, id, entry) => saved.push({ id, entry, reads: read.length }),
+    },
+    openDocSource: async () => ({ numPages: 1, pages: [{ kind: current.ocr ? 'image' : 'pdf' }],
+      getPdfPage: async () => ({ getTextContent: async () => ({ items: [{ str: current.text }] }) }),
+      renderPage: async () => '', destroy: async () => {} }),
+    recognizeWords: async () => [{ str: current.text, y0: 0 }],
+  });
+  const book = { id: 'book', subject: 'math', docs: { problem: { items: Array.from({ length: count }, (_, i) => ({ number: i + 1, id: `q${i + 1}` })) } } };
+  const row = { metadata: {}, files: candidates.map((candidate, i) => ({ localPath: i, filename: `${i}.pdf`, metadata: { part: candidate.part || 'answerKey', subject: 'math' } })) };
+  return { run: () => readAnswers(book, row), saved, read };
+}
+test('일부 OCR 후보 뒤 전체 글자 후보만 저장, 다시 읽어도 동일', async () => {
+  const s = setup([{ ocr: true, text: '1 ⑤' }, { part: 'solution', text: '1 ① 2 ② 3 ③' }]);
+  assert.equal((await s.run()).connected, 3);
+  assert.deepEqual(s.saved.map(x => x.entry.answer), ['1', '2', '3']);
+  assert.ok(s.saved.every(x => x.reads === 2 && x.entry.blocks.length === 0));
+  await s.run();
+  assert.deepEqual(s.saved.slice(3).map(x => x.entry.answer), ['1', '2', '3']);
+});
+test('부분 연결 수 같으면 OCR보다 글자 후보 우선, 서로 섞지 않음', async () => {
+  const s = setup([{ ocr: true, text: '1 ⑤' }, { text: '2 ②' }]);
+  assert.equal((await s.run()).low, 0);
+  assert.deepEqual(s.saved.map(x => x.id), ['q2']);
+});
+test('전부 연결한 후보는 뒤 후보 생략, OCR 확인 표시 유지', async () => {
+  const s = setup([{ ocr: true, text: '1 ⑤ 2 ④ 3 ③' }, { text: '1 ①' }]);
+  assert.equal((await s.run()).low, 3);
+  assert.deepEqual(s.read, [0]);
+  assert.ok(s.saved.every(x => x.entry.blocks[0].low[0].reason === 'ocr'));
+});
