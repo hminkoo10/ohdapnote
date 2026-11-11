@@ -75,9 +75,9 @@ export function routePageItems(items, classification) {
 
 // 앱의 한 쪽 검출 배열만 받습니다. rects는 쪽 비율 좌표입니다.
 // 번호 값·연속·정답 대응은 읽지 않습니다. 여러 쪽/잘못된 상자는 보수적으로 보존합니다.
-export function classifyAnswerTableShape(items = []) {
+export function classifyAnswerTableShape(items = [], {pageIndex, lastQuestionPage} = {}) {
   const boxes = [], pages = new Set();
-  let invalid = !Array.isArray(items), textCount = 0, shortCount = 0;
+  let invalid = !Array.isArray(items), textCount = 0, shortCount = 0, sentenceCount = 0;
   for (const item of Array.isArray(items) ? items : []) {
     if (item?.page != null) pages.add(item.page);
     if (!Array.isArray(item?.rects) || item.rects.length !== 1) { invalid = true; continue; }
@@ -90,6 +90,7 @@ export function classifyAnswerTableShape(items = []) {
     if (typeof item.text === 'string') {
       textCount++;
       const text = item.text.replace(/\s/g, '');
+      if (/(구하|계산하|쓰시오|고르|답하|채우|표시하|하시오|하여라|하라|인가[?？]?|이다[.!。]?|한다[.!。]?|있다[.!。]?|없다[.!。]?|calculate|find\b|write\b|choose\b)/i.test(text)) sentenceCount++;
       if (text.length > 0 && text.length <= 12 && /^[0-9①-⑤.,()]+$/.test(text)) shortCount++;
     }
   }
@@ -105,10 +106,17 @@ export function classifyAnswerTableShape(items = []) {
     boxes.some((s,j)=>i!==j && Math.abs(r.y-s.y)<=.006 && Math.abs(r.x-s.x)>.04)).length);
   const features = { boxCount:n, widthQuantiles:quantiles(r=>r.w), heightQuantiles:quantiles(r=>r.h),
     areaQuantiles:quantiles(r=>r.w*r.h), smallRatio, gridRatio,
-    textCoverage:ratio(textCount), shortTextRatio:textCount ? shortCount/textCount : null };
-  // dev에서 고정한 기하 문턱. 글은 선택 진단값이며 누락/오독에 기대어 판정하지 않습니다.
-  const isAnswerTable = !invalid && pages.size <= 1 && n > 40 && smallRatio >= .85 && gridRatio >= .7;
+    textCoverage:ratio(textCount), shortTextRatio:textCount ? shortCount/textCount : null, sentenceCount };
+  // 호출자가 별도로 확인한 책 전체의 마지막 문항 위치(0-based)만 받습니다.
+  // 정답표 모양/번호 순서로 경계를 추측하지 않습니다. 미확인 경계면 보존합니다.
+  const afterLastQuestion = Number.isInteger(pageIndex) && pageIndex >= 0 &&
+    Number.isInteger(lastQuestionPage) && lastQuestionPage >= 0 && pageIndex > lastQuestionPage &&
+    pages.size === 1 && pages.has(pageIndex);
+  const geometryMatch = !invalid && pages.size <= 1 && n > 40 && smallRatio >= .85 && gridRatio >= .7;
+  const isAnswerTable = geometryMatch && afterLastQuestion && sentenceCount === 0;
   return { isAnswerTable, role:isAnswerTable ? 'answer_table' : 'unknown', features,
     reason: invalid || pages.size > 1 ? '입력 불명확: 문항 보존' :
-      isAnswerTable ? '다수의 작은 검출 상자가 양축 격자로 정렬됨' : '정답표 모양 근거 부족: 문항 보존' };
+      geometryMatch && !afterLastQuestion ? '마지막 문항 뒤임을 확인 못함: 문항 보존' :
+      sentenceCount ? '상자 안 지시문·서술문: 문항 보존' :
+      isAnswerTable ? '마지막 문항 뒤 작은 격자, 문장 단서 없음' : '정답표 모양 근거 부족: 문항 보존' };
 }
