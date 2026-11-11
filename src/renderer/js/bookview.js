@@ -641,6 +641,7 @@ async function analyzeRole(role, { only = null } = {}) {
   try {
     const before = (doc.items || []).map((it) => it.id);
     const res = await analyzeDocument(src, {
+      previousDoc: doc,
       pages,
       role,
       subject: b.subject,
@@ -655,7 +656,7 @@ async function analyzeRole(role, { only = null } = {}) {
     });
     if (only) {
       // 새 쪽 것만 더함 (번호 모양·쪽 번호 맞춤·직접 고친 표시는 처음 분석한 대로)
-      doc.items = [...doc.items.filter((it) => !only.includes(it.page)), ...res.items];
+      doc.items = [...doc.items.filter((it) => !only.includes(it.page)), ...res.items.filter(it => only.includes(it.page))];
       doc.pageInfo = { ...doc.pageInfo, ...res.pageInfo };
     } else {
       doc.items = res.items;

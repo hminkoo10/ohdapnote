@@ -1,3 +1,5 @@
+import { classifyPageRole, classifyAnswerTableShape } from './pagerole.js';
+import { trailingNonQuestionPages, applyPageExclusions, isExcludedPage } from './page-exclusions.js';
 // 문서 분석 파이프라인: 렌더링 → 레이아웃 → (텍스트 | OCR) → 번호 선택 → 영역 계산
 // (Gemini 는 사용자가 고른 쪽만 따로: detectPageWithGemini)
 
@@ -140,6 +142,7 @@ async function readPage(src, index, { forceOcr = false, ocrFallback = true, deep
   }
   const textChars = tokens.reduce((n, t) => n + t.str.length, 0);
   page.tokens = tokens;
+  page.pageRole = classifyPageRole({ tokens, grid });
   const runText = () => {
     const ex = extractCandidates(tokens, layout, { passages, answer });
     page.candidates = answer ? filterAnswerCandidates(ex.candidates, tokens) : ex.candidates;
@@ -846,7 +849,7 @@ export async function analyzeDocument(src, opts) {
 
   items = assignIds(sortItems(items));
   if (examSections) for (const item of items) item.examSection = { ...examSections.get(item.page) };
-  const pageInfo = {};
+  let pageInfo = {};
   for (const r of results) {
     pageInfo[r.index] = {
       analyzed: true,
@@ -859,6 +862,29 @@ export async function analyzeDocument(src, opts) {
   }
   const pageOffset = guessPageOffset(results.map((r) => ({ index: r.index, numbers: r.footerNumbers })));
   const ocrPageCount = results.filter((r) => r.ocrPasses.length).length;
+  if (role === 'problem') {
+    const rows = results.map(r => {
+      const tokens = [...(r.tokens || []), ...r.ocrPasses.flat()];
+      const b = r.ocrPasses.length ? classifyPageRole({ tokens, grid: r.grid }) : r.pageRole || classifyPageRole({ tokens, grid: r.grid });
+      // 번호를 본문으로 쓰지 않고 검출 영역 안의 토큰만 투영합니다.
+      const detected = items.filter(it => it.page === r.index).map(it => ({ ...it,
+        text: tokens.filter(t => it.rects.some(box => box.page === r.index &&
+          (t.x0+t.x1)/2 >= box.x && (t.x0+t.x1)/2 <= box.x+box.w &&
+          (t.y0+t.y1)/2 >= box.y && (t.y0+t.y1)/2 <= box.y+box.h)).map(t => t.str).join(' ') }));
+      // 여러 쪽에 걸친 문항은 쪽 단위로 분리해 빼지 않습니다.
+      const continued = items.some(it => it.rects.some(box => box.page === r.index) &&
+        (it.page !== r.index || it.rects.some(box => box.page !== r.index)));
+      const classified = classifyAnswerTableShape(detected);
+      const shape = !continued && classified.matchesShape && b.role !== 'problem';
+      const weakShape = !continued && classified.supportsAnswerTable && b.role !== 'problem';
+      return { index: r.index, shape, weakShape, hasQuestions: detected.length > 0, nonQuestion: !continued && !b.extractQuestions, role: b.role,
+        restored: !!opts.previousDoc?.pageInfo?.[r.index]?.exclusion?.restored };
+    });
+    const roles = trailingNonQuestionPages(rows, src.numPages);
+    // 표지·목차는 끝 경계와 무관. 정답 머리글만으로 중간 쪽을 빼지 않습니다.
+    for (const row of rows) if (row.nonQuestion && ['unit_cover', 'toc'].includes(row.role)) roles.set(row.index, row.role);
+    ({ items, pageInfo } = applyPageExclusions(items, pageInfo, roles, opts.previousDoc));
+  }
   return { items, pageInfo, signature, signatures, pageOffset, ocrPages: ocrPageCount, layouts, grids };
 }
 
@@ -1005,6 +1031,12 @@ export function replacePageItems(items, pageIdx, newItems) {
  *  - 앞 쪽 마지막 번호 ~ 뒤 쪽 첫 번호 사이에 들어갈 번호를 모양과 상관없이 가장 길게 이어지게 고름
  */
 export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true, role = 'problem', subject } = {}) {
+  const saved = doc.pageInfo?.[idx];
+  if (isExcludedPage(saved)) {
+    // 아직 뺀 쪽의 보관 원본은 보호하고, 되돌린 쪽은 보통 쪽처럼 다시 찾습니다.
+    return { items: (doc.items || []).filter(it => it.page === idx), meta: saved,
+      page: { source: saved.source, layout: { blank: saved.blank, columns: saved.cols || [{}] } } };
+  }
   const passages = subject === 'english' || subject === 'korean';
   const page = await analyzePage(src, idx, { ocrLang, deep, role, passages });
   const sorted = sortItems((doc.items || []).filter((it) => !it.prefix));
