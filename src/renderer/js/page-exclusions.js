@@ -11,6 +11,9 @@ export function trailingNonQuestionPages(rows, pageCount) {
     if (!row || row.restored || (!row.shape && !row.nonQuestion)) break;
     excluded.set(index, row.shape ? 'answer_table' : row.role);
   }
+  // 묶음 앞에 실제 문항이 남는 보통 쪽이 없으면 문서 전체를 보호합니다.
+  const first = Math.min(...excluded.keys());
+  if (!rows.some(r => r.index < first && r.hasQuestions && !r.shape && !r.nonQuestion)) return new Map();
   return excluded;
 }
 

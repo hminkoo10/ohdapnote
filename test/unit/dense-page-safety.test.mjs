@@ -20,7 +20,7 @@ test('뒤쪽의 격자라도 지시문·서술어 있으면 보존',()=>{
 });
 test('뒤쪽 정답 격자 허용, 중간 정답표는 의도적으로 보존',()=>{
   const {items,pageIndex}=densePages[2];
-  const rows=[{index:pageIndex,shape:classify(items).matchesShape}];
+  const rows=[{index:0,hasQuestions:true},{index:pageIndex,shape:classify(items).matchesShape}];
   assert.equal(trailingNonQuestionPages(rows,pageIndex+1).size,1);
   assert.equal(trailingNonQuestionPages(rows,pageIndex+2).size,0);
 });

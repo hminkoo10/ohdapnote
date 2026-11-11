@@ -1,24 +1,17 @@
-# Page-role retention contract
+# 쪽 역할과 문항 보관
 
-The shape classifier returns a geometric candidate, not a document boundary.
-The app scans physical page positions backwards from the end of the document.
-Only a contiguous suffix of shape candidates or independently classified non-question
-pages is eligible. Missing pages, ordinary pages, and user-restored pages stop it.
-No oracle, user-selected boundary, question-number order, or answer matching is used.
-Cover and contents pages use the same retention mechanism independently of the suffix.
+문제 책에만 적용합니다. 기존 정답·풀이 자르기와 정답표 처리를 먼저 거친 뒤 남은 검출을 대상으로 합니다. 정답·해설 문서는 기존 방식으로 읽습니다.
 
-Sentence evidence inside a detected region vetoes the shape. Numbers are not body text.
-OCR text absence is not evidence of safety. Dense formula-only exercises can still be
-mistaken for tables, including the final exercise immediately before the answer table.
-Multi-page items are not split for page-role exclusion.
+## 경계
 
-Excluded detections live in pageInfo[index].exclusion.items, outside doc.items.
-The page-review restore button returns all retained detections and marks the page
-restored. Full analysis and single-page deep analysis preserve existing exclusions
-and restored detections, including user edits. Excluded pages have no review flags.
-Old books without exclusion metadata need no migration.
+문서 끝에서 거꾸로 이어지는 정답표 모양·비문항 쪽만 뺍니다. 빠진 쪽, 보통 문항 쪽, 사용자가 되돌린 쪽에서 멈춥니다. 묶음 앞에 문항이 남는 보통 쪽이 하나 이상 있어야 합니다. 번호 값이나 순서는 쓰지 않습니다. 표지·목차는 끝 묶음과 별도로 보관합니다.
 
-Synthetic array tests cover boundary, sentence veto, persistence, restoration and
-legacy data. test/e2e/page-exclusions.mjs renders an invented PDF, runs the actual
-analyzer and editor, restores the false-excluded dense page with one click, and
-checks full and single-page reanalysis. This does not replace real-book measurement.
+## 보관과 되돌리기
+
+뺀 검출은 `pageInfo[index].exclusion.items`에 보관하고 문항 목록·문제은행·내보내기에서는 숨깁니다. 페이지 검토의 [문항으로 되돌리기]로 그 쪽 검출을 모두 복원합니다. 제외 쪽에는 확인 필요 표시를 붙이지 않습니다.
+
+전체 다시 분석과 한 쪽 꼼꼼히 찾기는 기존 보관본, 되돌린 상태와 사용자 수정을 유지합니다. 예전 저장본은 그대로 열립니다.
+
+## 한계
+
+검출 상자 안에 문장이 있으면 모양 판정에서 제외합니다. 글자가 없거나 식만 빽빽한 문항은 정답표로 잘못 볼 수 있습니다. 여러 쪽에 걸친 문항은 분리해 빼지 않습니다. 한 쪽 문서나 전부 빽빽한 문서처럼 앞에 보통 문항 쪽이 없는 경우에는 끝 묶음을 빼지 않습니다. 이 보호는 기존 정답·풀이 처리 자체를 바꾸지 않습니다.

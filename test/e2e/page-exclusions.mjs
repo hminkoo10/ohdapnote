@@ -55,6 +55,10 @@ try {
     const { analyzeDocument } = await import('/src/renderer/js/analyze.js');
     const { createEditor } = await import('/src/renderer/js/editor.js');
     window.src = await openDocSource([{name:url+'/synthetic.pdf',kind:'pdf'}],n=>n);
+    const answer = await analyzeDocument(window.src,{pages:[0,1,2],role:'answer',flow:'column'});
+    if (Object.values(answer.pageInfo).some(info => info.exclusion) || !answer.items.length) {
+      throw Error('정답 문서는 기존 정답 읽기를 유지해야 함');
+    }
     window.options = {pages:[0,1,2],role:'problem',flow:'column'};
     window.doc = await analyzeDocument(window.src,window.options);
     const style = document.createElement('link'); style.rel='stylesheet';style.href='/src/renderer/styles.css';
@@ -81,10 +85,10 @@ try {
         pageInfo:Object.fromEntries(Object.entries(window.doc.pageInfo).map(([k,v])=>[k,{...v,exclusion:undefined}]))};
       window.editor.refresh();
     });
-    await page.screenshot({animations:'disabled',path:join(shots,'turn13-review-before.png')});
+    await page.screenshot({animations:'disabled',path:join(shots,'turn14-review-before.png')});
     await page.evaluate(()=>{window.doc=window.excludedDoc;window.editor.refresh();});
   }
-  if (shots) { mkdirSync(shots,{recursive:true}); await page.screenshot({animations:'disabled',path:join(shots,'turn13-review-excluded.png')}); }
+  if (shots) { mkdirSync(shots,{recursive:true}); await page.screenshot({animations:'disabled',path:join(shots,'turn14-review-excluded.png')}); }
   await page.getByRole('button',{name:'문항으로 되돌리기',exact:true}).click();
   const restored = await page.evaluate(async () => {
     const count=window.doc.items.filter(it=>it.page===1).length;
@@ -96,7 +100,7 @@ try {
     return {count,after:window.doc.items.filter(it=>it.page===1).length,single:single.items.length,restored:window.doc.pageInfo[1].exclusion.restored};
   });
   assert.deepEqual(restored,{count:48,after:48,single:48,restored:true});
-  if(shots) await page.screenshot({animations:'disabled',path:join(shots,'turn13-review-restored.png')});
+  if(shots) await page.screenshot({animations:'disabled',path:join(shots,'turn14-review-restored.png')});
   assert.deepEqual(errors,[]);
   const result={denseFalseExcludedPages:1,restored,seconds:(Date.now()-start)/1000};
   if(process.env.PORT_REPORT)writeFileSync(process.env.PORT_REPORT,JSON.stringify(result,null,2));
