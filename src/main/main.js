@@ -41,7 +41,14 @@ try { batch = parseExamBatch(process.argv, app.isPackaged); }
 catch (err) { batchArgumentError = err; }
 const isBatch = !!batch || !!batchArgumentError;
 const isSmokeTest = !isBatch && process.env.OHDAP_E2E === '1';
-if (isBatch) require('node:os').setPriority(0, require('node:os').constants.priority.PRIORITY_BELOW_NORMAL);
+// 일괄 처리: 창이 없으니 시작 중 오류도 오류 창 대신 종료 코드 2로 끝낸다(오류 창은 화면 없는 서버에서 멈춘 채 남음).
+const earlyBatchFatal = (err) => { process.stdout.write(JSON.stringify({ event: 'fatal', error: String(err?.message || err).replace(/[\r\n]+/g, ' ') }) + '\n'); app.exit(2); };
+if (isBatch) {
+  process.on('uncaughtException', earlyBatchFatal);
+  // 낮출 때만 바꾼다. nice 로 이미 더 낮게 띄웠으면 올리는 셈이라 권한이 없어 실패한다.
+  const os = require('node:os');
+  try { if (os.getPriority(0) < os.constants.priority.PRIORITY_BELOW_NORMAL) os.setPriority(0, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch {}
+}
 // 배포본에서는 개발자 도구를 막는다 (창의 개발자 도구, 원격 디버깅으로 붙기). 개발 실행에서만 열 수 있음
 const devTools = !app.isPackaged;
 if (app.isPackaged && ['remote-debugging-port', 'remote-debugging-pipe', 'inspect', 'inspect-brk'].some((s) => app.commandLine.hasSwitch(s))) app.exit(1);
@@ -1714,6 +1721,7 @@ async function runExamBatch() {
     ended = true;
     emit({ event: 'fatal', error: String(err?.message || err).replace(/[\r\n]+/g, ' ') }, () => app.exit(2));
   };
+  process.off('uncaughtException', earlyBatchFatal);
   process.on('uncaughtException', fatal);
   process.on('unhandledRejection', fatal);
   try {
