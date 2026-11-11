@@ -116,6 +116,11 @@ try {
   }, all);
   assert.equal(await app.evaluate(() => globalThis.libraryFileReads), readsBeforeMeasure);
   console.log(JSON.stringify({ performance: metrics, listColdMs, listWarmMs, libraryBooks: all.filter((b) => b.library).length }));
+  // 1000권을 한꺼번에 고르면 읽지 않고 더 골라 달라고 함
+  await win.locator('[data-bank-focus="exam"]').selectOption('library');
+  await win.getByText(/마고 모의고사가 \d+권이라 다 보이지 않아요/).waitFor();
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal(await app.evaluate(() => globalThis.libraryFileReads), readsBeforeMeasure);
   assert.equal(await win.locator('.bank-row[data-book^="exam-"]').count(), 0);
   console.log('library-e2e PASS');
 } finally {

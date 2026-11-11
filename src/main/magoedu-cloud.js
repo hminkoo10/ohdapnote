@@ -124,7 +124,7 @@ function check(appId, { packaged = true, env = process.env } = {}) {
       localDir: env.MAGOEDU_LOCAL_DIR || path.join(base, 'local'),
       academyId: env.MAGOEDU_ACADEMY_ID || '',
       libraryDir: env.MAGOEDU_LIBRARY_DIR || '',
-    academyDir: env.MAGOEDU_ACADEMY_DIR || '',
+      academyDir: env.MAGOEDU_ACADEMY_DIR || '',
       requestDir: env.MAGOEDU_REQUEST_DIR || '',
       academyInfoFile: env.MAGOEDU_ACADEMY_INFO || '',
       ssoCode: env.MAGOEDU_SSO_CODE || '',

@@ -185,9 +185,12 @@ function renderBank(root, summaries, books, entries, failed) {
 
   let loadRun = 0;
   const loading = h('p.small.muted', { hidden: true });
+  const LIBRARY_MAX = 100; // 마고 모의고사를 한 번에 이만큼까지만 읽음 (더 많으면 더 골라 달라고 함)
+  const libraryMatches = () => summaries.filter((s) => s.library && librarySelected(s, bs.filters)).length;
   const loadLibrary = async () => {
     const run = ++loadRun;
-    const selected = summaries.filter((s) => s.library && s.subjectOpen !== false && subjectOpen(s, state.appInfo) && (librarySelected(s, bs.filters) || bs.picked.some((p) => p.bookId === s.id)));
+    const few = libraryMatches() <= LIBRARY_MAX;
+    const selected = summaries.filter((s) => s.library && s.subjectOpen !== false && subjectOpen(s, state.appInfo) && ((few && librarySelected(s, bs.filters)) || bs.picked.some((p) => p.bookId === s.id)));
     if (!selected.length) { loading.hidden = true; return; }
     const needed = selected.filter((s) => !cache.has(s.id) || cache.get(s.id).updatedAt !== s.updatedAt);
     loading.hidden = !needed.length;
@@ -237,12 +240,15 @@ function renderBank(root, summaries, books, entries, failed) {
   function renderList() {
     const top = bs.scroll;
     clear(list);
-    const found = filterBank(entries, bs.filters, textOf).filter((e) => !bs.filters.review || reviewCount(e));
+    const many = libraryMatches();
+    const found = filterBank(entries, bs.filters, textOf).filter((e) => (!bs.filters.review || reviewCount(e)) && (many <= LIBRARY_MAX || !e.bookObj.$library));
     count.textContent = `${found.length}문항`;
-    if (summaries.some((s) => s.library) && !bs.filters.exam && !String(bs.filters.year || '').trim()) list.append(h('p.small.muted', '마고 모의고사는 시험 종류나 연도를 고르면 보여요.'));
+    const libraryHint = summaries.some((s) => s.library) && !bs.filters.exam && !String(bs.filters.year || '').trim();
+    if (libraryHint) list.append(h('p.small.muted', '마고 모의고사는 시험 종류나 연도를 고르면 보여요.'));
+    else if (many > LIBRARY_MAX) list.append(h('p.small.muted', `고른 마고 모의고사가 ${many}권이라 다 보이지 않아요. 연도나 학년을 더 고르세요.`));
     if (!summaries.length || !entries.length && !Object.values(bs.filters).some(Boolean) && !summaries.some((s) => s.library)) {
       list.append(h('div.empty-state', h('p', '책장에서 교재를 등록하고 분석하세요.'), h('button.btn.btn-primary', { onclick: () => nav.home({ tab: 'books' }) }, '책장으로')));
-    } else if (!found.length && !(summaries.some((s) => s.library) && !bs.filters.exam && !String(bs.filters.year || '').trim())) list.append(h('div.empty-state', h('p', '맞는 문항이 없어요. 찾는 말을 줄이거나 바꿔 보세요')));
+    } else if (!found.length && !libraryHint && many <= LIBRARY_MAX) list.append(h('div.empty-state', h('p', '맞는 문항이 없어요. 찾는 말을 줄이거나 바꿔 보세요')));
     let bookId = null;
     let bookGroup = null;
     let previousStem = '';
@@ -300,7 +306,7 @@ function renderBank(root, summaries, books, entries, failed) {
       const [problem, answer] = await Promise.all([itemImage(src.problem, e.item, 700, { stem: e.item.stem }), e.answer ? itemImage(src.answer, e.answer, 700) : null]);
       if (run !== previewRun || !root.isConnected) return;
       clear(preview).append(h('h3', `${e.bookName} · ${itemName(e.item)}`));
-      if (e.bookObj.$library) preview.append(h('p.small.muted', '마고 공용 책장 · 읽기 전용'), h('button.btn.btn-ghost.btn-small', { onclick: (ev) => { const button = ev.currentTarget; button.disabled = true; attempt(async () => { try { const copy = await api.copyBook(e.bookId); toast('내 책으로 복사했어요.'); nav.book(copy.id); } finally { button.disabled = false; } }); } }, '내 책으로 복사'));
+      if (e.bookObj.$library) preview.append(h('div.bank-heading', h('p.small.muted', '마고 공용 책장 · 읽기 전용'), h('button.btn.btn-small', { onclick: (ev) => { const button = ev.currentTarget; button.disabled = true; attempt(async () => { try { const copy = await api.copyBook(e.bookId); toast('내 책으로 복사했어요.'); nav.book(copy.id); } finally { button.disabled = false; } }); } }, '내 책으로 복사')));
       if (!open(e)) preview.append(h('p.readonly-banner', '학원 계약에 없는 과목 · 보기만'));
       if (problem) preview.append(h('img.bank-image', { src: problem, alt: '지문을 포함한 문제 그림' }));
       if (answer) preview.append(h('h4', '짝 해설'), h('img.bank-image', { src: answer, alt: '짝 해설 그림' }));
