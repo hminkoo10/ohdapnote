@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../../src/renderer/js/pagerole.js', import.meta.url), 'utf8');
 const { classifyAnswerTableShape: guarded } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
-const classify = items => guarded(items, {pageIndex:1,lastQuestionPage:0});
+const classify = items => guarded(items);
 // 모든 자료는 가상 격자입니다. 실제 교재 글·좌표를 사용하지 않습니다.
 const grid = (n=60) => Array.from({length:n},(_,i)=>({page:1,number:String(i%9),
   rects:[{page:1,x:.1+(i%5)*.16,y:.1+Math.floor(i/5)*.05,w:.06,h:.02}]}));

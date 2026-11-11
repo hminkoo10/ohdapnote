@@ -1,22 +1,24 @@
-# 정답표 모양 안전 계약
+# Page-role retention contract
 
-`classifyAnswerTableShape(items, {pageIndex, lastQuestionPage})`는 두 위치를
-동일 PDF의 0-based 쪽 인덱스로 받는다. `lastQuestionPage`는 호출자가 책 전체에서
-독립적으로 확인한 마지막 문항 쪽이어야 한다. 문항 번호 값·번호 순서·정답 대응이나
-이 분류기의 정답표 판정을 경계 추정에 사용하지 않는다.
+The shape classifier returns a geometric candidate, not a document boundary.
+The app scans physical page positions backwards from the end of the document.
+Only a contiguous suffix of shape candidates or independently classified non-question
+pages is eligible. Missing pages, ordinary pages, and user-restored pages stop it.
+No oracle, user-selected boundary, question-number order, or answer matching is used.
+Cover and contents pages use the same retention mechanism independently of the suffix.
 
-- 마지막 문항 **뒤**에서만 모양 규칙을 허용한다. 같은 쪽은 보존한다.
-- 위치 누락/불일치/잘못된 값은 보존한다. 자동 경계 탐색은 제공하지 않는다.
-- 상자 `text`에 지시어·서술어가 있으면 보존한다. `number`를 글로 대체하지 않는다.
-- 텍스트 누락은 문장 없음의 증명이 아니다. 따라서 문장 검사만으로 안전하지 않다.
-- 중간에 끼인 단원별 정답표는 의도적으로 놓친다. 문항 삭제 방지가 우선이다.
-- 기하 문턱은 기존 dev 고정값 그대로다. B(정답 대조)·E(번호 연속)는 사용하지 않는다.
+Sentence evidence inside a detected region vetoes the shape. Numbers are not body text.
+OCR text absence is not evidence of safety. Dense formula-only exercises can still be
+mistaken for tables, including the final exercise immediately before the answer table.
+Multi-page items are not split for page-role exclusion.
 
-PORT12는 독립 모듈만 변경한다. `analyze.js` 연결·자동 경계 추정은 하지 않는다.
-알려진 책 경계로 잰 결과를 자동 경계 추정의 성능으로 해석하면 안 된다.
-경계를 확인할 수 없는 연결에서는 모양 분류를 끄고 기존 b만 적용한다.
+Excluded detections live in pageInfo[index].exclusion.items, outside doc.items.
+The page-review restore button returns all retained detections and marks the page
+restored. Full analysis and single-page deep analysis preserve existing exclusions
+and restored detections, including user edits. Excluded pages have no review flags.
+Old books without exclusion metadata need no migration.
 
-`test/fixtures/dense-pages.mjs`는 새로 만든 가상 교재 3권의 12쪽이다.
-실제 PDF/실제 앱 검출 시험이 아닌 검출 배열 수준의 적대적 회귀 자료다.
-연산·빈칸·OX/단답 편집을 흉내 내며 지시문, 서술문, 식만 있는 셀, 글 누락을 포함한다.
-실제 교재 검증 범위는 기존 다른 책 103쪽 및 대상 책 154쪽 저장 검출이다.
+Synthetic array tests cover boundary, sentence veto, persistence, restoration and
+legacy data. test/e2e/page-exclusions.mjs renders an invented PDF, runs the actual
+analyzer and editor, restores the false-excluded dense page with one click, and
+checks full and single-page reanalysis. This does not replace real-book measurement.

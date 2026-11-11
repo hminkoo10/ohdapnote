@@ -1,3 +1,4 @@
+import { isExcludedPage, restorePageItems } from './page-exclusions.js';
 // "페이지 검토" 편집기: 인식된 문항 영역을 페이지 위에 표시하고 고칠 수 있게 합니다.
 //  - 상자 클릭: 선택 / 드래그: 이동 / 모서리: 크기 조절
 //  - [문항 추가] 모드에서 빈 곳을 드래그: 새 문항
@@ -126,6 +127,13 @@ export function createEditor(ctx) {
         else e.target.value = String(st.page + 1);
       },
     });
+    if (isExcludedPage(d.pageInfo?.[st.page])) {
+      toolbar.append(h('div.tb-group',
+        h('button.btn.btn-icon', { title: '이전 쪽', onclick: () => go(-1), disabled: st.page <= 0 }, icon('left')),
+        pageInput, h('span.muted', ` / ${s.numPages}`),
+        h('button.btn.btn-icon', { title: '다음 쪽', onclick: () => go(1), disabled: st.page >= s.numPages - 1 }, icon('right'))));
+      return;
+    }
     const it = selectedItem();
     const numInput = h('input.input.input-num', {
       value: it ? it.number : '',
@@ -177,6 +185,14 @@ export function createEditor(ctx) {
     const d = doc();
     if (!d) return;
     const info = d.pageInfo?.[st.page];
+    if (isExcludedPage(info)) {
+      const label = info.exclusion.role === 'answer_table' ? '정답표' : info.exclusion.role === 'toc' ? '목차' : '표지';
+      hint.append(h('span.muted', `${label}로 보여 문항에서 뺐어요.`),
+        h('button.btn.btn-small', { onclick: () => {
+          if (restorePageItems(d, st.page)) { st.selected = null; st.mode = 'select'; commit(); }
+        } }, '문항으로 되돌리기'));
+      return;
+    }
     const parts = [];
     if (!info?.analyzed) parts.push(h('span', '이 쪽은 아직 분석 전이에요.'));
     else {
@@ -245,6 +261,7 @@ export function createEditor(ctx) {
     overlay.classList.toggle('mode-draw', st.mode !== 'select');
     const d = doc();
     if (!d) return;
+    if (isExcludedPage(d.pageInfo?.[st.page])) return;
     const sorted = sortItems(d.items || []);
     sorted.forEach((it, k) => {
       it.rects.forEach((r, ri) => {
@@ -360,7 +377,7 @@ export function createEditor(ctx) {
   };
 
   overlay.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || isExcludedPage(doc()?.pageInfo?.[st.page])) return;
     const d = doc();
     if (!d) return;
     const p = norm(e);
@@ -476,6 +493,7 @@ export function createEditor(ctx) {
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
   function guessNumber(d, page, rect) {
+    if (isExcludedPage(d.pageInfo?.[st.page])) return;
     const sorted = sortItems(d.items || []);
     let prev = null;
     for (const it of sorted) {

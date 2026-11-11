@@ -127,7 +127,7 @@ export async function importExamFolder(paths, { onProgress = () => {}, signal, p
           const doc = book.docs[role], src = sources[role];
           if (!doc || doc.analyzedAt) continue;
           if (!src) throw Error('시험지 파일을 열지 못했어요.');
-          const res = await analyzeDocument(src, { pages: Array.from({ length: src.numPages }, (_, i) => i), role, subject: book.subject, ...doc.options, exam: row.metadata, ocrLang: 'kor+eng', signal, onProgress: (p) => onProgress({ ...p, name: row.name, queue: q }) });
+          const res = await analyzeDocument(src, { previousDoc: doc, pages: Array.from({ length: src.numPages }, (_, i) => i), role, subject: book.subject, ...doc.options, exam: row.metadata, ocrLang: 'kor+eng', signal, onProgress: (p) => onProgress({ ...p, name: row.name, queue: q }) });
           Object.assign(doc, { items: examImportItems(res.items), pageInfo: res.pageInfo, signature: res.signature, analyzedAt: Date.now() });
           await api.saveBook(book);
         }

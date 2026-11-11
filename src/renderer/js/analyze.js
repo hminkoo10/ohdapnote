@@ -1,3 +1,5 @@
+import { classifyPageRole, classifyAnswerTableShape } from './pagerole.js';
+import { trailingNonQuestionPages, applyPageExclusions } from './page-exclusions.js';
 // 문서 분석 파이프라인: 렌더링 → 레이아웃 → (텍스트 | OCR) → 번호 선택 → 영역 계산
 // (Gemini 는 사용자가 고른 쪽만 따로: detectPageWithGemini)
 
@@ -140,6 +142,7 @@ async function readPage(src, index, { forceOcr = false, ocrFallback = true, deep
   }
   const textChars = tokens.reduce((n, t) => n + t.str.length, 0);
   page.tokens = tokens;
+  page.pageRole = classifyPageRole({ tokens, grid });
   const runText = () => {
     const ex = extractCandidates(tokens, layout, { passages, answer });
     page.candidates = answer ? filterAnswerCandidates(ex.candidates, tokens) : ex.candidates;
@@ -751,17 +754,6 @@ export async function analyzeDocument(src, opts) {
     if (page.needsOcr) early.push(page);
   }
 
-  // 문제집 뒤에 붙은 정답과 풀이는 문제가 아님 (글자 레이어로 알 수 있으면 OCR 전에 뺌)
-  let answersFrom = -1;
-  const cutAnswers = () => {
-    const k = role === 'problem' ? answerSectionStart(results) : -1;
-    if (k < 0) return;
-    answersFrom = results[k].index;
-    results = results.slice(0, k + 1);
-    pages = pages.slice(0, pages.indexOf(answersFrom) + 1);
-  };
-  cutAnswers();
-
   // 텍스트 레이어는 있지만 번호를 거의 못 찾은 문서 → 번호가 그림으로 되어 있는 것으로 보고 OCR
   const textPages = results.filter((r) => r.source === 'text' && !r.layout.blank && !r.needsOcr);
   const withNums = textPages.filter((r) => r.candidates.length > 0).length;
@@ -775,12 +767,12 @@ export async function analyzeDocument(src, opts) {
   await ocrPages(src, ocrList.filter((r) => !r.ocrPasses.length), { ...ocrOpts, passes: OCR_PASSES.slice(0, 1), finish: false });
   await ocrPages(src, ocrList, { ...ocrOpts, passes: OCR_PASSES.slice(1) });
   shareSplitHints(results);
-  if (answersFrom < 0) cutAnswers(); // 스캔본은 OCR 로 정답표를 알아본 뒤에
   onProgress?.({ phase: 'scan', done: pages.length, total: pages.length, message: '번호 정리 중' });
 
   // 빠른 정답표 쪽은 번호 인식에서 뺌 (문제집 끝에 붙은 "한눈에 보는 정답"도: 문제집은 칸이 촘촘한 표만)
   const tablePages = new Set();
   const markTables = () => {
+    if (role === 'problem') return;
     for (const r of results) {
       if (r.isTable || looksLikeAnswerTable(r.candidates, { strict: role !== 'answer' })) {
         tablePages.add(r.index);
@@ -831,7 +823,6 @@ export async function analyzeDocument(src, opts) {
     for (const group of groups.values()) for (const [idx, reasons] of flagPages(group, anchors, layouts)) flags.set(idx, reasons);
   }
   for (const idx of tablePages) flags.set(idx, ['빠른 정답표 같아서 건너뜀']);
-  if (answersFrom >= 0) flags.set(answersFrom, ['여기부터는 정답과 풀이 같아서 뺌 (문제 쪽까지만 범위를 정하면 사라짐)']);
   const cutters = buildCutters(results, anchors, signature);
   const ranges = new Map(results.filter((r) => r.ranges?.length).map((r) => [r.index, r.ranges]));
   let items = computeItems(pages, anchors, layouts, grids, { flow, passages, answer: role === 'answer' && passages, source: sourceMap, cutters, stopPages: tablePages, ranges });
@@ -846,7 +837,7 @@ export async function analyzeDocument(src, opts) {
 
   items = assignIds(sortItems(items));
   if (examSections) for (const item of items) item.examSection = { ...examSections.get(item.page) };
-  const pageInfo = {};
+  let pageInfo = {};
   for (const r of results) {
     pageInfo[r.index] = {
       analyzed: true,
@@ -859,17 +850,28 @@ export async function analyzeDocument(src, opts) {
   }
   const pageOffset = guessPageOffset(results.map((r) => ({ index: r.index, numbers: r.footerNumbers })));
   const ocrPageCount = results.filter((r) => r.ocrPasses.length).length;
+  if (role === 'problem') {
+    const rows = results.map(r => {
+      const tokens = [...(r.tokens || []), ...r.ocrPasses.flat()];
+      const b = r.ocrPasses.length ? classifyPageRole({ tokens, grid: r.grid }) : r.pageRole || classifyPageRole({ tokens, grid: r.grid });
+      // 번호를 본문으로 쓰지 않고 검출 영역 안의 토큰만 투영합니다.
+      const detected = items.filter(it => it.page === r.index).map(it => ({ ...it,
+        text: tokens.filter(t => it.rects.some(box => box.page === r.index &&
+          (t.x0+t.x1)/2 >= box.x && (t.x0+t.x1)/2 <= box.x+box.w &&
+          (t.y0+t.y1)/2 >= box.y && (t.y0+t.y1)/2 <= box.y+box.h)).map(t => t.str).join(' ') }));
+      // 여러 쪽에 걸친 문항은 쪽 단위로 분리해 빼지 않습니다.
+      const continued = items.some(it => it.rects.some(box => box.page === r.index) &&
+        (it.page !== r.index || it.rects.some(box => box.page !== r.index)));
+      const shape = !continued && classifyAnswerTableShape(detected).matchesShape && b.role !== 'problem';
+      return { index: r.index, shape, nonQuestion: !continued && !b.extractQuestions, role: b.role,
+        restored: !!opts.previousDoc?.pageInfo?.[r.index]?.exclusion?.restored };
+    });
+    const roles = trailingNonQuestionPages(rows, src.numPages);
+    // 표지·목차는 끝 경계와 무관. 정답 머리글만으로 중간 쪽을 빼지 않습니다.
+    for (const row of rows) if (row.nonQuestion && ['unit_cover', 'toc'].includes(row.role)) roles.set(row.index, row.role);
+    ({ items, pageInfo } = applyPageExclusions(items, pageInfo, roles, opts.previousDoc));
+  }
   return { items, pageInfo, signature, signatures, pageOffset, ocrPages: ocrPageCount, layouts, grids };
-}
-
-/**
- * 문제집 PDF 뒤에 정답과 풀이가 붙어 있으면 그 첫머리의 빠른 정답표 쪽 (results 안 위치). 없으면 -1
- * 앞에 문제가 있고, 문서 뒤쪽 절반에서 나온 정답표만 봄 (단원 중간의 정답표로 문제를 잘라 내지 않게)
- */
-function answerSectionStart(results) {
-  return results.findIndex(
-    (r, k) => k >= results.length / 2 && (r.isTable || looksLikeAnswerTable(r.candidates, { strict: true })) && results.slice(0, k).some((q) => q.candidates.length),
-  );
 }
 
 const round4 = (v) => Math.round(v * 10000) / 10000;
@@ -1005,6 +1007,12 @@ export function replacePageItems(items, pageIdx, newItems) {
  *  - 앞 쪽 마지막 번호 ~ 뒤 쪽 첫 번호 사이에 들어갈 번호를 모양과 상관없이 가장 길게 이어지게 고름
  */
 export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true, role = 'problem', subject } = {}) {
+  const saved = doc.pageInfo?.[idx];
+  if (saved?.exclusion) {
+    // 보관 원본 또는 되돌린 문항을 꼼꼼히 찾기가 덮어쓰지 않게 합니다.
+    return { items: (doc.items || []).filter(it => it.page === idx), meta: saved,
+      page: { source: saved.source, layout: { blank: saved.blank, columns: saved.cols || [{}] } } };
+  }
   const passages = subject === 'english' || subject === 'korean';
   const page = await analyzePage(src, idx, { ocrLang, deep, role, passages });
   const sorted = sortItems((doc.items || []).filter((it) => !it.prefix));
@@ -1012,7 +1020,7 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
   const next = sorted.filter((it) => it.page > idx);
   const prevLast = prev.length ? prev[prev.length - 1].num : null;
   const nextFirst = next.length ? next[0].num : null;
-  if (looksLikeAnswerTable(page.candidates, { strict: role !== 'answer' })) page.candidates = [];
+  if (role === 'answer' && looksLikeAnswerTable(page.candidates)) page.candidates = [];
   const signatures = doc.signatures || (doc.signature ? [doc.signature] : null);
   sortCandidatesByZone(page, passages);
   const { anchors: sel } = selectAnchors([page], { numberStyle: doc.options?.numberStyle, signatures, prevLast });

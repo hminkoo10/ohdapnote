@@ -3,6 +3,7 @@
 import { h, clear, toast, modal, confirmDialog, icon } from './ui.js';
 import { openDocSource, bookFileUrl } from './docsource.js';
 import { detectPageWithGemini, replacePageItems } from './analyze.js';
+import { isExcludedPage } from './page-exclusions.js';
 import { itemName } from './exporter.js';
 import { ROLE_NAME, pageLabel, bookPage, itemsByPage, findItem, flaggedPages, normalizeDoc } from './store.js';
 import { sortItems } from './detect.js';
@@ -763,6 +764,11 @@ export async function runGeminiPages(book, role, pages, hooks = {}) {
       row.querySelector('.gem-msg').textContent = '인식 중…';
       row.scrollIntoView({ block: 'nearest' });
       try {
+        if (isExcludedPage(doc.pageInfo?.[p])) {
+          row.dataset.state = 'ok';
+          row.querySelector('.gem-msg').textContent = '문항에서 뺀 쪽은 보관 유지';
+          continue;
+        }
         const found = await detectPageWithGemini(src, p, {
           role,
           gemini: aiOptions(),
