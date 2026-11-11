@@ -1,7 +1,7 @@
 import { makeMockExamFixtures } from '../lib/mockexam-fixtures.mjs';
 import { _electron as electron } from '../lib/playwright.mjs';
 import { fakeCloud } from '../lib/fake-cloud.mjs';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -119,6 +119,5 @@ try {
 } finally {
   await app?.close(); cloud.stop();
   assert.ok(resolve(tmp).startsWith('C:\\temp\\gcc-tmp\\ohdap-mockexam-'));
-  const { execFileSync } = await import('node:child_process');
-  execFileSync('powershell.exe', ['-NoProfile', '-Command', "try { Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:MOCKEXAM_CLEANUP, 'OnlyErrorDialogs', 'SendToRecycleBin') } catch { Write-Output $env:MOCKEXAM_CLEANUP }"], { env: { ...process.env, MOCKEXAM_CLEANUP: tmp } });
+  try { rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { console.log('남은 임시 폴더:', tmp); }
 }

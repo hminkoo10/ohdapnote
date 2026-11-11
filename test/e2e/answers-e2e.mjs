@@ -318,7 +318,6 @@ try {
   if (app) await app.close();
   clouds.forEach((cloud) => cloud.stop());
   if (process.platform === 'win32') {
-    const { execFileSync } = await import('node:child_process');
-    execFileSync('powershell.exe', ['-NoProfile', '-Command', "try { Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:OHDAP_TEST_CLEANUP, 'OnlyErrorDialogs', 'SendToRecycleBin') } catch { Write-Output $env:OHDAP_TEST_CLEANUP }"], { env: { ...process.env, OHDAP_TEST_CLEANUP: tmp } });
+    try { rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { console.log('남은 임시 폴더:', tmp); }
   } else rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

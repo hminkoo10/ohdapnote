@@ -1,11 +1,11 @@
 import { _electron as electron } from '../lib/playwright.mjs';
 import { fileURLToPath } from 'node:url';
 import { makeMockExamFixtures } from '../lib/mockexam-fixtures.mjs';
-import { mkdtempSync, mkdirSync, readFileSync, existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, existsSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir, setPriority, constants } from 'node:os';
 import { createRequire } from 'node:module';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../..', import.meta.url));
@@ -65,5 +65,5 @@ try {
   assert.equal(await crashCode, 2);
   console.log('exam-batch-e2e PASS (codes 0/1/2, renderer crash, 2 exams, resume unchanged)');
 } finally {
-  if (process.platform === 'win32') execFileSync('powershell.exe', ['-NoProfile', '-Command', "try { Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:EXAM_BATCH_CLEANUP, 'OnlyErrorDialogs', 'SendToRecycleBin') } catch { Write-Output $env:EXAM_BATCH_CLEANUP }"], { env: { ...process.env, EXAM_BATCH_CLEANUP: tmp } });
+  try { rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { console.log('남은 임시 폴더:', tmp); }
 }

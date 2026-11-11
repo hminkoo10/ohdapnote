@@ -2,12 +2,11 @@ import { _electron as electron } from '../lib/playwright.mjs';
 import { transcriptKey } from '../../src/renderer/js/transcript-store.js';
 import { fakeCloud } from '../lib/fake-cloud.mjs';
 import { makeMockExamFixtures } from '../lib/mockexam-fixtures.mjs';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, copyFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 const require = createRequire(import.meta.url);
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -125,5 +124,5 @@ try {
   console.log('library-e2e PASS');
 } finally {
   await app?.close(); cloud.stop();
-  execFileSync('powershell.exe', ['-NoProfile', '-Command', "try { Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:LIBRARY_CLEANUP, 'OnlyErrorDialogs', 'SendToRecycleBin') } catch { Write-Output $env:LIBRARY_CLEANUP }"], { env: { ...process.env, LIBRARY_CLEANUP: tmp } });
+  try { rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { console.log('남은 임시 폴더:', tmp); }
 }
