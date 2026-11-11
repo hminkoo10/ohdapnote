@@ -83,7 +83,8 @@ async function readAnswers(book, row, signal) {
         }
       }
       if (entries.length > best.entries.length || (entries.length === best.entries.length && best.scanned && !scanned)) best = { entries, scanned };
-      if (entries.length === book.docs.problem.items.length) break;
+      // 글자로 전부 연결했으면 더 볼 것 없음. OCR 로 전부 연결했으면 확인 표시가 없는 글자 후보가 있는지 마저 본다.
+      if (entries.length === book.docs.problem.items.length && !scanned) break;
     } catch (err) {
       if (signal?.aborted || err.name === 'AbortError') throw err;
       // 못 여는 정답표는 다음 정답표·해설을 시도하고, 문제지는 계속 넣는다.

@@ -36,9 +36,19 @@ test('부분 연결 수 같으면 OCR보다 글자 후보 우선, 서로 섞지 
   assert.equal((await s.run()).low, 0);
   assert.deepEqual(s.saved.map(x => x.id), ['q2']);
 });
-test('전부 연결한 후보는 뒤 후보 생략, OCR 확인 표시 유지', async () => {
+test('글자로 전부 연결한 후보는 뒤 후보 생략', async () => {
+  const s = setup([{ text: '1 ① 2 ② 3 ③' }, { ocr: true, text: '1 ⑤' }]);
+  assert.equal((await s.run()).low, 0);
+  assert.deepEqual(s.read, [0]);
+});
+test('OCR 로 전부 연결해도 뒤 글자 후보를 보고, 더 적으면 OCR 확인 표시 유지', async () => {
   const s = setup([{ ocr: true, text: '1 ⑤ 2 ④ 3 ③' }, { text: '1 ①' }]);
   assert.equal((await s.run()).low, 3);
-  assert.deepEqual(s.read, [0]);
+  assert.deepEqual(s.read, [0, 1]);
   assert.ok(s.saved.every(x => x.entry.blocks[0].low[0].reason === 'ocr'));
+});
+test('OCR 와 글자 후보가 모두 전부 연결하면 확인 표시 없는 글자 후보', async () => {
+  const s = setup([{ ocr: true, text: '1 ⑤ 2 ④ 3 ③' }, { part: 'solution', text: '1 ① 2 ② 3 ③' }]);
+  assert.equal((await s.run()).low, 0);
+  assert.deepEqual(s.saved.map(x => x.entry.answer), ['1', '2', '3']);
 });
