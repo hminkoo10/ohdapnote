@@ -1719,6 +1719,8 @@ async function runExamBatch() {
   const fatal = (err) => {
     if (ended) return;
     ended = true;
+    // 화면 처리 프로세스가 죽은 뒤 app.exit 이 끝나지 않고 남은 적이 있다(Windows). 5초 뒤에는 강제로 끝낸다.
+    setTimeout(() => process.exit(2), 5000).unref();
     emit({ event: 'fatal', error: String(err?.message || err).replace(/[\r\n]+/g, ' ') }, () => app.exit(2));
   };
   process.off('uncaughtException', earlyBatchFatal);
