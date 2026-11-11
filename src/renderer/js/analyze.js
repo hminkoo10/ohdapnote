@@ -1,5 +1,5 @@
 import { classifyPageRole, classifyAnswerTableShape } from './pagerole.js';
-import { trailingNonQuestionPages, applyPageExclusions } from './page-exclusions.js';
+import { trailingNonQuestionPages, applyPageExclusions, isExcludedPage } from './page-exclusions.js';
 // 문서 분석 파이프라인: 렌더링 → 레이아웃 → (텍스트 | OCR) → 번호 선택 → 영역 계산
 // (Gemini 는 사용자가 고른 쪽만 따로: detectPageWithGemini)
 
@@ -1032,8 +1032,8 @@ export function replacePageItems(items, pageIdx, newItems) {
  */
 export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true, role = 'problem', subject } = {}) {
   const saved = doc.pageInfo?.[idx];
-  if (saved?.exclusion) {
-    // 보관 원본 또는 되돌린 문항을 꼼꼼히 찾기가 덮어쓰지 않게 합니다.
+  if (isExcludedPage(saved)) {
+    // 아직 뺀 쪽의 보관 원본은 보호하고, 되돌린 쪽은 보통 쪽처럼 다시 찾습니다.
     return { items: (doc.items || []).filter(it => it.page === idx), meta: saved,
       page: { source: saved.source, layout: { blank: saved.blank, columns: saved.cols || [{}] } } };
   }

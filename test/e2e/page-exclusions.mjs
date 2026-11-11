@@ -44,8 +44,8 @@ try {
   await page.route('**/*', r => {
     const target = r.request().url();
     if (target === url+'/synthetic.pdf') return r.fulfill({ contentType:'application/pdf', body:Buffer.from(bytes) });
-    // 식과 번호가 내장된 가상 PDF. OCR 호출이 필요하면 시험 실패로 드러냅니다.
-    if (target.endsWith('/ocr.js')) return r.fulfill({ contentType:'text/javascript',body:'export const OCR_WORKERS=1; export async function recognizeWords(){throw Error("unexpected OCR");} export async function recognizeLine(){throw Error("unexpected OCR");}' });
+    // 가상 PDF의 꼼꼼히 찾기만 빈 OCR 결과를 허용하고 호출 횟수를 확인합니다.
+    if (target.endsWith('/ocr.js')) return r.fulfill({ contentType:'text/javascript',body:'export const OCR_WORKERS=1; export async function recognizeWords(){if(!window.singleAnalysis)throw Error("unexpected OCR"); window.singleOcrCalls++; return [];} export async function recognizeLine(){throw Error("unexpected OCR");}' });
     return target.startsWith(url) || /^(blob:|data:)/.test(target) ? r.continue() : r.abort();
   });
   await page.goto(url+'/test/e2e/harness.html');
@@ -95,7 +95,18 @@ try {
     const saved=JSON.parse(JSON.stringify(window.doc));
     const {analyzeDocument,reanalyzeSinglePage}=await import('/src/renderer/js/analyze.js');
     window.doc=await analyzeDocument(window.src,{...window.options,previousDoc:saved});
+    window.singleAnalysis=true;
+    window.singleOcrCalls=0;
     const single=await reanalyzeSinglePage(window.src,window.doc,1);
+    window.singleAnalysis=false;
+    const exclusion=window.doc.pageInfo[1].exclusion;
+    // deepPage와 같은 메타 병합 뒤 되돌림 표시가 보존되는지 확인합니다.
+    window.doc.pageInfo[1]={...window.doc.pageInfo[1],...single.meta};
+    if ('exclusion' in single.meta || window.doc.pageInfo[1].exclusion!==exclusion) {
+      throw Error('다시 찾기 메타가 되돌림 표시를 덮음');
+    }
+    if (!window.singleOcrCalls) throw Error('꼼꼼히 다시 찾기가 실제 분석을 건너뜀');
+    window.doc=await analyzeDocument(window.src,{...window.options,previousDoc:window.doc});
     window.editor.refresh();
     return {count,after:window.doc.items.filter(it=>it.page===1).length,single:single.items.length,restored:window.doc.pageInfo[1].exclusion.restored};
   });
