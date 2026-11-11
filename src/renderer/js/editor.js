@@ -1,4 +1,3 @@
-import { isExcludedPage, restorePageItems } from './page-exclusions.js';
 // "페이지 검토" 편집기: 인식된 문항 영역을 페이지 위에 표시하고 고칠 수 있게 합니다.
 //  - 상자 클릭: 선택 / 드래그: 이동 / 모서리: 크기 조절
 //  - [문항 추가] 모드에서 빈 곳을 드래그: 새 문항
@@ -9,6 +8,7 @@ import { isExcludedPage, restorePageItems } from './page-exclusions.js';
 import { h, clear, icon, debounce, toast, confirmDialog } from './ui.js';
 import { ROLE_NAME, pageLabel, itemsByPage } from './store.js';
 import { sortItems } from './detect.js';
+import { isExcludedPage, restorePageItems } from './page-exclusions.js';
 
 export function createEditor(ctx) {
   const st = {
