@@ -11,11 +11,14 @@ function synthetic() {
   return { width, height, data };
 }
 test('합성 정규 격자 선/원 제거, 가운데 숫자와 원본 보존', () => {
-  const image = synthetic(), original = image.data.slice();
+  const image = synthetic();
+  for (let channel = 0; channel < 3; channel++) image.data[(87 * image.width + 80) * 4 + channel] = 210;
+  const original = image.data.slice();
   const g = prepareAnswerGrid(image);
   assert.equal(g.cols.length, 11); assert.equal(g.rows.length, 10);
   assert.equal(g.pixels[(95 * image.width + 80) * 4], 0);
   assert.equal(g.pixels[(88 * image.width + 80) * 4], 255);
+  assert.equal(g.pixels[(87 * image.width + 80) * 4], 255);
   assert.deepEqual(image.data, original);
   assert.equal(prepareAnswerGrid({ width: 10, height: 10, data: new Uint8ClampedArray(400).fill(255) }), null);
 });

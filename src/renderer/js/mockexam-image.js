@@ -31,7 +31,7 @@ export function prepareAnswerGrid({ width: W, height: H, data }) {
       if (ink) ring++;
     }
     if (ring < 14) continue; // 단답 숫자를 원문자로 오인하지 않음
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 > .60) white(x, y);
+    for (let y = rows[r] + 6; y < rows[r + 1] - 6; y++) for (let x = cols[c] + 6; x < cols[c + 1] - 6; x++) if (((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 > .60) white(x, y);
   }
   return { pixels, cols, rows, top, bottom };
 }
