@@ -14,24 +14,28 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const title = compact(/20\d{2}(?:학년도|년)[^\n]{0,160}/.exec(text)?.[0] || '');
   const file = compact(`${path}/${filename}`);
   const reasons = [];
+  // 코드 파일명은 날짜·학년 경로와 함께 있을 때만 학평으로 인정한다.
+  const serviceDate = /[\\/](20\d{2})(0[1-9]|1[012])(?:0[1-9]|[12]\d|3[01])[\\/]go([123])[\\/]/i.exec(path);
+  const code = serviceDate && /(?:^|[\\/])(kor|math|eng)_(?:main_)?(mun|ans|hsj)_[^\\/]+\.(?:pdf|png|jpe?g|zip)(?:[\\/]|$)/i.exec(`${path}/${filename}`);
+
   // 연기된 학평도 같은 자료 묶음에서는 시행 날짜 디렉터리를 공유한다.
   const dated = /[\\/](20\d{2})[\\/](0?[1-9]|1[012])[\\/]/.exec(path);
 
   const pick = (re) => re.exec(title) || re.exec(file);
   const classify = (s) => /전국연합|학력평가|학평/.test(s) ? 'edu' : /모의평가|모평/.test(s) ? 'kice' : /대학수학능력시험|수능/.test(s) ? 'csat' : null;
-  const exam = classify(title) || classify(file);
+  const exam = classify(title) || classify(file) || (code ? 'edu' : null);
   const sy = pick(/(20\d{2})학년도/);
   const yr = pick(/(20\d{2})년(?!도)/);
   const bare = pick(/(?:^|[^\d])(20\d{2})(?:[^\d]|$)/);
   const schoolYear = exam === 'csat' || exam === 'kice' ? (sy ? +sy[1] : null) : null;
-  const year = schoolYear ? schoolYear - 1 : yr ? +yr[1] : sy && exam === 'edu' ? +sy[1] : bare ? +bare[1] : null;
-  const month = (exam === 'edu' && dated ? +dated[2] : 0) || +(pick(/(1[012]|[1-9])월/)?.[1] || 0) || (exam === 'csat' ? 11 : null);
-  const grade = exam === 'csat' || exam === 'kice' ? 3 : +(pick(/고(?:등학교)?([123])(?:학년)?/)?.[1] || 0) || null;
+  const year = schoolYear ? schoolYear - 1 : yr ? +yr[1] : sy && exam === 'edu' ? +sy[1] : bare ? +bare[1] : code ? +serviceDate[1] : null;
+  const month = (exam === 'edu' && dated ? +dated[2] : 0) || +(pick(/(1[012]|[1-9])월/)?.[1] || 0) || (exam === 'csat' ? 11 : code ? +serviceDate[2] : null);
+  const grade = exam === 'csat' || exam === 'kice' ? 3 : +(pick(/고(?:등학교)?([123])(?:학년)?/)?.[1] || 0) || (code ? +serviceDate[3] : null);
   const foundSubjects = (s) => subjects.filter(([id, re]) => re.test(s.replace(/대학수학능력시험/g, '').replace(id === 'korean' ? /외국어/g : /$^/g, ''))).map(([id]) => id);
   const ss = foundSubjects(title).length ? foundSubjects(title) : foundSubjects(file);
   const folderSelections = selections.filter(v => file.includes(v));
   const inferred = folderSelections.length === 1 ? (selections.slice(0, 2).includes(folderSelections[0]) ? 'korean' : selections.slice(2, 5).includes(folderSelections[0]) ? 'math' : null) : null;
-  const subject = ss.length === 1 ? ss[0] : !ss.length ? inferred : null;
+  const subject = ss.length === 1 ? ss[0] : !ss.length ? inferred || (code ? { kor: 'korean', math: 'math', eng: 'english' }[code[1].toLowerCase()] : null) : null;
   const allowed = selections.filter((v) => !schoolYear || (/[가나]형/.test(v) ? subject === 'math' && schoolYear <= 2021 : /[AB]형/.test(v) ? schoolYear <= 2016 : true));
   const sel = allowed.filter((v) => (title || file).includes(v));
   if (!sel.length) sel.push(...allowed.filter((v) => file.includes(v)));
@@ -49,7 +53,7 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const selection = sel.length === 1 ? sel[0] : null;
   const form = examForm(title) || examForm(file);
   const partOf = (s) => /듣기.*(?:대본|스크립트)|listening.*script/i.test(s) ? 'listeningScript' : /해설|풀이|explanation|solution/i.test(s) ? 'solution' : /정답|정답표|answer/i.test(s) ? 'answerKey' : /문제|question/i.test(s) ? 'question' : null;
-  const part = /\.(?:mp3|wav|m4a)$/i.test(filename) ? 'audio' : partOf(compact(filename)) || partOf(file) || partOf(title) || 'other';
+  const part = /\.(?:mp3|wav|m4a)$/i.test(filename) ? 'audio' : partOf(compact(filename)) || partOf(file) || partOf(title) || (code ? { mun: 'question', ans: 'answerKey', hsj: 'solution' }[code[2].toLowerCase()] : 'other');
   for (const [name, value] of Object.entries({ exam, year, month, grade, subject })) if (value === null) reasons.push(`${name} 미확인 또는 합본`);
   if (part === 'other') reasons.push('파일 역할 미확인');
   if (sel.length > 1) reasons.push('선택 합권');

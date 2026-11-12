@@ -25,3 +25,17 @@ test('현행 평가원 선택 폴더는 공통 머리글보다 구체적, 홀짝
   assert.equal(p.rows.filter(r => !r.reason).length, 3);
   assert.ok(p.rows.every(r => r.metadata.selection && r.files.length === 2));
 });
+
+test('날짜/학년 디렉터리와 새 역할 코드, ZIP 내부 문제 연결', () => {
+  for (const grade of [1,2,3]) {
+    const files = ['kor','math','eng'].flatMap(subject => ['mun','ans','hsj'].map(role => ({
+      filename: `${subject}_main_${role}_synthetic.${role === 'ans' ? 'png' : 'pdf'}`,
+      path: `input/20281020/go${grade}/${subject}_main_${role}_synthetic.${role === 'ans' ? 'png' : 'pdf'}` })));
+    files[6] = { filename: '영어 문제.pdf', path: `input/20281020/go${grade}/eng_mun_synthetic.zip/영어 문제.pdf` };
+    const p = planExamImport(files, [], ['math','korean','english']);
+    assert.equal(p.rows.length, 3);
+    assert.equal(p.skipped.length, 0);
+    assert.ok(p.rows.every(r => r.files.length === 3 && r.metadata.year === 2028 && r.metadata.month === 10 && r.metadata.grade === grade));
+  }
+  assert.equal(identifyExam({filename:'kor_main_ans_synthetic.png'}).exam, null);
+});
