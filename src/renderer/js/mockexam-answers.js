@@ -82,7 +82,10 @@ export function parseAnswerKey(input, { subject = null, selection = null, tables
     // 해설 쪽의 계산 숫자를 정답으로 만들지 않는다. 명시적 표 또는 1·2·3 답 연속 확인.
     if (tablesOnly && !pointsColumn && !optionTail && !selectionTail && !/\b1[.)]?\s+[①-⑤]\s+2[.)]?\s+[①-⑤]\s+3[.)]?\s+[①-⑤]/.test(chunk)) return;
     const pattern = pointsColumn ? /(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})\s+([1-9](?:\.\d+)?)\b/g : /(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})(?!\d)/g;
-    for (const m of chunk.matchAll(pattern)) {
+    const matches = [...chunk.matchAll(pattern)];
+    // 번호만 늘어선 줄(1 2 3 4 …)을 번호·답 쌍으로 읽지 않는다. 답 범위로 거르기 전에 본다.
+    if (numberRunAnswers(matches.map((m) => [m[1], /^[①-⑤]$/.test(m[2]) ? '①②③④⑤'.indexOf(m[2]) + 1 : m[2]]))) { warnings.push(`${key}: 번호 나열`); return; }
+    for (const m of matches) {
       const number = +m[1];
       if (!number || number > (current === 'math' ? 30 : 60)) { warnings.push(`문항번호 범위: ${m[1]}`); continue; }
       const answer = /^[①-⑤]$/.test(m[2]) ? String('①②③④⑤'.indexOf(m[2]) + 1) : String(+m[2]);

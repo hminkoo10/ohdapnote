@@ -10,7 +10,7 @@ function setup(candidates, count = 3, selection = null) {
   const saved = [], read = [];
   let current;
   const readAnswers = runInNewContext(`${body}; readAnswers`, {
-    Blob, URL, parseAnswerKey, answerKeyToAnswers, numberRunAnswers, selections, examForm: () => null,
+    Blob, URL, parseAnswerKey, answerKeyToAnswers, selections, examForm: () => null,
     api: {
       scanExamRead: async (path) => { current = candidates[path]; read.push(path); return ''; },
       saveAnswer: async (_book, id, entry) => saved.push({ id, entry, reads: read.length }),
@@ -79,4 +79,13 @@ test('문항 번호 나열을 번호·답 쌍으로 읽은 후보는 버리고 �
   assert.equal(numberRunAnswers([[1, '2'], [2, '3'], [3, '4'], [4, '5'], [23, '1'], [24, '2']]), false);
   assert.equal(numberRunAnswers([[1, '3'], [2, '3'], [3, '4'], [20, '7'], [21, '22'], [22, '5']]), false);
   assert.equal(numberRunAnswers([[1, '2'], [3, '4'], [5, '6'], [7, '8'], [9, '10'], [10, '120']]), true);
+});
+
+test('번호만 늘어선 국어 정답표 줄은 답 범위로 거르기 전에 통째로 건너뜀', () => {
+  const lines = ['언어 영역', `문항번호 ${Array.from({ length: 20 }, (_, i) => i + 1).join(' ')}`, '정 답'];
+  const p = parseAnswerKey(lines.map((str) => ({ str, hasEOL: true })), { subject: 'korean' });
+  assert.deepEqual(p.answers.korean || {}, {});
+  assert.ok(p.warnings.some((w) => w.includes('번호 나열')));
+  const real = parseAnswerKey([{ str: '언어 영역', hasEOL: true }, { str: '1 ② 2 ③ 3 ④ 4 ⑤ 5 ① 6 ② 7 ⑤', hasEOL: true }], { subject: 'korean' });
+  assert.equal(Object.keys(real.answers.korean).length, 7);
 });
