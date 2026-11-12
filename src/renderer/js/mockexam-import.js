@@ -5,7 +5,7 @@ import { newDoc } from './store.js';
 import { analyzeDocument } from './analyze.js';
 import { parseAnswerKey, answerKeyToAnswers } from './mockexam-answers.js';
 import { recognizeWords } from './ocr.js';
-import { recognizeAnswerGrid } from './mockexam-image.js';
+import { recognizeAnswerGrid, preferGridAnswerKey } from './mockexam-image.js';
 import { transcribeExam } from './bank-transcribe.js';
 import { subjectOpen } from './subjects.js';
 import { openDocSource } from './docsource.js';
@@ -82,8 +82,7 @@ async function readAnswers(book, row, signal) {
         const pageForm = examForm(content.map((t) => t.str).join(' '));
         if (form && pageForm && form !== pageForm) continue;
         let p = parseAnswerKey(content, { subject: file.metadata.subject ? book.subject : null, selection: row.metadata.selection, tablesOnly: file.metadata.part === 'solution' });
-        const count = p => Object.values(p?.answers || {}).reduce((n, entries) => n + Object.keys(entries).length, 0);
-        if (count(gridParsed) > count(p)) p = gridParsed;
+        if (gridParsed) p = preferGridAnswerKey(p, gridParsed);
         for (const [k, v] of Object.entries(p.answers)) Object.assign(parsed.answers[k] ||= {}, v);
       }
       const entries = [];

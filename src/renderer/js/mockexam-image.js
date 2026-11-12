@@ -76,3 +76,19 @@ export async function recognizeAnswerGrid(canvas, recognizeWords, { subject, sel
   } finally { clean.width = clean.height = 1; }
   return { answers: { [[subject, selection].filter(Boolean).join('|')]: entries }, warnings: [] };
 }
+
+// 기존 OCR와 상충하는 답을 새 후보로 덮어쓰지 않는다.
+export function preferGridAnswerKey(parsed, grid) {
+  const count = p => Object.values(p?.answers || {}).reduce((n, entries) => n + Object.keys(entries).length, 0);
+  if (count(grid) <= count(parsed)) return parsed;
+  const answers = {};
+  for (const [section, entries] of Object.entries(grid.answers)) {
+    answers[section] = {};
+    for (const [n, entry] of Object.entries(entries)) {
+      const old = parsed.answers[section]?.[n] || parsed.answers[section.split('|')[0]]?.[n];
+      if (!old || old.answer === entry.answer) answers[section][n] = entry;
+    }
+  }
+  const candidate = { ...grid, answers };
+  return count(candidate) > count(parsed) ? candidate : parsed;
+}

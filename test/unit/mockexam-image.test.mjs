@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { prepareAnswerGrid, gridWordAnswers, recognizeAnswerGrid } from '../../src/renderer/js/mockexam-image.js';
+import { prepareAnswerGrid, gridWordAnswers, recognizeAnswerGrid, preferGridAnswerKey } from '../../src/renderer/js/mockexam-image.js';
 function synthetic() {
   const width = 460, height = 400, data = new Uint8ClampedArray(width * height * 4).fill(255);
   const ink = (x, y) => { const k = (y * width + x) * 4; data[k] = data[k + 1] = data[k + 2] = 0; };
@@ -52,4 +52,11 @@ test('두 확대 결과가 일치할 때만 답 연결', async () => {
       assert.deepEqual(parsed.answers.korean, commonOnly ? {} : { 41: { answer: '4', points: null } });
     }
   } finally { globalThis.document = previous; }
+});
+
+test('기존 OCR와 충돌하는 새 답은 제외, 기존 연결 수가 더 많으면 유지', () => {
+  const p={answers:{korean:{1:{answer:'4',points:null}}}};
+  const g={answers:{korean:{1:{answer:'2',points:null},2:{answer:'3',points:null},3:{answer:'5',points:null}}}};
+  assert.deepEqual(preferGridAnswerKey(p,g).answers.korean,{2:{answer:'3',points:null},3:{answer:'5',points:null}});
+  assert.equal(preferGridAnswerKey(g,p),g);
 });
