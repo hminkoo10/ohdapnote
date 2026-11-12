@@ -1098,7 +1098,8 @@ export function chooseExpectedChain(cands, prevLast, nextFirst) {
  * 숫자로만 된 6개 이하 덩어리(개념 쪽 소제목 "1 함수의 수렴과 발산", 책 소개 쪽 견본 그림 속 "0001 0003 …")는 버림.
  * @returns {number} 뺀 개수
  */
-export function dropStrayRuns(order, anchors, key) {
+export function dropStrayRuns(order, anchors, key, pages = []) {
+  const pageMap = new Map(pages.map((p) => [p.index, p]));
   const runs = [];
   for (const idx of order) {
     for (const c of anchors.get(idx) || []) {
@@ -1123,7 +1124,9 @@ export function dropStrayRuns(order, anchors, key) {
     if (isLong(r) || r[0].c.num === 1) return;
     const prev = runs.slice(0, i).reverse().find(isLong);
     const next = runs.slice(i + 1).find(isLong);
-    if (!follows(prev, r) && !follows(r, next)) for (const { c } of r) stray.add(c);
+    if (!follows(prev, r) && !follows(r, next)) for (const { idx, c } of r) {
+      if (!anchorVisualEvidence(pageMap.get(idx), c).protect) stray.add(c);
+    }
   });
   if (!stray.size) return 0;
   for (const idx of order) {
@@ -1562,4 +1565,22 @@ export function guessPageOffset(footers) {
   const pagesWithNumbers = footers.filter((f) => f.numbers.length).length;
   if (count >= 3 && count >= pagesWithNumbers * 0.3) return value;
   return null;
+}
+
+/** 같은 쪽 안의 모양만 본다. 번호 값·번호 순서·문서 번호 형식은 근거로 쓰지 않는다. */
+export function anchorVisualEvidence(page, c) {
+  const L = page?.layout;
+  const tokens = page?.ocrPasses?.flat() || [];
+  const h = c.h;
+  const aligned = Number.isFinite(c.relX) && c.relX >= -0.005 && c.relX <= 0.02;
+  const large = c.hRatio >= 1.25 && c.hRatio <= 2.5;
+  const inBody = !!L && c.y0 >= L.bodyTop && c.y1 <= L.bodyBottom;
+  const col = L?.columns?.[c.col];
+  const right = tokens.filter((t) => t.x0 >= c.x1 + 0.5 * h && t.x0 <= c.x1 + 4 * h && t.x1 <= (col?.x1 ?? 1));
+  const prose = (t) => /[\uac00-\ud7a3]{2,}/.test(t.str) && !/[\u2460-\u2473\u00b7\u2026]/.test(t.str);
+  const first = right.filter((t) => prose(t) && t.y0 < c.y1 && t.y1 > c.y0);
+  const continuation = first.some((t) => right.some((u) => prose(u) && u.y0 >= c.y1 && u.y0 <= c.y1 + 2 * h && Math.abs(u.x0 - t.x0) <= h));
+  const cleanLane = !tokens.some((t) => t.x0 < c.x1 && t.x1 > c.x0 && t.y1 < c.y0 && t.y1 > c.y0 - h);
+  const score = [aligned, large, inBody, first.length > 0, continuation, cleanLane].filter(Boolean).length;
+  return { score, threshold: 6, margin: score - 6, protect: score === 6 };
 }
