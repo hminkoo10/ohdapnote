@@ -89,3 +89,9 @@ test('번호만 늘어선 국어 정답표 줄은 답 범위로 거르기 전에
   const real = parseAnswerKey([{ str: '언어 영역', hasEOL: true }, { str: '1 ② 2 ③ 3 ④ 4 ⑤ 5 ① 6 ② 7 ⑤', hasEOL: true }], { subject: 'korean' });
   assert.equal(Object.keys(real.answers.korean).length, 7);
 });
+
+test('제목에서 뒤로 밀린 학년도·월(2012 6)의 끝자리를 문항 번호로 읽지 않음', () => {
+  const lines = ['학년도 대학수학능력시험 월 모의평가 정답표 2012 6', '수리 영역', '가 형', '1 ③ 2 ⑤ 7 ②'];
+  const p = parseAnswerKey(lines.map((str) => ({ str, hasEOL: true })), { subject: 'math', selection: '가형' });
+  assert.deepEqual(p.answers, { 'math|가형': { 1: { answer: '3', points: null }, 2: { answer: '5', points: null }, 7: { answer: '2', points: null } } });
+});
