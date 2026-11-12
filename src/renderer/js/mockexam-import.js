@@ -5,6 +5,7 @@ import { newDoc } from './store.js';
 import { analyzeDocument } from './analyze.js';
 import { parseAnswerKey, answerKeyToAnswers } from './mockexam-answers.js';
 import { recognizeWords } from './ocr.js';
+import { recognizeAnswerGrid } from './mockexam-image.js';
 import { transcribeExam } from './bank-transcribe.js';
 import { subjectOpen } from './subjects.js';
 import { openDocSource } from './docsource.js';
@@ -60,16 +61,26 @@ async function readAnswers(book, row, signal) {
       let scanned = false;
       for (let i = 0; i < src.numPages; i++) {
         signal?.throwIfAborted();
+        let gridParsed = null;
         let content = src.pages[i].kind === 'pdf' ? (await (await src.getPdfPage(i)).getTextContent()).items : [];
         if (!content.some((t) => t.str.trim())) {
           scanned = true;
-          const words = await recognizeWords(await src.renderPage(i, 1700), { lang: 'kor+eng', psm: '6' });
-          content = words.map((w, k) => ({ str: w.str, hasEOL: !words[k + 1] || Math.abs(words[k + 1].y0 - w.y0) > 12 }));
+          const canvas = await src.renderPage(i, 1700);
+          try {
+            const words = await recognizeWords(canvas, { lang: 'kor+eng', psm: '6' });
+            content = words.map((w, k) => ({ str: w.str, hasEOL: !words[k + 1] || Math.abs(words[k + 1].y0 - w.y0) > 12 }));
+            if (/\.(png|jpe?g)$/i.test(file.filename)) {
+              try { gridParsed = await recognizeAnswerGrid(canvas, recognizeWords, { subject: file.metadata.subject ? book.subject : null, selection: row.metadata.selection, signal }); }
+              catch (err) { if (signal?.aborted || err.name === 'AbortError') throw err; }
+            }
+          } finally { canvas.width = canvas.height = 1; }
         }
         const form = book.docs.problem.items.find((i) => i.examSection?.form)?.examSection.form || row.metadata.form;
         const pageForm = examForm(content.map((t) => t.str).join(' '));
         if (form && pageForm && form !== pageForm) continue;
-        const p = parseAnswerKey(content, { subject: file.metadata.subject ? book.subject : null, selection: row.metadata.selection, tablesOnly: file.metadata.part === 'solution' });
+        let p = parseAnswerKey(content, { subject: file.metadata.subject ? book.subject : null, selection: row.metadata.selection, tablesOnly: file.metadata.part === 'solution' });
+        const count = p => Object.values(p?.answers || {}).reduce((n, entries) => n + Object.keys(entries).length, 0);
+        if (count(gridParsed) > count(p)) p = gridParsed;
         for (const [k, v] of Object.entries(p.answers)) Object.assign(parsed.answers[k] ||= {}, v);
       }
       const entries = [];
