@@ -50,6 +50,8 @@ async function readAnswers(book, row, signal) {
   const candidates = row.files.filter((f) => f.metadata.part === 'answerKey');
   candidates.push(...row.files.filter((f) => f.metadata.part === 'solution'));
   let best = { entries: [], scanned: false };
+  const selectedBook = selections.slice(0, 5).includes(row.metadata.selection);
+  const complementary = new Map(), conflicts = new Set();
   for (const file of candidates) {
     // 정답표는 책 문서와 별개로 읽는다. 해설을 answer로 유지한다.
     let src, url;
@@ -92,8 +94,15 @@ async function readAnswers(book, row, signal) {
         const entry = answerKeyToAnswers(parsed, section, { [item.number]: item.id }).items[item.id];
         if (entry) {
           if (scanned) entry.blocks = [{ type: 'para', text: '정답을 확인하세요.', low: [{ start: 0, end: 10, reason: 'ocr' }] }];
-          entries.push({ id: item.id, entry });
+          entries.push({ id: item.id, entry, scanned });
         }
+      }
+      // 선택 폴더가 명확한 책에서만 공통 표와 별도 선택 해설을 보완한다.
+      if (selectedBook && file.metadata.selection === row.metadata.selection) for (const found of entries) {
+        if (conflicts.has(found.id)) continue;
+        const old = complementary.get(found.id);
+        if (old && old.entry.answer !== found.entry.answer) { complementary.delete(found.id); conflicts.add(found.id); }
+        else if (!old || old.scanned && !found.scanned) complementary.set(found.id, found);
       }
       if (entries.length > best.entries.length || (entries.length === best.entries.length && best.scanned && !scanned)) best = { entries, scanned };
       // 글자로 전부 연결했으면 더 볼 것 없음. OCR 로 전부 연결했으면 확인 표시가 없는 글자 후보가 있는지 마저 본다.
@@ -104,11 +113,12 @@ async function readAnswers(book, row, signal) {
     } finally { await src?.destroy(); URL.revokeObjectURL(url); }
   }
   signal?.throwIfAborted();
+  if (complementary.size > best.entries.length) best = { entries: [...complementary.values()], scanned: [...complementary.values()].some(e => e.scanned) };
   for (const { id, entry } of best.entries) {
     signal?.throwIfAborted();
     await api.saveAnswer(book.id, id, entry);
   }
-  return { connected: best.entries.length, low: best.scanned ? best.entries.length : 0 };
+  return { connected: best.entries.length, low: best.entries.filter(e => e.scanned).length };
 }
 // 자동 받기 뒤에도 동일하게 호출: paths가 null이면 마지막 작업을 이어간다.
 export async function importExamFolder(paths, { onProgress = () => {}, signal, plan } = {}) {
