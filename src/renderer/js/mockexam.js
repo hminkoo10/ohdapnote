@@ -53,7 +53,7 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const selection = sel.length === 1 ? sel[0] : null;
   const form = examForm(title) || examForm(file);
   const partOf = (s) => /듣기.*(?:대본|스크립트)|listening.*script/i.test(s) ? 'listeningScript' : /해설|풀이|explanation|solution/i.test(s) ? 'solution' : /정답|정답표|answer/i.test(s) ? 'answerKey' : /문제|question/i.test(s) ? 'question' : null;
-  const part = /\.(?:mp3|wav|m4a)$/i.test(filename) ? 'audio' : partOf(compact(filename)) || partOf(file) || partOf(title) || (code ? { mun: 'question', ans: 'answerKey', hsj: 'solution' }[code[2].toLowerCase()] : 'other');
+  const part = /\.(?:mp3|wav|m4a)$/i.test(filename) ? 'audio' : partOf(compact(filename)) || (code ? { mun: 'question', ans: 'answerKey', hsj: 'solution' }[code[2].toLowerCase()] : null) || partOf(file) || partOf(title) || 'other';
   for (const [name, value] of Object.entries({ exam, year, month, grade, subject })) if (value === null) reasons.push(`${name} 미확인 또는 합본`);
   if (part === 'other') reasons.push('파일 역할 미확인');
   if (sel.length > 1) reasons.push('선택 합권');

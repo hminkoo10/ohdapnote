@@ -49,3 +49,8 @@ test('선택 해설의 35번/23번 시작 정답표는 읽고 뒤 풀이 숫자�
     assert.equal(p.answers[`${subject}|${selection}`][start].answer,'1');
   }
 });
+
+test('새 역할 코드는 상위 answers 폴더 이름보다 우선', () => {
+  const m=identifyExam({filename:'kor_main_mun_synthetic.pdf',path:'answers/input/20281020/go3/kor_main_mun_synthetic.pdf'});
+  assert.equal(m.part,'question');
+});
