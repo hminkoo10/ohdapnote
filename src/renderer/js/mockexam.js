@@ -2,7 +2,7 @@ import { normalizeHancomText } from './hancom.js';
 
 const subjects = [['korean', /국어|언어(?!와\s*매체)/], ['math', /수학|수리/], ['english', /영어|외국어/]];
 export const selections = ['화법과작문', '언어와매체', '확률과통계', '미적분', '기하', '가형', '나형', 'A형', 'B형', '인문계', '자연계', '예체능'];
-const compact = (s) => normalizeHancomText(s).replace(/\s/g, '')
+const compact = (s) => normalizeHancomText(s).replace(/[\s_]/g, '')
   .replace(/화작/g, '화법과작문').replace(/언매/g, '언어와매체')
   .replace(/확통/g, '확률과통계').replace(/미적(?!분)/g, '미적분');
 
@@ -14,6 +14,9 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const title = compact(/20\d{2}(?:학년도|년)[^\n]{0,160}/.exec(text)?.[0] || '');
   const file = compact(`${path}/${filename}`);
   const reasons = [];
+  // 연기된 학평도 같은 자료 묶음에서는 시행 날짜 디렉터리를 공유한다.
+  const dated = /[\\/](20\d{2})[\\/](0?[1-9]|1[012])[\\/]/.exec(path);
+
   const pick = (re) => re.exec(title) || re.exec(file);
   const classify = (s) => /전국연합|학력평가|학평/.test(s) ? 'edu' : /모의평가|모평/.test(s) ? 'kice' : /대학수학능력시험|수능/.test(s) ? 'csat' : null;
   const exam = classify(title) || classify(file);
@@ -22,11 +25,13 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const bare = pick(/(?:^|[^\d])(20\d{2})(?:[^\d]|$)/);
   const schoolYear = exam === 'csat' || exam === 'kice' ? (sy ? +sy[1] : null) : null;
   const year = schoolYear ? schoolYear - 1 : yr ? +yr[1] : sy && exam === 'edu' ? +sy[1] : bare ? +bare[1] : null;
-  const month = +(pick(/(1[012]|[1-9])월/)?.[1] || 0) || (exam === 'csat' ? 11 : null);
+  const month = (exam === 'edu' && dated ? +dated[2] : 0) || +(pick(/(1[012]|[1-9])월/)?.[1] || 0) || (exam === 'csat' ? 11 : null);
   const grade = exam === 'csat' || exam === 'kice' ? 3 : +(pick(/고(?:등학교)?([123])(?:학년)?/)?.[1] || 0) || null;
   const foundSubjects = (s) => subjects.filter(([id, re]) => re.test(s.replace(/대학수학능력시험/g, '').replace(id === 'korean' ? /외국어/g : /$^/g, ''))).map(([id]) => id);
   const ss = foundSubjects(title).length ? foundSubjects(title) : foundSubjects(file);
-  const subject = ss.length === 1 ? ss[0] : null;
+  const folderSelections = selections.filter(v => file.includes(v));
+  const inferred = folderSelections.length === 1 ? (selections.slice(0, 2).includes(folderSelections[0]) ? 'korean' : selections.slice(2, 5).includes(folderSelections[0]) ? 'math' : null) : null;
+  const subject = ss.length === 1 ? ss[0] : !ss.length ? inferred : null;
   const allowed = selections.filter((v) => !schoolYear || (/[가나]형/.test(v) ? subject === 'math' && schoolYear <= 2021 : /[AB]형/.test(v) ? schoolYear <= 2016 : true));
   const sel = allowed.filter((v) => (title || file).includes(v));
   if (!sel.length) sel.push(...allowed.filter((v) => file.includes(v)));
