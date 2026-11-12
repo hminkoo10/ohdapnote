@@ -20,7 +20,7 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const serviceDate = /[\\/](20\d{2})(0[1-9]|1[012])(?:0[1-9]|[12]\d|3[01])[\\/]go([123])[\\/]/i.exec(path);
   const code = serviceDate && /(?:^|[\\/])(kor|math|eng)_(?:main_)?(mun|ans|hsj)_[^\\/]+\.(?:pdf|png|jpe?g|zip)(?:[\\/]|$)/i.exec(`${path}/${filename}`);
 
-  // 연기된 학평도 같은 자료 묶음에서는 시행 날짜 디렉터리를 공유한다.
+  // 날짜 폴더(…/2024/05/…)의 달은 제목·파일 이름에 달이 없을 때만 쓴다(받은 날짜별로 정리한 폴더일 수 있음).
   const dated = /[\\/](20\d{2})[\\/](0?[1-9]|1[012])[\\/]/.exec(path);
 
   const pick = (re) => re.exec(title) || re.exec(file);
@@ -31,7 +31,7 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const bare = pick(/(?:^|[^\d])(20\d{2})(?:[^\d]|$)/);
   const schoolYear = exam === 'csat' || exam === 'kice' ? (sy ? +sy[1] : null) : null;
   const year = schoolYear ? schoolYear - 1 : yr ? +yr[1] : sy && exam === 'edu' ? +sy[1] : bare ? +bare[1] : code ? +serviceDate[1] : null;
-  const month = (exam === 'edu' && dated ? +dated[2] : 0) || +(pick(/(1[012]|[1-9])월/)?.[1] || 0) || (exam === 'csat' ? 11 : code ? +serviceDate[2] : null);
+  const month = +(pick(/(1[012]|[1-9])월/)?.[1] || 0) || (exam === 'edu' && dated ? +dated[2] : 0) || (exam === 'csat' ? 11 : code ? +serviceDate[2] : null);
   const grade = exam === 'csat' || exam === 'kice' ? 3 : +(pick(/고(?:등학교)?([123])(?:학년)?/)?.[1] || 0) || (code ? +serviceDate[3] : null);
   const foundSubjects = (s) => subjects.filter(([id, re]) => re.test(s.replace(/대학수학능력시험/g, '').replace(id === 'korean' ? /외국어/g : /$^/g, ''))).map(([id]) => id);
   const ss = foundSubjects(title).length ? foundSubjects(title) : foundSubjects(file);
@@ -70,14 +70,23 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
     if (subject === 'english') listening = { start: 1, end: schoolYear === 2014 ? 22 : 17 };
     if (subject === 'korean' && schoolYear >= 2008 && schoolYear <= 2013) listening = { start: 1, end: 5 };
   }
-  return { exam, year, schoolYear, month, grade, subject, part, selection, form, listening, confidence: Math.max(0.1, 1 - reasons.length * 0.16), reasons };
+  return { exam, year, schoolYear, month, titleMonth: tm ? +tm : null, fileMonth: fm ? +fm : null, grade, subject, part, selection, form, listening, confidence: Math.max(0.1, 1 - reasons.length * 0.16), reasons };
 }
 
 /** 불명 필드는 다른 파일에 자동 병합하지 않는다. 홀짝/선택은 답 충돌 방지를 위해 분리. */
 export function groupExamFiles(files) {
   const groups = new Map();
+  // 연기 회차: 같은 폴더의 문제지 제목이 폴더·파일 이름과 다른 달이면, 제목 글이 없는 정답·해설도 제목의 달을 따른다.
+  const folder = (file) => (file.path || '').replace(/[\\/][^\\/]*$/, '');
+  const moved = new Map();
+  for (const file of files) {
+    const m = file.metadata || identifyExam(file);
+    if (m.titleMonth && m.fileMonth && m.titleMonth !== m.fileMonth) moved.set(`${folder(file)}|${m.fileMonth}`, m.titleMonth);
+  }
   files.forEach((file, index) => {
-    const meta = file.metadata || identifyExam(file);
+    let meta = file.metadata || identifyExam(file);
+    const month = !meta.titleMonth && meta.fileMonth === meta.month && moved.get(`${folder(file)}|${meta.fileMonth}`);
+    if (month) meta = { ...meta, month };
     const key = [meta.exam, meta.year, meta.month, meta.grade, meta.subject, meta.selection || '', meta.form || ''].join(':');
     const uncertain = !meta.exam || !meta.year || !meta.month || !meta.grade || !meta.subject;
     const id = uncertain ? `${key}:unresolved:${index}` : key;

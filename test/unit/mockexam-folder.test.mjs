@@ -66,3 +66,14 @@ test('밑줄로 나뉜 연도와 월은 숫자로 붙이지 않음', () => {
   const m=identifyExam({filename:'2028_3월_고1_학평_국어_정답.png'});
   assert.deepEqual([m.year,m.month,m.grade,m.subject,m.part],[2028,3,1,'korean','answerKey']);
 });
+
+test('날짜별로 받은 폴더의 달보다 파일 이름·제목의 달이 먼저, 날짜 폴더 달은 대체값', () => {
+  const at = (folder, filename, text = '') => identifyExam({ filename, path: `D:/자료/2024/05/${folder}/${filename}`, text });
+  assert.equal(at('고3_3월_학평_국어', 'question-synthetic.pdf').month, 3);
+  assert.equal(at('고3_학평_국어', 'question-synthetic.pdf', '2024년 3월 고3 전국연합학력평가 국어').month, 3);
+  assert.equal(at('고3_학평_국어', 'question-synthetic.pdf').month, 5);
+  // 같은 날짜 폴더라도 서로 다른 시험 폴더는 각자의 달로 묶는다.
+  const p = planExamImport(['고3_3월_학평_국어', '고3_4월_학평_국어'].flatMap(folder => ['question', 'answer'].map(part =>
+    ({ filename: `${part}-synthetic.pdf`, path: `D:/자료/2024/05/${folder}/${part}-synthetic.pdf`, text: '' }))), [], ['korean']);
+  assert.deepEqual(p.rows.map(r => [r.metadata.month, r.files.length]).sort(), [[3, 2], [4, 2]]);
+});
