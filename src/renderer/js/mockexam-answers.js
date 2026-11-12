@@ -115,10 +115,14 @@ export function parseAnswerKey(input, { subject = null, selection = null, tables
   return { answers, warnings };
 }
 
-/** 문항 번호 나열(1 2 3 4 …)을 번호·답 쌍으로 읽으면 답이 '번호+1'로 이어진다. 실제 정답표에서는 드물다. pairs: [[번호, 답], …] */
+/**
+ * 문항 번호 나열(1 2 3 4 …)을 번호·답 쌍으로 읽으면 답이 '번호+1'로 이어진다. pairs: [[번호, 답], …]
+ * 1~4번은 실제 답도 '번호+1'(②~⑤)일 수 있으므로 5번부터만 본다. 5지선다 답은 6 이상이 될 수 없다.
+ */
 export function numberRunAnswers(pairs) {
-  const run = pairs.filter(([number, answer]) => +answer === +number + 1).length;
-  return run >= 2 && run * 2 >= pairs.length;
+  const late = pairs.filter(([number]) => +number >= 5);
+  const run = late.filter(([number, answer]) => +answer === +number + 1).length;
+  return run >= 3 && run * 2 >= late.length;
 }
 
 /** 한 과목/선택 정답 → answers.json. 번호→실제 문항 ID 매핑 필수, 다른 과목 혼입 방지. */
