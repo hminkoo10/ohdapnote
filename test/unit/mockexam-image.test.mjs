@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { prepareAnswerGrid, gridWordAnswers, recognizeAnswerGrid, preferGridAnswerKey } from '../../src/renderer/js/mockexam-image.js';
-function synthetic() {
+function synthetic(dataRows = 9) {
   const width = 460, height = 400, data = new Uint8ClampedArray(width * height * 4).fill(255);
   const ink = (x, y) => { const k = (y * width + x) * 4; data[k] = data[k + 1] = data[k + 2] = 0; };
-  for (let x = 20; x <= 420; x += 40) for (let y = 80; y <= 350; y++) ink(x, y);
-  for (let y = 80; y <= 350; y += 30) for (let x = 20; x <= 420; x++) ink(x, y);
+  for (let x = 20; x <= 420; x += 40) for (let y = 80; y <= 80 + dataRows * 30; y++) ink(x, y);
+  for (let y = 80; y <= 80 + dataRows * 30; y += 30) for (let x = 20; x <= 420; x++) ink(x, y);
   for (let y = 88; y <= 102; y++) for (let x = 73; x <= 87; x++) if (Math.abs(Math.hypot(x - 80, y - 95) - 7) < 1) ink(x, y);
   for (let y = 91; y <= 99; y++) ink(80, y);
   return { width, height, data };
@@ -73,4 +73,9 @@ test('배점이 있는 네 단 표는 머리글 제외 후 열 우선 번호 검
   assert.ok(grid);assert.equal(grid.stride,3);assert.equal(grid.rows.length,13);assert.equal(grid.top,100);
   const words=[{str:'13',x0:100,x1:130,y0:5,y1:20,conf:99},{str:'4',x0:500,x1:530,y0:5,y1:20,conf:99}];
   assert.deepEqual(gridWordAnswers(words,grid,1,800,360,'korean'),{13:'4'});
+});
+
+test('현대 수학 공통 22문항처럼 다섯 행인 표도 번호 검증 대상으로 인식', () => {
+  const grid=prepareAnswerGrid(synthetic(5));
+  assert.ok(grid);assert.equal(grid.rows.length,6);
 });

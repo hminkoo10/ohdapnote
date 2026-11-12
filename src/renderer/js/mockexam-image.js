@@ -14,7 +14,7 @@ export function prepareAnswerGrid({ width: W, height: H, data }) {
   for (let y = 0; y < H; y++) { run = dark(cols[0], y) ? run + 1 : 0; if (run > best) { best = run; top = y - run + 1; bottom = y; } }
   let rows = groups(ys).filter(y => y >= top - 5 && y <= bottom + 5);
   if (columnMajor) { rows = rows.slice(1); top = rows[0]; }
-  if (rows.length < 7 || rows.length > 13) return null;
+  if (rows.length < 6 || rows.length > 13) return null;
   const gaps = rows.slice(1).map((y, i) => y - rows[i]);
   if (Math.max(...gaps) / Math.min(...gaps) > 1.15) return null;
   const pixels = new Uint8ClampedArray(data);
