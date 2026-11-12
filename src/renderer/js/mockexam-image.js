@@ -73,7 +73,24 @@ export async function recognizeAnswerGrid(canvas, recognizeWords, { subject, sel
         const crop = document.createElement('canvas'); crop.width = width; crop.height = Math.round((grid.bottom - grid.top) * width / (grid.cols[c + 2] - grid.cols[c]));
         try {
           crop.getContext('2d').drawImage(clean, grid.cols[c] + 3, grid.top + 3, grid.cols[c + 2] - grid.cols[c] - 6, grid.bottom - grid.top - 6, 0, 0, crop.width, crop.height);
-          passes.push(gridWordAnswers(await recognizeWords(crop, { lang: 'kor+eng', psm: '6' }), grid, c / grid.stride, crop.width, crop.height, subject));
+          const words = await recognizeWords(crop, { lang: 'kor+eng', psm: '6' });
+          // 열 문맥에서 4를 1로 읽는 오인은 두 배율에서도 반복된다.
+          // 1은 문맥을 없앤 단일 문자 인식까지 일치해야 한다. 다른 답으로 교정하지 않는다.
+          for (const word of words.filter(w => w.str === '1' && w.conf >= 90 && w.x0 > width * .4)) {
+            const pad = (word.y1 - word.y0) * .4;
+            const cell = document.createElement('canvas'); cell.width = 200;
+            cell.height = Math.round(200 * (word.y1 - word.y0 + 2 * pad) / (word.x1 - word.x0 + 2 * pad));
+            try {
+              const ctx = cell.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cell.width, cell.height);
+              ctx.drawImage(crop, word.x0 - pad, word.y0 - pad, word.x1 - word.x0 + 2 * pad, word.y1 - word.y0 + 2 * pad, 0, 0, cell.width, cell.height);
+              for (const lang of ['eng', 'kor+eng']) {
+                signal?.throwIfAborted();
+                const check = await recognizeWords(cell, { lang, psm: '10' });
+                if (check.length !== 1 || check[0].str !== '1' || !Number.isFinite(check[0].conf) || check[0].conf < 80) { word.conf = 0; break; }
+              }
+            } finally { cell.width = cell.height = 1; }
+          }
+          passes.push(gridWordAnswers(words, grid, c / grid.stride, crop.width, crop.height, subject));
         } finally { crop.width = crop.height = 1; }
       }
       for (const [n, answer] of Object.entries(passes[0])) if (passes[1][n] === answer && (!commonOnly || +n <= (subject === 'math' ? 22 : 34))) entries[n] = { answer, points: null };

@@ -64,6 +64,26 @@ test('기존 OCR와 충돌하는 새 답은 제외, 기존 연결 수가 더 많
   assert.equal(preferGridAnswerKey(g,p),g);
 });
 
+test('두 배율이 같은 오인 숫자를 반환해도 분리 문자와 다르면 연결하지 않음', async () => {
+  const previous = globalThis.document, image = synthetic();
+  const makeCanvas = () => {
+    const canvas = { width: image.width, height: image.height };
+    canvas.getContext = () => ({ getImageData: () => image, createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }), putImageData() {}, drawImage() {}, fillRect() {} });
+    return canvas;
+  };
+  globalThis.document = { createElement: makeCanvas };
+  try {
+    for (const [isolated, conf, accept] of [['4', 95, false], ['', 95, false], ['1', 79, false], ['1', NaN, false], ['1', 95, true]]) {
+      const parsed = await recognizeAnswerGrid(makeCanvas(), async (crop, options) => {
+        if (options.psm === '10') return isolated ? [{ str: isolated, conf }] : [];
+        const cy = crop.height * (95 - 83) / 264;
+        return [{ str: '1', x0: crop.width * .1, x1: crop.width * .2, y0: cy - 8, y1: cy + 8, conf: 99 }, { str: '1', x0: crop.width * .6, x1: crop.width * .7, y0: cy - 8, y1: cy + 8, conf: 94 }];
+      }, { subject: 'english' });
+      assert.deepEqual(parsed.answers.english, accept ? { 1: { answer: '1', points: null } } : {});
+    }
+  } finally { globalThis.document = previous; }
+});
+
 test('배점이 있는 네 단 표는 머리글 제외 후 열 우선 번호 검증', () => {
   const width=560,height=500,data=new Uint8ClampedArray(width*height*4).fill(255);
   const ink=(x,y)=>{for(let c=0;c<3;c++)data[(y*width+x)*4+c]=0;};
