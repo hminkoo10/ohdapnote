@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { selections } from '../../src/renderer/js/mockexam.js';
-import { parseAnswerKey, answerKeyToAnswers } from '../../src/renderer/js/mockexam-answers.js';
+import { parseAnswerKey, answerKeyToAnswers, numberRunAnswers } from '../../src/renderer/js/mockexam-answers.js';
 const source = readFileSync(new URL('../../src/renderer/js/mockexam-import.js', import.meta.url), 'utf8');
 const body = source.slice(source.indexOf('async function readAnswers('), source.indexOf('// 자동 받기'));
 function setup(candidates, count = 3, selection = null) {
   const saved = [], read = [];
   let current;
   const readAnswers = runInNewContext(`${body}; readAnswers`, {
-    Blob, URL, parseAnswerKey, answerKeyToAnswers, selections, examForm: () => null,
+    Blob, URL, parseAnswerKey, answerKeyToAnswers, numberRunAnswers, selections, examForm: () => null,
     api: {
       scanExamRead: async (path) => { current = candidates[path]; read.push(path); return ''; },
       saveAnswer: async (_book, id, entry) => saved.push({ id, entry, reads: read.length }),
@@ -69,4 +69,12 @@ test('명시된 현대 선택 책만 공통 OCR과 선택 글자 정답을 보�
   const full=setup([{ocr:true,text:common+' '+tail},{part:'solution',text:tail.replace('23 ①','23 ⑤')}],30,'미적분');
   assert.equal((await full.run()).connected,29);
   assert.ok(!full.saved.some(x=>x.id==='q23'));
+});
+
+test('문항 번호 나열을 번호·답 쌍으로 읽은 후보는 버리고 다음 후보 사용', async () => {
+  const s = setup([{ text: '1 2 3 4 5 6' }, { part: 'solution', text: '1 ① 2 ② 3 ③' }], 6);
+  assert.equal((await s.run()).connected, 3);
+  assert.deepEqual(s.saved.map(x => [x.id, x.entry.answer]), [['q1', '1'], ['q2', '2'], ['q3', '3']]);
+  assert.equal(numberRunAnswers([[1, '3'], [2, '3'], [3, '4'], [20, '7'], [21, '12']]), false);
+  assert.equal(numberRunAnswers([[1, '2'], [3, '4'], [5, '6'], [6, '6']]), true);
 });

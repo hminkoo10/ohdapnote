@@ -115,6 +115,12 @@ export function parseAnswerKey(input, { subject = null, selection = null, tables
   return { answers, warnings };
 }
 
+/** 문항 번호 나열(1 2 3 4 …)을 번호·답 쌍으로 읽으면 답이 '번호+1'로 이어진다. 실제 정답표에서는 드물다. pairs: [[번호, 답], …] */
+export function numberRunAnswers(pairs) {
+  const run = pairs.filter(([number, answer]) => +answer === +number + 1).length;
+  return run >= 2 && run * 2 >= pairs.length;
+}
+
 /** 한 과목/선택 정답 → answers.json. 번호→실제 문항 ID 매핑 필수, 다른 과목 혼입 방지. */
 export function answerKeyToAnswers(parsed, section, itemIds, { common = true } = {}) {
   const answers = parsed.answers || parsed;

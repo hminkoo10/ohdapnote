@@ -3,7 +3,7 @@ import { identifyExam, examForm, selections } from './mockexam.js';
 import { planExamImport, examImportItems, examAnswerFiles } from './mockexam-plan.js';
 import { newDoc } from './store.js';
 import { analyzeDocument } from './analyze.js';
-import { parseAnswerKey, answerKeyToAnswers } from './mockexam-answers.js';
+import { parseAnswerKey, answerKeyToAnswers, numberRunAnswers } from './mockexam-answers.js';
 import { recognizeWords } from './ocr.js';
 import { recognizeAnswerGrid, preferGridAnswerKey, answerGridScope } from './mockexam-image.js';
 import { transcribeExam } from './bank-transcribe.js';
@@ -87,7 +87,7 @@ async function readAnswers(book, row, signal) {
         if (gridParsed) p = preferGridAnswerKey(p, gridParsed);
         for (const [k, v] of Object.entries(p.answers)) Object.assign(parsed.answers[k] ||= {}, v);
       }
-      const entries = [];
+      const entries = [], pairs = [];
       for (const item of book.docs.problem.items) {
         const selection = item.examSection?.selection || row.metadata.selection;
         const section = [book.subject, selection].filter(Boolean).join('|');
@@ -95,8 +95,11 @@ async function readAnswers(book, row, signal) {
         if (entry) {
           if (scanned) entry.blocks = [{ type: 'para', text: '정답을 확인하세요.', low: [{ start: 0, end: 10, reason: 'ocr' }] }];
           entries.push({ id: item.id, entry, scanned });
+          pairs.push([item.number, entry.answer]);
         }
       }
+      // 번호 나열을 정답으로 읽은 후보는 통째로 버린다(틀린 답보다 빠진 답이 낫다).
+      if (numberRunAnswers(pairs)) entries.length = 0;
       // 선택 폴더가 명확한 책에서만 공통 표와 별도 선택 해설을 보완한다.
       if (selectedBook && file.metadata.selection === row.metadata.selection) for (const found of entries) {
         if (conflicts.has(found.id)) continue;
