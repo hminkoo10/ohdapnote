@@ -35,6 +35,8 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const allowed = selections.filter((v) => !schoolYear || (/[가나]형/.test(v) ? subject === 'math' && schoolYear <= 2021 : /[AB]형/.test(v) ? schoolYear <= 2016 : true));
   const sel = allowed.filter((v) => (title || file).includes(v));
   if (!sel.length) sel.push(...allowed.filter((v) => file.includes(v)));
+  // 공통 표지에 모든 선택명이 있어도 단일 선택 폴더는 별권이다.
+  if (sel.length > 1 && folderSelections.length === 1 && selections.slice(0, 5).includes(folderSelections[0])) sel.splice(0, sel.length, folderSelections[0]);
   // 옛 파일은 '수학A'처럼 형을 생략한다. 과목 바로 뒤의 표기만 인정.
   const legacyType = subject && exam === 'edu' && year <= 2016
     ? /(?:수학|수리|국어|언어|영어|외국어)([AB])(?:형|[_)./\\-]|$)/.exec(title || file) : null;

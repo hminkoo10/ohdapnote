@@ -14,3 +14,14 @@ test('선택 폴더는 과목·선택·시행월을 모든 역할에서 공유',
   assert.ok(p.rows.some(r => r.name.endsWith('수학(미적분)')));
   assert.equal(p.skipped.length, 0);
 });
+
+test('현행 평가원 선택 폴더는 공통 머리글보다 구체적, 홀짝 분리', () => {
+  const files = ['기하','미적분','확률과_통계'].flatMap(sel => ['홀','짝'].flatMap(form =>
+    ['question','answer'].map(part => ({ filename: `${part}-synthetic.pdf`,
+      path: `input/2028학년도_대학수학능력시험_${sel}_${form}수형/${part}-synthetic.pdf`,
+      text: part === 'question' ? '2028학년도 대학수학능력시험 수학 확률과 통계 미적분 기하' : '' }))));
+  const p = planExamImport(files);
+  assert.equal(p.rows.length, 6);
+  assert.equal(p.rows.filter(r => !r.reason).length, 3);
+  assert.ok(p.rows.every(r => r.metadata.selection && r.files.length === 2));
+});
