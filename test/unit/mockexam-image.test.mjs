@@ -63,3 +63,14 @@ test('기존 OCR와 충돌하는 새 답은 제외, 기존 연결 수가 더 많
   assert.deepEqual(preferGridAnswerKey(p,g).answers.korean,{2:{answer:'3',points:null},3:{answer:'5',points:null}});
   assert.equal(preferGridAnswerKey(g,p),g);
 });
+
+test('배점이 있는 네 단 표는 머리글 제외 후 열 우선 번호 검증', () => {
+  const width=560,height=500,data=new Uint8ClampedArray(width*height*4).fill(255);
+  const ink=(x,y)=>{for(let c=0;c<3;c++)data[(y*width+x)*4+c]=0;};
+  for(let x=20;x<=500;x+=40)for(let y=60;y<=460;y++)ink(x,y);
+  for(const y of [60,...Array.from({length:13},(_,i)=>100+i*30)])for(let x=20;x<=500;x++)ink(x,y);
+  const grid=prepareAnswerGrid({width,height,data});
+  assert.ok(grid);assert.equal(grid.stride,3);assert.equal(grid.rows.length,13);assert.equal(grid.top,100);
+  const words=[{str:'13',x0:100,x1:130,y0:5,y1:20,conf:99},{str:'4',x0:500,x1:530,y0:5,y1:20,conf:99}];
+  assert.deepEqual(gridWordAnswers(words,grid,1,800,360,'korean'),{13:'4'});
+});
