@@ -13,6 +13,7 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   // 본문 속 고2·풀이·평가원은 제목 정보가 아니다.
   const title = compact(/20\d{2}(?:학년도|년)[^\n]{0,160}/.exec(text)?.[0] || '');
   const file = compact(`${path}/${filename}`);
+  const legacyFile = normalizeHancomText(`${path}/${filename}`).replace(/\s/g, '');
   const reasons = [];
   // 코드 파일명은 날짜·학년 경로와 함께 있을 때만 학평으로 인정한다.
   const serviceDate = /[\\/](20\d{2})(0[1-9]|1[012])(?:0[1-9]|[12]\d|3[01])[\\/]go([123])[\\/]/i.exec(path);
@@ -43,7 +44,7 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   if (sel.length > 1 && folderSelections.length === 1 && selections.slice(0, 5).includes(folderSelections[0])) sel.splice(0, sel.length, folderSelections[0]);
   // 옛 파일은 '수학A'처럼 형을 생략한다. 과목 바로 뒤의 표기만 인정.
   const legacyType = subject && exam === 'edu' && year <= 2016
-    ? /(?:수학|수리|국어|언어|영어|외국어)([AB])(?:형|[_)./\\-]|$)/.exec(title || file) : null;
+    ? /(?:수학|수리|국어|언어|영어|외국어)([AB])(?:형|[_)./\\-]|$)/.exec(title || legacyFile) : null;
   if (legacyType) sel.splice(0, sel.length, `${legacyType[1]}형`);
   const oldYear = schoolYear || year;
   const legacyMath = subject === 'math' && oldYear && oldYear <= 2021

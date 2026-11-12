@@ -54,3 +54,10 @@ test('새 역할 코드는 상위 answers 폴더 이름보다 우선', () => {
   const m=identifyExam({filename:'kor_main_mun_synthetic.pdf',path:'answers/input/20281020/go3/kor_main_mun_synthetic.pdf'});
   assert.equal(m.part,'question');
 });
+
+test('선택 이름 정규화 뒤에도 옛 A/B 밑줄 파일 경계 유지', () => {
+  for (const part of ['문제','정답','해설']) {
+    assert.equal(identifyExam({filename:`2014년 3월 고2 학평 수학A_${part}.pdf`}).selection,'A형');
+    assert.equal(identifyExam({filename:`2014년 3월 고2 학평 영어B_${part}.pdf`}).selection,'B형');
+  }
+});
