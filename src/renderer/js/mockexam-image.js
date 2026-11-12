@@ -103,13 +103,18 @@ export async function recognizeAnswerGrid(canvas, recognizeWords, { subject, sel
 export function preferGridAnswerKey(parsed, grid) {
   const count = p => Object.values(p?.answers || {}).reduce((n, entries) => n + Object.keys(entries).length, 0);
   if (count(grid) <= count(parsed)) return parsed;
-  const answers = {};
+  const answers = {}, conflicts = new Set();
   for (const [section, entries] of Object.entries(grid.answers)) {
     answers[section] = {};
     for (const [n, entry] of Object.entries(entries)) {
       const old = parsed.answers[section]?.[n] || parsed.answers[section.split('|')[0]]?.[n];
       if (!old || old.answer === entry.answer) answers[section][n] = entry;
+      else conflicts.add(`${section}#${n}`).add(`${section.split('|')[0]}#${n}`);
     }
+  }
+  // 새 후보가 읽지 못한 기존 답은 남긴다. 서로 다른 답이 나온 번호는 둘 다 버린다.
+  for (const [section, entries] of Object.entries(parsed.answers || {})) {
+    for (const [n, entry] of Object.entries(entries)) if (!conflicts.has(`${section}#${n}`) && !answers[section]?.[n]) (answers[section] ||= {})[n] = entry;
   }
   const candidate = { ...grid, answers };
   return count(candidate) > count(parsed) ? candidate : parsed;

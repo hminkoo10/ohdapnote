@@ -64,6 +64,12 @@ test('기존 OCR와 충돌하는 새 답은 제외, 기존 연결 수가 더 많
   assert.equal(preferGridAnswerKey(g,p),g);
 });
 
+test('새 그림 후보가 읽지 못한 기존 답은 남기고 충돌 번호만 버림', () => {
+  const p={answers:{korean:{1:{answer:'4',points:null},9:{answer:'2',points:null}}}};
+  const g={answers:{korean:{1:{answer:'2',points:null},2:{answer:'3',points:null},3:{answer:'5',points:null}}}};
+  assert.deepEqual(preferGridAnswerKey(p,g).answers.korean,{2:{answer:'3',points:null},3:{answer:'5',points:null},9:{answer:'2',points:null}});
+});
+
 test('두 배율이 같은 오인 숫자를 반환해도 분리 문자와 다르면 연결하지 않음', async () => {
   const previous = globalThis.document, image = synthetic();
   const makeCanvas = () => {
