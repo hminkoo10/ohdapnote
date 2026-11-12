@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { identifyExam } from '../../src/renderer/js/mockexam.js';
+import { parseAnswerKey } from '../../src/renderer/js/mockexam-answers.js';
 import { planExamImport } from '../../src/renderer/js/mockexam-plan.js';
 const file = (folder, part, text = '') => ({ filename: `${part}-synthetic.pdf`, path: `input/2028/05/${folder}/${part}-synthetic.pdf`, text });
 test('선택 폴더는 과목·선택·시행월을 모든 역할에서 공유', () => {
@@ -38,4 +39,13 @@ test('날짜/학년 디렉터리와 새 역할 코드, ZIP 내부 문제 연결'
     assert.ok(p.rows.every(r => r.files.length === 3 && r.metadata.year === 2028 && r.metadata.month === 10 && r.metadata.grade === grade));
   }
   assert.equal(identifyExam({filename:'kor_main_ans_synthetic.png'}).exam, null);
+});
+
+test('선택 해설의 35번/23번 시작 정답표는 읽고 뒤 풀이 숫자는 제외', () => {
+  for (const [subject,selection,start] of [['korean','언어와매체',35],['korean','화법과작문',35],['math','미적분',23]]) {
+    const table=Array.from({length:subject==='korean'?11:8},(_,i)=>`${start+i} ${'①②③④⑤'[i%5]}`).join(' ');
+    const p=parseAnswerKey(`${selection} 정답 ${table} 해 설 ${start} ⑤`,{subject,selection,tablesOnly:true});
+    assert.equal(Object.keys(p.answers[`${subject}|${selection}`]||{}).length,subject==='korean'?11:8);
+    assert.equal(p.answers[`${subject}|${selection}`][start].answer,'1');
+  }
 });
