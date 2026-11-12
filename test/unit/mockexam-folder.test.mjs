@@ -61,3 +61,8 @@ test('선택 이름 정규화 뒤에도 옛 A/B 밑줄 파일 경계 유지', ()
     assert.equal(identifyExam({filename:`2014년 3월 고2 학평 영어B_${part}.pdf`}).selection,'B형');
   }
 });
+
+test('밑줄로 나뉜 연도와 월은 숫자로 붙이지 않음', () => {
+  const m=identifyExam({filename:'2028_3월_고1_학평_국어_정답.png'});
+  assert.deepEqual([m.year,m.month,m.grade,m.subject,m.part],[2028,3,1,'korean','answerKey']);
+});

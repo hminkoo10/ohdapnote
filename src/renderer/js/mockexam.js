@@ -2,7 +2,7 @@ import { normalizeHancomText } from './hancom.js';
 
 const subjects = [['korean', /국어|언어(?!와\s*매체)/], ['math', /수학|수리/], ['english', /영어|외국어/]];
 export const selections = ['화법과작문', '언어와매체', '확률과통계', '미적분', '기하', '가형', '나형', 'A형', 'B형', '인문계', '자연계', '예체능'];
-const compact = (s) => normalizeHancomText(s).replace(/[\s_]/g, '')
+const compact = (s) => normalizeHancomText(s).replace(/\s/g, '')
   .replace(/화작/g, '화법과작문').replace(/언매/g, '언어와매체')
   .replace(/확통/g, '확률과통계').replace(/미적(?!분)/g, '미적분');
 
@@ -13,7 +13,8 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   // 본문 속 고2·풀이·평가원은 제목 정보가 아니다.
   const title = compact(/20\d{2}(?:학년도|년)[^\n]{0,160}/.exec(text)?.[0] || '');
   const file = compact(`${path}/${filename}`);
-  const legacyFile = normalizeHancomText(`${path}/${filename}`).replace(/\s/g, '');
+  const selectionFile = compact(file.replace(/_/g, ''));
+  const selectionTitle = compact(title.replace(/_/g, ''));
   const reasons = [];
   // 코드 파일명은 날짜·학년 경로와 함께 있을 때만 학평으로 인정한다.
   const serviceDate = /[\\/](20\d{2})(0[1-9]|1[012])(?:0[1-9]|[12]\d|3[01])[\\/]go([123])[\\/]/i.exec(path);
@@ -34,17 +35,17 @@ export function identifyExam({ filename = '', path = '', text = '' } = {}) {
   const grade = exam === 'csat' || exam === 'kice' ? 3 : +(pick(/고(?:등학교)?([123])(?:학년)?/)?.[1] || 0) || (code ? +serviceDate[3] : null);
   const foundSubjects = (s) => subjects.filter(([id, re]) => re.test(s.replace(/대학수학능력시험/g, '').replace(id === 'korean' ? /외국어/g : /$^/g, ''))).map(([id]) => id);
   const ss = foundSubjects(title).length ? foundSubjects(title) : foundSubjects(file);
-  const folderSelections = selections.filter(v => file.includes(v));
+  const folderSelections = selections.filter(v => selectionFile.includes(v));
   const inferred = folderSelections.length === 1 ? (selections.slice(0, 2).includes(folderSelections[0]) ? 'korean' : selections.slice(2, 5).includes(folderSelections[0]) ? 'math' : null) : null;
   const subject = ss.length === 1 ? ss[0] : !ss.length ? inferred || (code ? { kor: 'korean', math: 'math', eng: 'english' }[code[1].toLowerCase()] : null) : null;
   const allowed = selections.filter((v) => !schoolYear || (/[가나]형/.test(v) ? subject === 'math' && schoolYear <= 2021 : /[AB]형/.test(v) ? schoolYear <= 2016 : true));
-  const sel = allowed.filter((v) => (title || file).includes(v));
-  if (!sel.length) sel.push(...allowed.filter((v) => file.includes(v)));
+  const sel = allowed.filter((v) => (selectionTitle || selectionFile).includes(v));
+  if (!sel.length) sel.push(...allowed.filter((v) => selectionFile.includes(v)));
   // 공통 표지에 모든 선택명이 있어도 단일 선택 폴더는 별권이다.
   if (sel.length > 1 && folderSelections.length === 1 && selections.slice(0, 5).includes(folderSelections[0])) sel.splice(0, sel.length, folderSelections[0]);
   // 옛 파일은 '수학A'처럼 형을 생략한다. 과목 바로 뒤의 표기만 인정.
   const legacyType = subject && exam === 'edu' && year <= 2016
-    ? /(?:수학|수리|국어|언어|영어|외국어)([AB])(?:형|[_)./\\-]|$)/.exec(title || legacyFile) : null;
+    ? /(?:수학|수리|국어|언어|영어|외국어)([AB])(?:형|[_)./\\-]|$)/.exec(title || file) : null;
   if (legacyType) sel.splice(0, sel.length, `${legacyType[1]}형`);
   const oldYear = schoolYear || year;
   const legacyMath = subject === 'math' && oldYear && oldYear <= 2021
