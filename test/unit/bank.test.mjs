@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bankEntries, bankTargets, blocksToText, stemKey, passageItem, filterBank, orderPicked, makeBankBlocks } from '../../src/renderer/js/bank.js';
+import { bankEntries, bankTargets, blocksToText, stemKey, passageItem, filterBank, orderPicked, makeBankBlocks, reviewable, reviewMarks, exportReviewCount } from '../../src/renderer/js/bank.js';
 import { itemName } from '../../src/renderer/js/exporter.js';
 import { blockSegs, buildHwpx } from '../../src/renderer/js/hwpx.js';
 import { transcribeParts } from '../../src/renderer/js/pdfmath.js';
@@ -199,4 +199,36 @@ test('HWPX 기존 그리기와 호환: 지문 자체 영역 한 번, 문제는 �
   assert.equal(bytes.stats.text, 3);
   assert.equal(seen.filter((id) => id.startsWith('stem:')).length, 1);
   assert.ok(bytes.length > 1000);
+});
+
+test('문제은행 확인 표시: 마고 책(읽기 전용)은 세지 않고, 내 책으로 복사하면 원래 수', () => {
+  const blocks = [
+    { type: 'para', text: '합성 문항입니다.', low: [{ start: 0, end: 2, reason: 'ocr' }] },
+    { type: 'math', latex: 'x^2', low: [{ reason: 'math', group: 'transcription', detail: '수식 1개 — 원본과 한 번 비교하세요' }] },
+  ];
+  const before = structuredClone(blocks);
+  const library = { id: 'exam-1', $library: true, $canEdit: false }; // 문제은행이 공용 책장에서 읽은 책
+  const summary = { id: 'exam-1', library: true }; // 책 목록 요약
+  const copy = { id: 'copy-1', name: '합성 모의고사 (복사본)', canEdit: true }; // 내 책으로 복사한 책
+  assert.equal(reviewMarks(library, blocks), 0);
+  assert.equal(reviewMarks(summary, blocks), 0);
+  assert.equal(reviewMarks(copy, blocks), 2);
+  assert.equal(reviewable(library), false);
+  assert.equal(reviewable(copy), true);
+  assert.deepEqual(blocks, before); // 표시 자료는 지우지 않음
+});
+
+test('시험지 저장 알림 확인 수: 마고 책 몫만 빼고 내 책 문항 수는 그대로 (PDF·한글)', () => {
+  const mine = { id: 'mine', name: '내 교재' }, library = { id: 'exam-1', $library: true };
+  const srcMine = {}, srcLib = {};
+  const entries = [{ bookId: 'mine', bookObj: mine, src: { problem: srcMine } }, { bookId: 'exam-1', bookObj: library, src: { problem: srcLib } }];
+  const block = (src, n) => ({ role: 'problem', src, item: { id: `q${n}` } });
+  const blocks = [block(srcMine, 1), block(srcMine, 2), block(srcLib, 3), { role: 'answer', src: srcMine, item: { id: 'q1' }, answerBlocks: [] }];
+  const low = { q1: 2, q2: 1, q3: 4 };
+  const lowOf = (_entry, b) => low[b.item.id] || 0;
+  assert.equal(exportReviewCount(blocks, entries, lowOf), 3); // PDF: 내 책 2 + 1
+  assert.equal(exportReviewCount(blocks, entries, lowOf, 7), 3); // 한글: 변환이 센 7(마고 4 포함)에서 4를 뺌
+  const own = blocks.filter((b) => b.src === srcMine);
+  assert.equal(exportReviewCount(own, entries, lowOf, 5), 5); // 내 책만이면 한글 변환이 센 수 그대로
+  assert.equal(exportReviewCount(blocks, entries, lowOf, 2), 0); // 음수 없음
 });

@@ -3,6 +3,22 @@ import { sortItems } from './detect.js';
 import { computeMatches, findItem, bookPage } from './store.js';
 import { subjectOf } from './subjects.js';
 import { makeBlocks, itemName } from './exporter.js';
+import { countLow } from './lowconf.js';
+
+/** 마고 공용 책장 책은 읽기 전용이라 학원이 확인 표시를 고칠 수 없음 → 세지 않음. 표시 자료는 그대로 둠. */
+export const reviewable = (book) => !(book?.$library || book?.library);
+export const reviewMarks = (book, blocks) => reviewable(book) ? countLow(blocks) : 0;
+/**
+ * 시험지 저장 알림의 '확인 필요' 수 = 내 책 문항 몫만. lowOf(entry, block) 는 그 문항 옮긴 글의 표시 수.
+ * hwpxCount(한글 변환이 책 구분 없이 센 수)를 주면 거기서 마고 책 문항 몫만 뺌.
+ */
+export function exportReviewCount(blocks, entries, lowOf, hwpxCount) {
+  const sum = (wanted) => blocks.reduce((n, block) => {
+    const entry = entries.find((e) => e.src?.[block.role] === block.src);
+    return n + (block.answerBlocks || !entry || !block.item || !wanted(entry.bookObj) ? 0 : lowOf(entry, block));
+  }, 0);
+  return hwpxCount === undefined ? sum(reviewable) : Math.max(0, hwpxCount - sum((book) => !reviewable(book)));
+}
 
 export const choiceMark = (i) => '①②③④⑤'[i] || `${i + 1}.`;
 

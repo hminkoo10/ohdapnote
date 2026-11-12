@@ -52,6 +52,12 @@ try {
   await win.locator('[data-bank-focus="exam"]').selectOption('csat');
   await win.locator('[data-bank-focus="year"]').fill('2024');
   await win.waitForSelector('.bank-row'); assert.equal(await win.locator('.bank-row').count(), 1);
+  // 마고 책은 읽기 전용 → 옮긴 글에 확인 표시가 있어도 보이지 않고 '확인할 문항'으로도 잡히지 않음
+  assert.equal(await win.locator('.bank-row .bank-review-count').count(), 0);
+  await win.locator('[data-bank-focus="review"]').check();
+  await win.waitForFunction(() => !document.querySelector('.bank-row'));
+  await win.locator('[data-bank-focus="review"]').uncheck();
+  await win.waitForSelector('.bank-row');
   assert.equal(existsSync(join(libraryDir, 'books', book.id, 'problem-1.pdf')), false);
   if (shots) await win.screenshot({ path: join(shots, 'selected.png') });
   await win.locator('.bank-row input').check();
@@ -66,6 +72,7 @@ try {
   await app.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, exportPath);
   await win.getByRole('button', { name: '문제지', exact: true }).click();
   await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some((e) => e.textContent.includes('저장 완료')), { timeout: 60000 });
+  assert.doesNotMatch(await win.locator('.toast').filter({ hasText: '저장 완료' }).first().innerText(), /확인 필요/);
   assert.equal(readFileSync(exportPath).subarray(0, 4).toString(), '%PDF');
   for (const [name, args] of [['books:save', [book]], ['books:delete', [book.id]], ['books:setShared', [{ id: book.id, shared: false }]], ['books:renameItems', [{ bookId: book.id, renames: {} }]], ['books:saveTranscripts', [{ bookId: book.id, data: { items: {} } }]], ['answers:save', [{ bookId: book.id, itemId: 'q1', data: { answer: '3', blocks: [] } }]], ['answers:putImage', [{ bookId: book.id }]]]) {
     const message = await app.evaluate(async ({ ipcMain }, [name, args]) => { try { await ipcMain._invokeHandlers.get(name)({}, ...args); return 'allowed'; } catch (err) { return err.message; } }, [name, args]);
@@ -87,6 +94,12 @@ try {
   assert.equal(JSON.parse(readFileSync(join(libraryDir, 'books', book.id, 'book.json'))).name, book.name);
   await win.evaluate(async () => { const { nav } = await import('./js/shared.js'); await nav.home({ tab: 'bank' }); });
   await win.waitForSelector('.bank-filters');
+  // 복사한 책은 학원이 고칠 수 있으니 같은 문항의 확인 표시가 다시 보임 (마고 책 줄은 그대로 없음)
+  await win.waitForSelector(`.bank-row[data-book="${copy.id}"]`);
+  assert.match(await win.locator(`.bank-row[data-book="${copy.id}"]`).innerText(), /확인 필요 1군데/);
+  assert.equal(await win.locator(`.bank-book[data-book="${copy.id}"] .bank-review-count`).innerText(), '확인할 곳 1군데');
+  assert.equal(await win.locator(`.bank-row[data-book="${book.id}"] .bank-review-count`).count(), 0);
+  if (shots) await win.screenshot({ path: join(shots, 'copy-review.png') });
   // 같은 창·동일 로컬 교재에서 공용 요약 유무만 바꿔 비교. 실제 문제은행 DOM을 기다림.
   for (let i = 4; i <= 1001; i++) seed(i);
   const listStart = performance.now();
