@@ -95,3 +95,10 @@ test('제목에서 뒤로 밀린 학년도·월(2012 6)의 끝자리를 문항 �
   const p = parseAnswerKey(lines.map((str) => ({ str, hasEOL: true })), { subject: 'math', selection: '가형' });
   assert.deepEqual(p.answers, { 'math|가형': { 1: { answer: '3', points: null }, 2: { answer: '5', points: null }, 7: { answer: '2', points: null } } });
 });
+
+test('OCR 잡글자에서 버린 끝자리 쌍의 글자로 다음 쌍을 만들지 않음', () => {
+  // '2100 29 1'의 '00 29'는 끝자리 쌍이라 버린다. 그 '29'를 다시 번호로 써서 29번 답 1을 만들면 안 된다.
+  const lines = ['수리 영역', '가 형', '27 6 2100 29', '1 |'];
+  const p = parseAnswerKey(lines.map((str) => ({ str, hasEOL: true })), { subject: 'math', selection: '가형' });
+  assert.deepEqual(p.answers, { 'math|가형': { 27: { answer: '6', points: null } } });
+});

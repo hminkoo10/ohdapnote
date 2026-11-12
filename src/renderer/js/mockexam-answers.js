@@ -81,12 +81,13 @@ export function parseAnswerKey(input, { subject = null, selection = null, tables
     const pointsColumn = /문항\s*(?:번호)?\s*정\s*답\s*배\s*점|번호\s*정\s*답\s*배\s*점/.test(chunk);
     // 해설 쪽의 계산 숫자를 정답으로 만들지 않는다. 명시적 표 또는 1·2·3 답 연속 확인.
     if (tablesOnly && !pointsColumn && !optionTail && !selectionTail && !/\b1[.)]?\s+[①-⑤]\s+2[.)]?\s+[①-⑤]\s+3[.)]?\s+[①-⑤]/.test(chunk)) return;
-    // 문항 번호는 더 긴 숫자의 끝자리가 아니다(제목 '2006 6'의 06 등).
-    const pattern = pointsColumn ? /(?<!\d)(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})\s+([1-9](?:\.\d+)?)\b/g : /(?<!\d)(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})(?!\d)/g;
+    const pattern = pointsColumn ? /(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})\s+([1-9](?:\.\d+)?)\b/g : /(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})(?!\d)/g;
     const matches = [...chunk.matchAll(pattern)];
     // 번호만 늘어선 줄(1 2 3 4 …)을 번호·답 쌍으로 읽지 않는다. 답 범위로 거르기 전에 본다.
     if (numberRunAnswers(matches.map((m) => [m[1], /^[①-⑤]$/.test(m[2]) ? '①②③④⑤'.indexOf(m[2]) + 1 : m[2]]))) { warnings.push(`${key}: 번호 나열`); return; }
-    for (const m of matches) {
+    // 문항 번호는 더 긴 숫자의 끝자리가 아니다(제목 '2006 6'의 06 등). 그 쌍은 버리되 읽은 자리는 그대로 넘긴다.
+    // 처음부터 그 자리에서 읽지 않으면 OCR 잡글자의 뒤 숫자가 새 번호·답 쌍이 된다.
+    for (const m of matches.filter((m) => !/\d/.test(chunk[m.index - 1] || ''))) {
       const number = +m[1];
       if (!number || number > (current === 'math' ? 30 : 60)) { warnings.push(`문항번호 범위: ${m[1]}`); continue; }
       const answer = /^[①-⑤]$/.test(m[2]) ? String('①②③④⑤'.indexOf(m[2]) + 1) : String(+m[2]);
