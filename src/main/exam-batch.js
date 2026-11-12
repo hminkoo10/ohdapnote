@@ -32,4 +32,22 @@ function makeSummary(queue, meta) {
   return { ...meta, finishedAt: new Date().toISOString(), exams, skipped,
     errors: exams.filter((r) => r.error).map(({ name, error }) => ({ name, error })) };
 }
-module.exports = { parseExamBatch, makeSummary };
+// 완료 시험은 다음 시험을 시작하기 전에 외부 결과에 확정한다.
+function createExamWriter(output, meta, bookDir) {
+  const copied = new Set();
+  return async (queue, partial = true) => {
+    const summary = { ...makeSummary(queue, meta), partial };
+    await fs.promises.mkdir(output, { recursive: true });
+    for (const row of summary.exams.filter(r => r.done && !copied.has(r.bookId))) {
+      try {
+        await fs.promises.cp(bookDir(row.bookId), path.join(output, 'books', row.bookId), { recursive: true });
+        copied.add(row.bookId);
+      } catch (err) { row.error = err.message; summary.errors.push({ name: row.name, error: err.message }); }
+    }
+    const temp = path.join(output, 'summary.json.tmp');
+    await fs.promises.writeFile(temp, JSON.stringify(summary, null, 2) + '\n');
+    await fs.promises.rename(temp, path.join(output, 'summary.json'));
+    return summary;
+  };
+}
+module.exports = { parseExamBatch, makeSummary, createExamWriter };

@@ -58,11 +58,27 @@ try {
   assert.equal(JSON.parse(readFileSync(join(output, 'summary.json'))).errors.length, 1);
   const crashEnv = { ...process.env, OHDAP_USER_DATA: join(tmp, 'crash-user'), OHDAP_E2E: '' };
   delete crashEnv.ELECTRON_RUN_AS_NODE;
-  const crashApp = await electron.launch({ executablePath: require('electron'), args: ['.', ...args], cwd: root, env: crashEnv });
+  const crashOutput = join(tmp, 'crash-output');
+  const crashArgs = [...args]; crashArgs[crashArgs.indexOf('--exam-out') + 1] = crashOutput;
+  const crashApp = await electron.launch({ executablePath: require('electron'), args: ['.', ...crashArgs], cwd: root, env: crashEnv });
+  const firstSaved = new Promise((ok, fail) => {
+    let text = '';
+    const timer = setTimeout(() => fail(Error('완료 체크포인트 대기 시간 초과')), 60000);
+    crashApp.process().stdout.on('data', b => {
+      text += b;
+      if (text.includes('"event":"exam-end"')) { clearTimeout(timer); ok(); }
+    });
+  });
   const crashCode = new Promise((ok) => crashApp.process().once('exit', ok));
   await crashApp.firstWindow();
+  await firstSaved;
   await crashApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer()).catch(() => {});
   assert.equal(await crashCode, 2);
+  const partial = JSON.parse(readFileSync(join(crashOutput, 'summary.json')));
+  assert.equal(partial.partial, true);
+  const completed = partial.exams.filter(r => r.done);
+  assert.equal(completed.length, 1);
+  assert.ok(existsSync(join(crashOutput, 'books', completed[0].bookId, 'book.json')));
   console.log('exam-batch-e2e PASS (codes 0/1/2, renderer crash, 2 exams, resume unchanged)');
 } finally {
   try { rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { console.log('남은 임시 폴더:', tmp); }

@@ -13,8 +13,9 @@ try {
   const plan = resume ? undefined : await (await import('./mockexam-import.js')).inspectExamFolder([input]);
   if (plan && !plan.rows.length) throw Error('처리할 시험이 없어요.');
   if (plan) plan.batchInput = input;
-  const queue = await importExamFolder(resume ? null : [input], { plan, onProgress: (p) => {
+  const queue = await importExamFolder(resume ? null : [input], { plan, onProgress: async (p) => {
     if (p.phase === 'exam') batch.event({ event: 'exam-start', name: p.name });
+    if (p.phase === 'exam-end') await batch.checkpoint(p.queue);
     if (p.phase === 'exam-end') batch.event({ event: 'exam-end', name: p.name,
       items: p.row.result?.items || 0, answers: p.row.result?.answers || 0,
       low: p.row.result?.low || 0, seconds: p.row.result?.seconds || p.row.seconds || 0, error: p.row.error || null });
