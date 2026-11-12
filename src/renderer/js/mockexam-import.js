@@ -160,7 +160,7 @@ export async function importExamFolder(paths, { onProgress = () => {}, signal, p
         row.done = true; delete row.error; save(q);
       } catch (err) {
         if (signal?.aborted || err.name === 'AbortError') throw err;
-        row.error = err.message; row.seconds = (Date.now() - started) / 1000; save(q);
+        row.error = String(err?.message || err); row.seconds = (Date.now() - started) / 1000; save(q);
       } finally { if (book) dropSources(book.id); }
       await onProgress({ phase: 'exam-end', name: row.name, row, queue: q });
     }
