@@ -62,6 +62,28 @@ try {
   } else {
   await makeMockExamFixtures(input);
   await launch();
+  // 합성 숫자와 직접 그린 원/격자만: 실제 시험 그림은 저장하지 않는다.
+  const gridAnswers = await win.evaluate(async () => {
+    const { recognizeAnswerGrid } = await import('./js/mockexam-image.js');
+    const { recognizeWords } = await import('./js/ocr.js');
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1700;
+    const ctx = canvas.getContext('2d'); ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 1700, 1700);
+    ctx.strokeStyle = 'black'; ctx.lineWidth = 2;
+    for (let x = 50; x <= 1650; x += 160) { ctx.beginPath(); ctx.moveTo(x, 400); ctx.lineTo(x, 1300); ctx.stroke(); }
+    for (let y = 400; y <= 1300; y += 100) { ctx.beginPath(); ctx.moveTo(50, y); ctx.lineTo(1650, y); ctx.stroke(); }
+    ctx.font = '28px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let r = 0; r < 9; r++) for (let c = 0; c < 5; c++) {
+      const y = 450 + r * 100, x = 290 + c * 320;
+      ctx.fillStyle = 'black'; ctx.fillText(String(r * 5 + c + 1), x - 160, y);
+      ctx.strokeStyle = ctx.fillStyle = 'rgb(30,60,150)'; ctx.beginPath(); ctx.arc(x, y, 21, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillText(String((r + c) % 5 + 1), x, y);
+    }
+    try { return (await recognizeAnswerGrid(canvas, recognizeWords, { subject: 'korean' })).answers.korean; }
+    finally { canvas.width = canvas.height = 1; }
+  });
+  console.log('합성 격자 연결', Object.keys(gridAnswers).length, JSON.stringify(gridAnswers));
+  assert.ok(Object.keys(gridAnswers).length >= 30, '엄격한 확신도 검사 후에도 합성 표의 3분의 2 이상 인식');
+  for (const [n, entry] of Object.entries(gridAnswers)) assert.equal(entry.answer, String((Math.floor((+n - 1) / 5) + (+n - 1) % 5) % 5 + 1));
   await app.evaluate(({ dialog }, input) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [input] }); }, input);
   await win.getByRole('button', { name: '모의고사 넣기', exact: true }).click();
   await win.getByRole('button', { name: '폴더 고르기', exact: true }).click();
