@@ -1763,7 +1763,7 @@ async function runExamBatch() {
     registerIpc();
     ipcMain.handle('exam-batch:config', () => ({ input: batch.input }));
     ipcMain.on('exam-batch:event', (_event, data) => {
-      if (['exam-start', 'exam-end'].includes(data?.event)) emit(data);
+      if (['exam-start', 'exam-end', 'ocr-skip'].includes(data?.event)) emit(data);
     });
     const writeExam = createExamWriter(batch.output, { startedAt, version: app.getVersion(), commit }, bookDir);
     ipcMain.handle('exam-batch:checkpoint', (_event, queue) => writeExam(queue));

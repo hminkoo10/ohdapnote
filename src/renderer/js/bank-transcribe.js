@@ -158,6 +158,7 @@ async function runBank(book, { item, useAi, onChange }) {
     onChange();
   }
 }
+const OCR_MAX_SIDE = 32767;
 // 모의고사 일괄 처리에서도 같은 PDF·스캔 경로를 사용한다. 화면·외부 인식 호출 없음.
 export async function transcribeExam(book, { signal, onProgress } = {}) {
   const src = await getSources(book);
@@ -172,7 +173,16 @@ export async function transcribeExam(book, { signal, onProgress } = {}) {
         const blocks = await pdfTranscribe(blockSegs(b), { plain: subjectOf(book) !== 'math' });
         if (blocks?.length) entry = { blocks, model: 'pdf' };
         else {
-          try { entry = { ...await scanTranscribe(await renderStack(blockSegs(b), TRANSCRIBE_WIDTH), { number: b.item.passage ? '' : b.item.number, signal, api }), model: 'ocr' }; }
+          try {
+            const canvas = await renderStack(blockSegs(b), TRANSCRIBE_WIDTH);
+            // OCR 은 한 변 32767px 까지만 받는다. 넘기면 일괄 처리 전체가 멈추므로 읽지 않고 확인 표시만 남긴다.
+            if (canvas.width > OCR_MAX_SIDE || canvas.height > OCR_MAX_SIDE) {
+              const size = `${canvas.width}x${canvas.height}`;
+              canvas.width = canvas.height = 1;
+              onProgress?.({ phase: 'ocr-skip', item: itemName(b.item), size });
+              entry = { blocks: [], model: 'ocr', reliable: false, reasons: [`그림이 너무 커서(${size}px) 글자를 읽지 않았어요.`] };
+            } else entry = { ...await scanTranscribe(canvas, { number: b.item.passage ? '' : b.item.number, signal, api }), model: 'ocr' };
+          }
           catch (err) {
             if (signal?.aborted) throw err;
             entry = { blocks: [], model: 'ocr', reliable: false, reasons: [err.message] };

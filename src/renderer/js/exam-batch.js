@@ -15,6 +15,7 @@ try {
   if (plan) plan.batchInput = input;
   const queue = await importExamFolder(resume ? null : [input], { plan, onProgress: async (p) => {
     if (p.phase === 'exam') batch.event({ event: 'exam-start', name: p.name });
+    if (p.phase === 'ocr-skip') batch.event({ event: 'ocr-skip', name: p.name, item: p.item, size: p.size });
     if (p.phase === 'exam-end') await batch.checkpoint(p.queue);
     if (p.phase === 'exam-end') batch.event({ event: 'exam-end', name: p.name,
       items: p.row.result?.items || 0, answers: p.row.result?.answers || 0,
