@@ -44,5 +44,12 @@ test('두 확대 결과가 일치할 때만 답 연결', async () => {
       }, { subject: 'korean' });
       assert.deepEqual(parsed.answers.korean, disagree ? {} : { 1: { answer: '4', points: null } });
     }
+    for (const commonOnly of [false, true]) {
+      const parsed = await recognizeAnswerGrid(canvas, async crop => {
+        const cy = crop.height * (335 - 83) / 264;
+        return [{ str: '41', x0: crop.width * .1, x1: crop.width * .2, y0: cy - 8, y1: cy + 8, conf: 99 }, { str: '4', x0: crop.width * .6, x1: crop.width * .7, y0: cy - 8, y1: cy + 8, conf: 99 }];
+      }, { subject: 'korean', commonOnly });
+      assert.deepEqual(parsed.answers.korean, commonOnly ? {} : { 41: { answer: '4', points: null } });
+    }
   } finally { globalThis.document = previous; }
 });

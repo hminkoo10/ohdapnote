@@ -52,7 +52,7 @@ export function gridWordAnswers(words, grid, column, width, height, subject) {
   return result;
 }
 
-export async function recognizeAnswerGrid(canvas, recognizeWords, { subject, selection, signal } = {}) {
+export async function recognizeAnswerGrid(canvas, recognizeWords, { subject, selection, commonOnly = false, signal } = {}) {
   if (!subject) return null;
   const ctx = canvas.getContext('2d'), image = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const grid = prepareAnswerGrid(image);
@@ -71,7 +71,7 @@ export async function recognizeAnswerGrid(canvas, recognizeWords, { subject, sel
           passes.push(gridWordAnswers(await recognizeWords(crop, { lang: 'kor+eng', psm: '6' }), grid, c / 2, crop.width, crop.height, subject));
         } finally { crop.width = crop.height = 1; }
       }
-      for (const [n, answer] of Object.entries(passes[0])) if (passes[1][n] === answer) entries[n] = { answer, points: null };
+      for (const [n, answer] of Object.entries(passes[0])) if (passes[1][n] === answer && (!commonOnly || +n <= (subject === 'math' ? 22 : 34))) entries[n] = { answer, points: null };
     }
   } finally { clean.width = clean.height = 1; }
   return { answers: { [[subject, selection].filter(Boolean).join('|')]: entries }, warnings: [] };

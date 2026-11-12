@@ -1,5 +1,5 @@
 import { api, state, getSources, dropSources, restartGuard } from './shared.js';
-import { identifyExam, examForm } from './mockexam.js';
+import { identifyExam, examForm, selections } from './mockexam.js';
 import { planExamImport, examImportItems, examAnswerFiles } from './mockexam-plan.js';
 import { newDoc } from './store.js';
 import { analyzeDocument } from './analyze.js';
@@ -70,7 +70,10 @@ async function readAnswers(book, row, signal) {
             const words = await recognizeWords(canvas, { lang: 'kor+eng', psm: '6' });
             content = words.map((w, k) => ({ str: w.str, hasEOL: !words[k + 1] || Math.abs(words[k + 1].y0 - w.y0) > 12 }));
             if (/\.(png|jpe?g)$/i.test(file.filename)) {
-              try { gridParsed = await recognizeAnswerGrid(canvas, recognizeWords, { subject: file.metadata.subject ? book.subject : null, selection: row.metadata.selection, signal }); }
+              try {
+                const commonOnly = selections.slice(0, 5).includes(row.metadata.selection) && !file.metadata.selection;
+                gridParsed = await recognizeAnswerGrid(canvas, recognizeWords, { subject: file.metadata.subject ? book.subject : null, selection: commonOnly ? null : row.metadata.selection, commonOnly, signal });
+              }
               catch (err) { if (signal?.aborted || err.name === 'AbortError') throw err; }
             }
           } finally { canvas.width = canvas.height = 1; }
