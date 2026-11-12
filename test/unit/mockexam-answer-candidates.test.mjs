@@ -65,5 +65,8 @@ test('명시된 현대 선택 책만 공통 OCR과 선택 글자 정답을 보�
   const conflicting=setup([{ocr:true,text:common+' 23 ⑤'},{part:'solution',text:tail}],30,'미적분');
   assert.equal((await conflicting.run()).connected,29);
   assert.ok(!conflicting.saved.some(x=>x.id==='q23'));
-
+  // 더 많이 읽은 기존 후보로 돌아가도 상충한 답을 되살리지 않는다.
+  const full=setup([{ocr:true,text:common+' '+tail},{part:'solution',text:tail.replace('23 ①','23 ⑤')}],30,'미적분');
+  assert.equal((await full.run()).connected,29);
+  assert.ok(!full.saved.some(x=>x.id==='q23'));
 });

@@ -113,6 +113,7 @@ async function readAnswers(book, row, signal) {
     } finally { await src?.destroy(); URL.revokeObjectURL(url); }
   }
   signal?.throwIfAborted();
+  if (conflicts.size) best = { ...best, entries: best.entries.filter(e => !conflicts.has(e.id)) };
   if (complementary.size > best.entries.length) best = { entries: [...complementary.values()], scanned: [...complementary.values()].some(e => e.scanned) };
   for (const { id, entry } of best.entries) {
     signal?.throwIfAborted();
