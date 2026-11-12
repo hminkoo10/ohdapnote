@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { prepareAnswerGrid, gridWordAnswers, recognizeAnswerGrid, preferGridAnswerKey } from '../../src/renderer/js/mockexam-image.js';
+import { prepareAnswerGrid, gridWordAnswers, recognizeAnswerGrid, preferGridAnswerKey, answerGridScope } from '../../src/renderer/js/mockexam-image.js';
 function synthetic(dataRows = 9) {
   const width = 460, height = 400, data = new Uint8ClampedArray(width * height * 4).fill(255);
   const ink = (x, y) => { const k = (y * width + x) * 4; data[k] = data[k + 1] = data[k + 2] = 0; };
@@ -78,4 +78,16 @@ test('배점이 있는 네 단 표는 머리글 제외 후 열 우선 번호 검
 test('현대 수학 공통 22문항처럼 다섯 행인 표도 번호 검증 대상으로 인식', () => {
   const grid=prepareAnswerGrid(synthetic(5));
   assert.ok(grid);assert.equal(grid.rows.length,6);
+});
+
+test('형·선택 미확인 합권은 그림 답을 공통 답으로 연결하지 않음', () => {
+  const book={subject:'english',docs:{problem:{items:Array.from({length:90},()=>({}))}}};
+  assert.equal(answerGridScope(book,{}, {subject:'english'}),null);
+  book.docs.problem.items=[{examSection:{selection:'A형'}}];
+  assert.equal(answerGridScope(book,{}, {subject:'english'}),null);
+  assert.equal(answerGridScope(book,{selection:'A형'},{subject:'english'}),null);
+  assert.ok(answerGridScope(book,{selection:'A형'},{subject:'english',selection:'A형'}));
+  book.subject='math';book.docs.problem.items=[{examSection:{selection:'미적분',form:'홀'}}];
+  assert.equal(answerGridScope(book,{selection:'미적분',form:'홀'},{subject:'math'}),null);
+  assert.deepEqual(answerGridScope(book,{selection:'미적분',form:'홀'},{subject:'math'},'홀'),{subject:'math',selection:null,commonOnly:true});
 });

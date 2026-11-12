@@ -1,3 +1,5 @@
+import { selections } from './mockexam.js';
+
 // 정규 격자 PNG의 원문자 테두리만 제거해 기존 OCR로 숫자를 읽는다.
 // 배치가 다르거나 두 번 읽은 결과가 다르면 추정하지 않는다.
 export function prepareAnswerGrid({ width: W, height: H, data }) {
@@ -94,4 +96,19 @@ export function preferGridAnswerKey(parsed, grid) {
   }
   const candidate = { ...grid, answers };
   return count(candidate) > count(parsed) ? candidate : parsed;
+}
+
+// 합권/형 미확인 책에 한 형의 그림 답을 공통 답으로 흘려 넣지 않는다.
+export function answerGridScope(book, metadata, file, pageForm = null) {
+  if (file.subject !== book.subject) return null;
+  const items = book.docs.problem.items;
+  const variants = new Set(items.map(i => i.examSection?.selection).filter(Boolean));
+  const modern = selections.slice(0, 5).includes(metadata.selection);
+  if (!metadata.selection && (variants.size || items.length > (book.subject === 'math' ? 30 : 45))) return null;
+  if (metadata.selection && !file.selection && !modern) return null;
+  if (metadata.selection && file.selection && metadata.selection !== file.selection) return null;
+  const form = items.find(i => i.examSection?.form)?.examSection.form || metadata.form;
+  if (form && (file.form || pageForm) !== form) return null;
+  const commonOnly = modern && !file.selection;
+  return { subject: book.subject, selection: commonOnly ? null : metadata.selection, commonOnly };
 }

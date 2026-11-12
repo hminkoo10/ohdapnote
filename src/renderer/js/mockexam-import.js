@@ -5,7 +5,7 @@ import { newDoc } from './store.js';
 import { analyzeDocument } from './analyze.js';
 import { parseAnswerKey, answerKeyToAnswers } from './mockexam-answers.js';
 import { recognizeWords } from './ocr.js';
-import { recognizeAnswerGrid, preferGridAnswerKey } from './mockexam-image.js';
+import { recognizeAnswerGrid, preferGridAnswerKey, answerGridScope } from './mockexam-image.js';
 import { transcribeExam } from './bank-transcribe.js';
 import { subjectOpen } from './subjects.js';
 import { openDocSource } from './docsource.js';
@@ -73,8 +73,8 @@ async function readAnswers(book, row, signal) {
             content = words.map((w, k) => ({ str: w.str, hasEOL: !words[k + 1] || Math.abs(words[k + 1].y0 - w.y0) > 12 }));
             if (/\.(png|jpe?g)$/i.test(file.filename)) {
               try {
-                const commonOnly = selections.slice(0, 5).includes(row.metadata.selection) && !file.metadata.selection;
-                gridParsed = await recognizeAnswerGrid(canvas, recognizeWords, { subject: file.metadata.subject ? book.subject : null, selection: commonOnly ? null : row.metadata.selection, commonOnly, signal });
+                const scope = answerGridScope(book, row.metadata, file.metadata, examForm(content.map(t => t.str).join(' ')));
+                if (scope) gridParsed = await recognizeAnswerGrid(canvas, recognizeWords, { ...scope, signal });
               }
               catch (err) { if (signal?.aborted || err.name === 'AbortError') throw err; }
             }
