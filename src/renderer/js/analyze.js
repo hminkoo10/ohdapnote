@@ -816,7 +816,7 @@ export async function analyzeDocument(src, opts) {
   for (const [idx, chain] of anchors) anchors.set(idx, rowMajorOrder(chain));
   if (passages) dropInsetResets(pages, anchors);
   // 앞뒤 번호 흐름과 동떨어진 짧은 덩어리(목차·만화 쪽, 부록 표에서 잘못 읽은 숫자)는 뺌
-  if (signature) dropStrayRuns(pages, anchors, `${signature.prefix || ''}|${signature.padded ? signature.digitsLen : 0}`);
+  if (signature) dropStrayRuns(pages, anchors, `${signature.prefix || ''}|${signature.padded ? signature.digitsLen : 0}`, results);
 
   const examSections = role === 'problem' && ['korean', 'math', 'english'].includes(opts.subject) ? (stabilizeExamPages(results, anchors, opts.subject) || stabilizeLegacyExamPages(results, anchors, opts.subject, opts.exam)) : null;
   const layouts = new Map(results.map((r) => [r.index, r.layout]));
