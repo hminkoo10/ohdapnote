@@ -14,6 +14,9 @@ const PDF_OPTIONS = {
   wasmUrl: new URL('../vendor/pdfjs/wasm/', import.meta.url).href,
   iccUrl: new URL('../vendor/pdfjs/iccs/', import.meta.url).href,
   isEvalSupported: false,
+  // 작업자가 그림을 OffscreenCanvas 비트맵으로 넘기면 쪽마다 큰 비트맵이 남아 시험 하나에 수 GB까지 쌓인다
+  // (서버 측정: 렌더러 최대 9.6GB). 픽셀로 넘기게 하면 그리는 결과는 같고 1.6GB 안팎이다.
+  isOffscreenCanvasSupported: false,
   enableXfa: false,
   fontExtraProperties: true, // 글꼴 이름(수식 글꼴 EH… 구분)을 읽으려고
 };
