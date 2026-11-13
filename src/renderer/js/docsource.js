@@ -147,8 +147,9 @@ export class DocSource {
     if (this._pageCache.has(key)) return this._pageCache.get(key);
     const page = await this._pdfDocs.get(p.fileIndex).getPage(p.pageIndex + 1);
     this._pageCache.set(key, page);
-    // 메모리를 위해 최근 페이지 몇 개만 유지
-    if (this._pageCache.size > 12) {
+    // 정리하지 않은 쪽은 그림 데이터를 그대로 들고 있다(스캔본은 쪽마다 수백 MB).
+    // 마지막으로 연 한 쪽만 남긴다 (서버 측정: 스캔본 시험 렌더러 최대 4.8GB → 1.4GB, 걸린 시간은 비슷).
+    if (this._pageCache.size > 1) {
       const [oldKey, oldPage] = this._pageCache.entries().next().value;
       this._pageCache.delete(oldKey);
       oldPage.cleanup();
