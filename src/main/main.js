@@ -37,7 +37,7 @@ log.initialize();
 log.transports.file.level = 'info';
 
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
-const { parseExamBatch, makeSummary } = require('./exam-batch');
+const { parseExamBatch, makeSummary, createExamWriter } = require('./exam-batch');
 let batch, batchArgumentError;
 try { batch = parseExamBatch(process.argv, app.isPackaged); }
 catch (err) { batchArgumentError = err; }
@@ -1763,16 +1763,13 @@ async function runExamBatch() {
     registerIpc();
     ipcMain.handle('exam-batch:config', () => ({ input: batch.input }));
     ipcMain.on('exam-batch:event', (_event, data) => {
-      if (['exam-start', 'exam-end'].includes(data?.event)) emit(data);
+      if (['exam-start', 'exam-end', 'ocr-skip'].includes(data?.event)) emit(data);
     });
+    const writeExam = createExamWriter(batch.output, { startedAt, version: app.getVersion(), commit }, bookDir);
+    ipcMain.handle('exam-batch:checkpoint', (_event, queue) => writeExam(queue));
     ipcMain.handle('exam-batch:finish', async (_event, queue) => {
       try {
-        const summary = makeSummary(queue, { startedAt, version: app.getVersion(), commit });
-        for (const row of summary.exams.filter((r) => r.done)) {
-          try { await fsp.cp(bookDir(row.bookId), path.join(batch.output, 'books', row.bookId), { recursive: true }); }
-          catch (err) { row.error = err.message; summary.errors.push({ name: row.name, error: err.message }); }
-        }
-        await fsp.writeFile(path.join(batch.output, 'summary.json'), JSON.stringify(summary, null, 2) + '\n');
+        const summary = await writeExam(queue, false);
         const code = summary.errors.length ? 1 : 0;
         ended = true;
         emit({ event: 'finished', code, exams: summary.exams.length, errors: summary.errors.length }, () => app.exit(code));

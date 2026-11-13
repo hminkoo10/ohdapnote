@@ -119,6 +119,7 @@ if (batchThreads) contextBridge.exposeInMainWorld('examBatch', {
   threads: Number(batchThreads.split('=')[1]),
   config: () => ipcRenderer.invoke('exam-batch:config'),
   event: (data) => ipcRenderer.send('exam-batch:event', data),
+  checkpoint: (queue) => ipcRenderer.invoke('exam-batch:checkpoint', queue),
   finish: (queue) => ipcRenderer.invoke('exam-batch:finish', queue),
   fatal: (error) => ipcRenderer.send('exam-batch:fatal', error),
 });

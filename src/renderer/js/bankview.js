@@ -5,7 +5,7 @@ import { api, state, nav, getSources, holdSource, itemImage, findJob, jobListene
 import { SUBJECTS, subjectName, contractedSubjects, subjectOpen } from './subjects.js';
 import { pageLabel } from './store.js';
 import { buildPdf, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS, CONVERT_MODES } from './exporter.js';
-import { bankEntries, filterBank, librarySelected, orderPicked, makeBankBlocks, bankTargets, passageItem, blocksToText, choiceMark } from './bank.js';
+import { bankEntries, filterBank, librarySelected, orderPicked, makeBankBlocks, bankTargets, passageItem, blocksToText, choiceMark, reviewMarks, exportReviewCount } from './bank.js';
 import { loadTranscripts, bestTranscript, setEditedTranscript, clearEditedTranscript, exportHwpx } from './transcribe.js';
 import { putBank } from './bank-transcribe.js';
 import { answerEditorButton, showAnswerPreview } from './answer-editor.js';
@@ -47,7 +47,7 @@ const pathName = { edit: '고침', ai: '정밀 인식', ocr: '스캔 인식', pd
 const lookupBlock = (e, item = e.item) => ({ kind: 'problem', role: 'problem', item, stem: null, src: { files: e.bookObj.docs.problem.files } });
 const result = (e, item = e.item) => bestTranscript(e.bookId, lookupBlock(e, item));
 const textOf = (e) => [blocksToText(result(e)?.entry.blocks), e.stemKey ? blocksToText(result(e, passageItem(e.item))?.entry.blocks) : ''].join(' ');
-const reviewCount = (e) => countLow(result(e)?.entry.blocks) + (e.stemKey ? countLow(result(e, passageItem(e.item))?.entry.blocks) : 0);
+const reviewCount = (e) => reviewMarks(e.bookObj, result(e)?.entry.blocks) + (e.stemKey ? reviewMarks(e.bookObj, result(e, passageItem(e.item))?.entry.blocks) : 0);
 
 export function openBankReview(bookId) {
   bs.filters = { subject: '', bookId, page: '', number: '', text: '', review: true };
@@ -159,7 +159,7 @@ function renderBank(root, summaries, books, entries, failed) {
       const book = books.find((b) => b.id === s.id);
       const items = entries.filter((e) => e.bookId === s.id);
       const n = items.filter((e) => result(e) && (!e.stemKey || result(e, passageItem(e.item)))).length;
-      const low = book ? bankTargets(book).reduce((sum, b) => sum + countLow(bestTranscript(book.id, { ...b, src: { files: book.docs.problem.files } })?.entry.blocks), 0) : 0;
+      const low = book ? bankTargets(book).reduce((sum, b) => sum + reviewMarks(book, bestTranscript(book.id, { ...b, src: { files: book.docs.problem.files } })?.entry.blocks), 0) : 0;
       const total = items.length || s.problemCount || 0;
       const job = findJob(`bank:${s.id}`);
       const locked = s.subjectOpen === false || !subjectOpen(s, state.appInfo);
@@ -507,10 +507,9 @@ async function buildBankExport(mode, all) {
     await attachAnswers(entries);
     const info = { ...examInfo(), subtitle: `문제 ${entries.length}문항` };
     const blocks = makeBankBlocks(mode, entries, opts, (role, it, e) => pageLabel(e.bookObj.docs[role], it.page));
-    let remaining = blocks.reduce((sum, block) => {
-      const entry = entries.find((e) => e.src?.[block.role] === block.src);
-      return sum + (block.answerBlocks || !entry || !block.item ? 0 : countLow(bestTranscript(entry.bookId, block)?.entry.blocks));
-    }, 0);
+    // 마고 책(읽기 전용) 문항의 표시는 학원이 고칠 수 없어 세지 않음
+    const lowOf = (entry, block) => countLow(bestTranscript(entry.bookId, block)?.entry.blocks);
+    let remaining = exportReviewCount(blocks, entries, lowOf);
     const reviewNote = () => remaining ? ` · 확인 필요 ${remaining}군데` : '';
     const sig = JSON.stringify({ mode, opts, info, blocks: blocks.map((b) => [b.item?.id, b.item?.rects, b.num, b.source, b.answerBlocks]) });
     const modeName = { problems: '문제지', answers: '해설지', 'both-inline': '문제+해설', 'both-end': '문제+해설(해설 뒤)' }[mode];
@@ -525,7 +524,7 @@ async function buildBankExport(mode, all) {
     };
     if (opts.format === 'hwpx') {
       const bytes = await exportHwpx(blocks, entries, opts, info, { key: 'hwpx:bank', sig });
-      remaining = bytes.reviewCount || 0;
+      remaining = exportReviewCount(blocks, entries, lowOf, bytes.reviewCount || 0);
       const token = {};
       const save = () => restartGuard.track('export', async () => saved(await api.saveFile({ defaultName: `${name}.hwpx`, data: bytes, filters: [{ name: '한글 문서', extensions: ['hwpx'] }], title: '한글 문서 저장' }), token));
       if (bytes.job?.finish({ message: `한글 시험지 준비 완료${reviewNote()}`, actions: [{ label: '저장하기', onClick: () => attempt(save) }] })) {

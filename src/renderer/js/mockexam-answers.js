@@ -65,7 +65,12 @@ export function parseAnswerKey(input, { subject = null, selection = null, tables
     if (!current) return;
     // 정답표 뒤의 해설 숫자는 답이 아니다. 제목의 '정답 및 해설'은 건너뛴다.
     const optionTail = current === 'math' && ['가형','나형','A형','B형'].includes(selected) && /정\s*답\s+26[.)]?\s+[①-⑤]\s+27[.)]?\s+[①-⑤]\s+28[.)]?\s+[①-⑤]/.test(chunk);
-    const firstAnswer = (optionTail ? /\b26[.)]?\s+[①-⑤]/ : /\b1[.)]?\s+[①-⑤]/).exec(chunk);
+    const selectionStart = current === 'korean' && ['화법과작문', '언어와매체'].includes(selected) ? 35
+      : current === 'math' && ['확률과통계', '미적분', '기하'].includes(selected) ? 23 : null;
+    // 선택 해설은 공통 1번 대신 선택의 첫 세 문항이 연속하는 표만 인정한다.
+    const selectionTail = selectionStart && new RegExp(`\\b${selectionStart}[.)]?\\s+[①-⑤]\\s+${selectionStart + 1}[.)]?\\s+[①-⑤]\\s+${selectionStart + 2}[.)]?\\s+[①-⑤]`).test(chunk);
+    const firstNumber = optionTail ? 26 : selectionTail ? selectionStart : 1;
+    const firstAnswer = new RegExp(`\\b${firstNumber}[.)]?\\s+[①-⑤]`).exec(chunk);
     if (firstAnswer) {
       const tail = chunk.slice(firstAnswer.index);
       const end = /해\s*설|풀\s*이|출제|정답률/.exec(tail);
@@ -75,9 +80,14 @@ export function parseAnswerKey(input, { subject = null, selection = null, tables
     const key = selected ? `${current}|${selected}` : current;
     const pointsColumn = /문항\s*(?:번호)?\s*정\s*답\s*배\s*점|번호\s*정\s*답\s*배\s*점/.test(chunk);
     // 해설 쪽의 계산 숫자를 정답으로 만들지 않는다. 명시적 표 또는 1·2·3 답 연속 확인.
-    if (tablesOnly && !pointsColumn && !optionTail && !/\b1[.)]?\s+[①-⑤]\s+2[.)]?\s+[①-⑤]\s+3[.)]?\s+[①-⑤]/.test(chunk)) return;
+    if (tablesOnly && !pointsColumn && !optionTail && !selectionTail && !/\b1[.)]?\s+[①-⑤]\s+2[.)]?\s+[①-⑤]\s+3[.)]?\s+[①-⑤]/.test(chunk)) return;
     const pattern = pointsColumn ? /(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})\s+([1-9](?:\.\d+)?)\b/g : /(\d{1,2})[.)]?\s+([①-⑤]|\d{1,3})(?!\d)/g;
-    for (const m of chunk.matchAll(pattern)) {
+    const matches = [...chunk.matchAll(pattern)];
+    // 번호만 늘어선 줄(1 2 3 4 …)을 번호·답 쌍으로 읽지 않는다. 답 범위로 거르기 전에 본다.
+    if (numberRunAnswers(matches.map((m) => [m[1], /^[①-⑤]$/.test(m[2]) ? '①②③④⑤'.indexOf(m[2]) + 1 : m[2]]))) { warnings.push(`${key}: 번호 나열`); return; }
+    // 문항 번호는 더 긴 숫자의 끝자리가 아니다(제목 '2006 6'의 06 등). 그 쌍은 버리되 읽은 자리는 그대로 넘긴다.
+    // 처음부터 그 자리에서 읽지 않으면 OCR 잡글자의 뒤 숫자가 새 번호·답 쌍이 된다.
+    for (const m of matches.filter((m) => !/\d/.test(chunk[m.index - 1] || ''))) {
       const number = +m[1];
       if (!number || number > (current === 'math' ? 30 : 60)) { warnings.push(`문항번호 범위: ${m[1]}`); continue; }
       const answer = /^[①-⑤]$/.test(m[2]) ? String('①②③④⑤'.indexOf(m[2]) + 1) : String(+m[2]);
@@ -108,6 +118,16 @@ export function parseAnswerKey(input, { subject = null, selection = null, tables
   read(text.slice(last));
   if (!Object.keys(answers).length) warnings.push('읽은 정답 없음');
   return { answers, warnings };
+}
+
+/**
+ * 문항 번호 나열(1 2 3 4 …)을 번호·답 쌍으로 읽으면 답이 '번호+1'로 이어진다. pairs: [[번호, 답], …]
+ * 1~4번은 실제 답도 '번호+1'(②~⑤)일 수 있으므로 5번부터만 본다. 5지선다 답은 6 이상이 될 수 없다.
+ */
+export function numberRunAnswers(pairs) {
+  const late = pairs.filter(([number]) => +number >= 5);
+  const run = late.filter(([number, answer]) => +answer === +number + 1).length;
+  return run >= 3 && run * 2 >= late.length;
 }
 
 /** 한 과목/선택 정답 → answers.json. 번호→실제 문항 ID 매핑 필수, 다른 과목 혼입 방지. */

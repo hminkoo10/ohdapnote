@@ -22,3 +22,24 @@ test('요약에서 원문 제외', () => {
   assert.equal(s.exams[0].items, 3); assert.equal(s.skipped.length, 2);
   assert.equal(s.errors.length, 1); assert.ok(!JSON.stringify(s).includes('PRIVATE_PDF_TEXT'));
 });
+
+test('완료 시험 체크포인트는 다음 시험 실패 뒤에도 책과 요약 유지', async () => {
+  const fs = await import('node:fs/promises');
+  const { createExamWriter } = createRequire(import.meta.url)('../../src/main/exam-batch.js');
+  const tmp = await fs.mkdtemp(join(tmpdir(), 'exam-checkpoint-'));
+  try {
+    const source = join(tmp, 'source'); await fs.mkdir(source);
+    await fs.writeFile(join(source, 'book.json'), '{"synthetic":true}');
+    const output = join(tmp, 'output');
+    const writer = createExamWriter(output, { version: 'test' }, () => source);
+    const good = { name: '합성 시험', bookId: 'synthetic', done: true, result: { items: 3, answers: 3, low: 0 } };
+    await writer({ rows: [good] }, true);
+    assert.equal(JSON.parse(await fs.readFile(join(output, 'summary.json'))).partial, true);
+    await writer({ rows: [good, { name: '실패 시험', error: '합성 실패' }] }, false);
+    assert.equal(JSON.parse(await fs.readFile(join(output, 'books', 'synthetic', 'book.json'))).synthetic, true);
+    const summary = JSON.parse(await fs.readFile(join(output, 'summary.json')));
+    assert.equal(summary.errors.length, 1);
+    assert.equal(summary.partial, false);
+    assert.equal(summary.exams[0].answers, 3);
+  } finally { await fs.rm(tmp, { recursive: true, force: true }); }
+});

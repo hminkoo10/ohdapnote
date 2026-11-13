@@ -1,0 +1,136 @@
+import { selections } from './mockexam.js';
+
+// 정규 격자 PNG의 원문자 테두리만 제거해 기존 OCR로 숫자를 읽는다.
+// 배치가 다르거나 두 번 읽은 결과가 다르면 추정하지 않는다.
+export function prepareAnswerGrid({ width: W, height: H, data }) {
+  const dark = (x, y) => data[(y * W + x) * 4] < 180;
+  const xs = [], ys = [];
+  for (let y = 0; y < H; y++) { let n = 0; for (let x = 0; x < W; x++) if (dark(x, y)) n++; if (n > W * .6) ys.push(y); }
+  for (let x = 0; x < W; x++) { let n = 0; for (let y = 0; y < H; y++) if (dark(x, y)) n++; if (n > H * .35) xs.push(x); }
+  const groups = a => a.filter((n, i) => !i || n - a[i - 1] > 4);
+  const cols = groups(xs);
+  const stride = cols.length === 11 ? 2 : [10, 13].includes(cols.length) ? 3 : null;
+  if (!stride) return null; // 번호/답 다섯 쌍 또는 번호/답/배점 세·네 단 표
+  const columnMajor = stride === 3;
+  let top = 0, bottom = 0, run = 0, best = 0;
+  for (let y = 0; y < H; y++) { run = dark(cols[0], y) ? run + 1 : 0; if (run > best) { best = run; top = y - run + 1; bottom = y; } }
+  let rows = groups(ys).filter(y => y >= top - 5 && y <= bottom + 5);
+  if (columnMajor) { rows = rows.slice(1); top = rows[0]; }
+  if (rows.length < 6 || rows.length > 13) return null;
+  const gaps = rows.slice(1).map((y, i) => y - rows[i]);
+  if (Math.max(...gaps) / Math.min(...gaps) > 1.15) return null;
+  const pixels = new Uint8ClampedArray(data);
+  const white = (x, y) => { if (x < 0 || y < 0 || x >= W || y >= H) return; const k = (y * W + x) * 4; pixels[k] = pixels[k + 1] = pixels[k + 2] = 255; };
+  for (const y of ys) for (let dy = -2; dy <= 2; dy++) for (let x = 0; x < W; x++) white(x, y + dy);
+  for (const x of xs) for (let dx = -2; dx <= 2; dx++) for (let y = 0; y < H; y++) white(x + dx, y);
+  for (let c = 1; c + 1 < cols.length; c += stride) for (let r = 0; r + 1 < rows.length; r++) {
+    let x0 = W, x1 = 0, y0 = H, y1 = 0;
+    for (let y = rows[r] + 7; y < rows[r + 1] - 7; y++) for (let x = cols[c] + 7; x < cols[c + 1] - 7; x++) if (pixels[(y * W + x) * 4] < 180) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    if (x1 <= x0 || y1 <= y0 || Math.abs((x1 - x0) / (y1 - y0) - 1) > .2) continue;
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rx = (x1 - x0 + 1) / 2, ry = (y1 - y0 + 1) / 2;
+    let ring = 0;
+    for (let a = 0; a < 16; a++) {
+      const x = Math.round(cx + rx * .94 * Math.cos(a * Math.PI / 8)), y = Math.round(cy + ry * .94 * Math.sin(a * Math.PI / 8));
+      let ink = false;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (x + dx >= x0 && x + dx <= x1 && y + dy >= y0 && y + dy <= y1 && pixels[((y + dy) * W + x + dx) * 4] < 180) ink = true;
+      if (ink) ring++;
+    }
+    if (ring < 14) continue; // 단답 숫자를 원문자로 오인하지 않음
+    for (let y = rows[r] + 6; y < rows[r + 1] - 6; y++) for (let x = cols[c] + 6; x < cols[c + 1] - 6; x++) if (((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 > .60) white(x, y);
+  }
+  return { pixels, cols, rows, top, bottom, stride, columnMajor, groupCount: (cols.length - 1) / stride };
+}
+
+export function gridWordAnswers(words, grid, column, width, height, subject) {
+  const result = {};
+  for (let r = 0; r + 1 < grid.rows.length; r++) {
+    const line = words.filter(w => {
+      const y = grid.top + 3 + (w.y0 + w.y1) / 2 / height * (grid.bottom - grid.top - 6);
+      return y > grid.rows[r] + 4 && y < grid.rows[r + 1] - 4;
+    }).sort((a, b) => a.x0 - b.x0);
+    if (line.length !== 2 || line.some(w => !Number.isFinite(w.conf) || w.conf < 90)) continue;
+    const [number, answer] = line, expected = grid.columnMajor ? r + column * (grid.rows.length - 1) + 1 : r * (grid.groupCount || 5) + column + 1;
+    if (expected > (subject === 'math' ? 30 : 60) || number.str !== String(expected) || number.x1 > width * .55 || answer.x0 < width * .4) continue;
+    if (!(subject === 'math' ? /^\d{1,3}$/ : /^[1-5]$/).test(answer.str)) continue;
+    result[expected] = String(+answer.str);
+  }
+  return result;
+}
+
+export async function recognizeAnswerGrid(canvas, recognizeWords, { subject, selection, commonOnly = false, signal } = {}) {
+  if (!subject) return null;
+  const ctx = canvas.getContext('2d'), image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const grid = prepareAnswerGrid(image);
+  if (!grid) return null;
+  const clean = document.createElement('canvas'); clean.width = canvas.width; clean.height = canvas.height;
+  const output = clean.getContext('2d').createImageData(canvas.width, canvas.height); output.data.set(grid.pixels); clean.getContext('2d').putImageData(output, 0, 0);
+  const entries = {};
+  try {
+    for (let c = 0; c + 2 < grid.cols.length; c += grid.stride) {
+      const passes = [];
+      for (const width of [800, 1000]) {
+        signal?.throwIfAborted();
+        const crop = document.createElement('canvas'); crop.width = width; crop.height = Math.round((grid.bottom - grid.top) * width / (grid.cols[c + 2] - grid.cols[c]));
+        try {
+          crop.getContext('2d').drawImage(clean, grid.cols[c] + 3, grid.top + 3, grid.cols[c + 2] - grid.cols[c] - 6, grid.bottom - grid.top - 6, 0, 0, crop.width, crop.height);
+          const words = await recognizeWords(crop, { lang: 'kor+eng', psm: '6' });
+          // 열 문맥에서 4를 1로 읽는 오인은 두 배율에서도 반복된다.
+          // 1은 문맥을 없앤 단일 문자 인식까지 일치해야 한다. 다른 답으로 교정하지 않는다.
+          for (const word of words.filter(w => w.str === '1' && w.conf >= 90 && w.x0 > width * .4)) {
+            const pad = (word.y1 - word.y0) * .4;
+            const cell = document.createElement('canvas'); cell.width = 200;
+            cell.height = Math.round(200 * (word.y1 - word.y0 + 2 * pad) / (word.x1 - word.x0 + 2 * pad));
+            try {
+              const ctx = cell.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cell.width, cell.height);
+              ctx.drawImage(crop, word.x0 - pad, word.y0 - pad, word.x1 - word.x0 + 2 * pad, word.y1 - word.y0 + 2 * pad, 0, 0, cell.width, cell.height);
+              for (const lang of ['eng', 'kor+eng']) {
+                signal?.throwIfAborted();
+                const check = await recognizeWords(cell, { lang, psm: '10' });
+                if (check.length !== 1 || check[0].str !== '1' || !Number.isFinite(check[0].conf) || check[0].conf < 80) { word.conf = 0; break; }
+              }
+            } finally { cell.width = cell.height = 1; }
+          }
+          passes.push(gridWordAnswers(words, grid, c / grid.stride, crop.width, crop.height, subject));
+        } finally { crop.width = crop.height = 1; }
+      }
+      for (const [n, answer] of Object.entries(passes[0])) if (passes[1][n] === answer && (!commonOnly || +n <= (subject === 'math' ? 22 : 34))) entries[n] = { answer, points: null };
+    }
+  } finally { clean.width = clean.height = 1; }
+  return { answers: { [[subject, selection].filter(Boolean).join('|')]: entries }, warnings: [] };
+}
+
+// 기존 OCR와 상충하는 답을 새 후보로 덮어쓰지 않는다.
+export function preferGridAnswerKey(parsed, grid) {
+  const count = p => Object.values(p?.answers || {}).reduce((n, entries) => n + Object.keys(entries).length, 0);
+  if (count(grid) <= count(parsed)) return parsed;
+  const answers = {}, conflicts = new Set();
+  for (const [section, entries] of Object.entries(grid.answers)) {
+    answers[section] = {};
+    for (const [n, entry] of Object.entries(entries)) {
+      const old = parsed.answers[section]?.[n] || parsed.answers[section.split('|')[0]]?.[n];
+      if (!old || old.answer === entry.answer) answers[section][n] = entry;
+      else conflicts.add(`${section}#${n}`).add(`${section.split('|')[0]}#${n}`);
+    }
+  }
+  // 새 후보가 읽지 못한 기존 답은 남긴다. 서로 다른 답이 나온 번호는 둘 다 버린다.
+  for (const [section, entries] of Object.entries(parsed.answers || {})) {
+    for (const [n, entry] of Object.entries(entries)) if (!conflicts.has(`${section}#${n}`) && !answers[section]?.[n]) (answers[section] ||= {})[n] = entry;
+  }
+  const candidate = { ...grid, answers };
+  return count(candidate) > count(parsed) ? candidate : parsed;
+}
+
+// 합권/형 미확인 책에 한 형의 그림 답을 공통 답으로 흘려 넣지 않는다.
+export function answerGridScope(book, metadata, file, pageForm = null) {
+  if (file.subject !== book.subject) return null;
+  const items = book.docs.problem.items;
+  const variants = new Set(items.map(i => i.examSection?.selection).filter(Boolean));
+  const modern = selections.slice(0, 5).includes(metadata.selection);
+  if (!metadata.selection && (variants.size || items.length > (book.subject === 'math' ? 30 : 45))) return null;
+  if (metadata.selection && !file.selection && !modern) return null;
+  if (metadata.selection && file.selection && metadata.selection !== file.selection) return null;
+  const form = items.find(i => i.examSection?.form)?.examSection.form || metadata.form;
+  if (form && (file.form || pageForm) !== form) return null;
+  const commonOnly = modern && !file.selection;
+  return { subject: book.subject, selection: commonOnly ? null : metadata.selection, commonOnly };
+}
