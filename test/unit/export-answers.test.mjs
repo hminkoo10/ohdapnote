@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseAnswer, headAnswer, shortAnswer, tablePairs, uniqueTable, createAnswerReader, resolveExportAnswers, MISSING_ANSWER, mayHaveAnswers } from '../../src/renderer/js/export-answers.js';
+import { chooseAnswer, headAnswer, answerFromBlocks, shortAnswer, tablePairs, uniqueTable, createAnswerReader, resolveExportAnswers, MISSING_ANSWER, mayHaveAnswers, missingAnswerMessage } from '../../src/renderer/js/export-answers.js';
+import { transcriptKey } from '../../src/renderer/js/transcript-store.js';
+import { geminiTranscribeBatch } from '../../src/renderer/js/gemini.js';
+import { blockSegs } from '../../src/renderer/js/hwpx.js';
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { makeBlocks, buildPdf } from '../../src/renderer/js/exporter.js';
 import { buildHwpx } from '../../src/renderer/js/hwpx.js';
 import { inflateRawSync } from 'node:zlib';
@@ -14,6 +19,239 @@ const row = (text, y = 0.1) => text.split(' ').map((str, i) => token(str, 0.05 +
 const rect = { page: 0, x: 0, y: 0, w: 1, h: 1 };
 const entry = (number, extra = {}) => ({ problem: { id: `p${number}`, number: String(number), page: 0, rects: [rect] }, ...extra });
 const label = () => 'p.1';
+
+test('해설 전체: 끝·번호 줄·math·choices·runs, 같은 답만 여러 번 허용', () => {
+  assert.equal(answerFromBlocks([para('풀이'), para('계산'), para('참고'), para('답 ③'), para('다른 풀이')]), '③');
+  assert.equal(answerFromBlocks([para('017 답: 12 풀이를 확인한다')]), '12');
+  assert.equal(answerFromBlocks([para('정답 ③'), para('답: ③')]), '③');
+  assert.equal(answerFromBlocks([para('정답 ③'), para('답: ⑤')]), '');
+  assert.equal(answerFromBlocks([para('대답 ③, 정답률 80, 답이 없다, 답지 12')]), '');
+  assert.equal(answerFromBlocks([para('정답률 80'), para('답이 3이다'), para('답 12')]), '12');
+  assert.equal(answerFromBlocks([para('답 (1) 14 (2) 10√2 참고 다른 풀이')]), '(1) 14 (2) 10√2');
+  assert.equal(answerFromBlocks([{ type: 'math', text: '답 $x^2$' }]), 'x²');
+  assert.equal(answerFromBlocks([{ type: 'math', latex: '\\text{답 } \\sqrt{2}' }]), '√2');
+  assert.equal(answerFromBlocks([{ type: 'choices', items: ['본문', '정답 $\\sqrt{2}$'] }]), '√2');
+  assert.equal(answerFromBlocks([{ type: 'para', runs: [{ text: '답 ' }, { eq: 'x^{2}' }] }]), 'x²');
+  for (const text of ['답 ③', '정답 -12', '답 3/4', '정답 x = -3', '정답 ③ 풀이', '답 ③ (참고)']) {
+    assert.equal(answerFromBlocks([para(text)]), headAnswer([para(text)]), text);
+  }
+});
+
+test('답 뒤 한글: 이음말·단위·끝 낱말은 답에 포함, 해설 문장 앞에서 자르고, 조건이 이어지면 쓰지 않음', () => {
+  assert.equal(answerFromBlocks([para('답 x=−2 또는 x=1±2i')]), 'x=−2 또는 x=1±2i');
+  assert.equal(answerFromBlocks([para('답 $x=3$ 또는 $x=5$')]), 'x=3 또는 x=5');
+  assert.equal(answerFromBlocks([para('답 x<−2 또는 x>3 다른 풀이 생략')]), 'x<−2 또는 x>3');
+  assert.equal(answerFromBlocks([para('답 2×2 행렬')]), '2×2 행렬');
+  assert.equal(answerFromBlocks([para('답 2000원')]), '2000원');
+  assert.equal(answerFromBlocks([para('답 −3')]), '−3');
+  assert.equal(answerFromBlocks([para('1 정답 ③ 이차방정식의 두 근의 합은 따라서 구하는 값은 37 이다.')]), '③');
+  assert.equal(answerFromBlocks([para('답 3 이므로 구하는 값')]), '3');
+  assert.equal(answerFromBlocks([para('답 3 이다')]), '3');
+  assert.equal(answerFromBlocks([para('답 ③ 풀이')]), '③');
+  for (const text of ['답 x=1 일 때 최댓값 3', '답 x=1 이고 y=2', '답 3이다', '답 실수부분: 1, 허수부분: 0']) {
+    assert.equal(answerFromBlocks([para(text)]), '', text);
+  }
+});
+
+test('LaTeX 답: 위첨자·근호·분수·부등호·그리스 문자, 손실·괄호 오류는 거부', () => {
+  const cases = [
+    ['x^{23}', 'x²³'], ['x^{-12}', 'x⁻¹²'], ['\\sqrt{2}', '√2'], ['\\pm 2', '±2'],
+    ['x\\le 2', 'x≤2'], ['x\\ge 2', 'x≥2'], ['x\\ne 2', 'x≠2'], ['2\\times 3', '2×3'],
+    ['\\frac{a}{b}', 'a/b'], ['\\frac{a+b}{c-d}', '(a+b)/(c-d)'],
+    ['\\frac{1}{\\frac{a}{b}}', '1/(a/b)'], ['\\pi+\\alpha+\\Gamma', 'π+α+Γ'],
+  ];
+  for (const [latex, expected] of cases) assert.equal(answerFromBlocks([para(`답 $${latex}$`)]), expected, latex);
+  for (const value of ['$\\begin{matrix}1\\end{matrix}$', '$\\mystery{2}$', '$\\frac{1}{2$', '$x^$', '$\\hat{x}$', '$x+2', '(1] 12', '1'.repeat(41)]) {
+    assert.equal(answerFromBlocks([para(`답 ${value}`)]), '', value);
+  }
+  assert.equal(answerFromBlocks([para(`답 ${'1'.repeat(40)}`)]).length, 40);
+  assert.equal(answerFromBlocks([para('답 $\\mystery{2}$'), para('답 2')]), '', '못 읽은 답을 무시하지 않음');
+});
+
+test('짝 PDF: 모든 rect의 끝 답만, 영역 밖 답·숨은 OCR 제외', async () => {
+  const src = { pages: [{ kind: 'pdf' }, { kind: 'pdf' }], getTextTokens: async page => page ? [...row('풀이', 0.1), ...row('답 12', 0.3), ...row('답 13', 0.8)] : row('풀이') };
+  const reader = createAnswerReader(), item = { rects: [rect, { ...rect, page: 1, h: 0.5 }] };
+  assert.equal(await reader.region(src, item), '12');
+  assert.equal((await reader.readRegion({ ...src, hasOnlyHiddenText: async () => true }, item)).scanned, true);
+});
+
+// 기존 시험과 같은 IPC 흉내. 실제 geminiTranscribeBatch를 거치되 서비스 요청은 없다.
+const transcribeSource = readFileSync(new URL('../../src/renderer/js/transcribe.js', import.meta.url), 'utf8');
+const aiBody = transcribeSource.slice(transcribeSource.indexOf('export async function transcribeAiBlocks'), transcribeSource.indexOf('/**\n * 0)')).replace('export ', '');
+let fixtureId = 0;
+function aiFixture(t, { count = 5, batch = 2, concurrency = 2, respond } = {}) {
+  const previous = globalThis.window, calls = [], renders = [], progress = [], store = { items: {}, dirty: false };
+  let saves = 0, active = 0, maxActive = 0;
+  const abort = new AbortController();
+  globalThis.window = { ohdap: {
+    aiGenerate: async args => {
+      calls.push(args);
+      maxActive = Math.max(maxActive, ++active);
+      try {
+        await new Promise(resolve => setTimeout(resolve, 2));
+        if (respond) return await respond(args, calls.length, abort);
+        const n = args.body.contents[0].parts.filter(p => p.inlineData).length;
+        const blocks = [para('풀이'), para('답 $\\sqrt{2}$'), para('참고')];
+        const reply = n === 1 ? { blocks } : { items: Array.from({ length: n }, (_, i) => ({ index: i + 1, blocks })) };
+        return { ok: true, status: 200, json: { candidates: [{ content: { parts: [{ text: JSON.stringify(reply) }] } }] } };
+      } finally { active--; }
+    }, aiAbort: async () => true,
+  } };
+  t.after(() => { if (previous === undefined) delete globalThis.window; else globalThis.window = previous; });
+  const options = { batch, concurrency, rpm: 600000, models: [`answer-test-${++fixtureId}`] };
+  const run = runInNewContext(`${aiBody}; transcribeAiBlocks`, {
+    Error, DOMException, transcriptKey, blockSegs, TRANSCRIBE_WIDTH: 1500, geminiTranscribeBatch,
+    aiOptions: () => options,
+    renderStack: async (segs, width) => { renders.push({ segs, width }); return {}; },
+    canvasToBase64Jpeg: (_canvas, quality) => { assert.equal(quality, 0.85); return 'FAKE'; },
+  });
+  const src = { files: [{ name: 'answer.pdf', kind: 'pdf' }], pages: [{ kind: 'pdf', w: 595, h: 842 }], getTextTokens: async () => [] };
+  const entries = Array.from({ length: count }, (_, i) => entry(i + 1, { bookId: 'synthetic', src: { answer: src }, answer: { id: `a${i}`, rects: [rect] } }));
+  const transcriber = { load: async () => store, save: async () => { saves++; }, run };
+  const resolveAnswers = extra => resolveExportAnswers(entries, { aiReady: true, convert: 'ai', transcriber, signal: abort.signal, onProgress: msg => progress.push(msg), ...extra });
+  const key = i => transcriptKey({ role: 'answer', src, item: entries[i].answer });
+  return { calls, renders, progress, store, abort, entries, transcriber, resolveAnswers, key, saves: () => saves, maxActive: () => maxActive };
+}
+
+test('스캔 AI: 같은 묶음·동시 요청, 저장 열쇠, 중복·두 번째 내보내기는 재호출 없음', async t => {
+  const f = aiFixture(t);
+  f.entries.push(f.entries[0]);
+  const r = await f.resolveAnswers();
+  assert.equal(r.missing, 0);
+  assert.deepEqual(r.entries.map(e => e.exportAnswer), Array(6).fill('√2'));
+  assert.equal(f.calls.length, 3);
+  assert.deepEqual(f.calls.map(c => c.body.contents[0].parts.filter(p => p.inlineData).length).sort(), [1, 2, 2]);
+  assert.equal(f.maxActive(), 2);
+  assert.ok(f.calls.every(c => JSON.stringify(c.body).includes('Keep the answer line')));
+  assert.equal(f.renders.length, 5);
+  assert.ok(f.renders.every(r => r.width === 1500 && r.segs[0].block.role === 'answer'));
+  assert.equal(Object.keys(f.store.items).length, 5);
+  assert.ok(f.store.items[f.key(0)].blocks.length);
+  assert.equal(f.saves(), 1);
+  assert.equal((await f.resolveAnswers()).missing, 0);
+  assert.equal(f.calls.length, 3);
+  assert.equal(f.progress[0], 'AI 로 해설을 읽는 중… (0/6)');
+  assert.equal(f.progress.at(-1), 'AI 로 해설을 읽는 중… (6/6)');
+});
+
+test('스캔 저장 순서: 고친 글 → AI, local·pdf 안 씀, 표와 충돌 검사', async t => {
+  const f = aiFixture(t, { count: 1 });
+  f.store.items[f.key(0)] = { blocks: [para('답 12')] };
+  f.store.items[f.key(0) + '|edit'] = { blocks: [para('답 ③')] };
+  f.store.items[f.key(0) + '|local'] = { blocks: [para('답 ⑤')] };
+  assert.equal((await f.resolveAnswers()).entries[0].exportAnswer, '③');
+  delete f.store.items[f.key(0) + '|edit'];
+  assert.equal((await f.resolveAnswers()).entries[0].exportAnswer, '12');
+  const src = f.entries[0].src.answer;
+  src.pages.push({ kind: 'pdf' });
+  src.getTextTokens = async page => page === 1 ? row('1 ⑤') : [];
+  f.entries[0].bookObj = { docs: { answer: { pageInfo: { 1: { exclusion: { role: 'answer_table' } } } } } };
+  assert.equal((await f.resolveAnswers()).conflicts, 1);
+  delete f.store.items[f.key(0)];
+  f.store.items[f.key(0) + '|pdf'] = { blocks: [para('답 12')] };
+  assert.equal((await f.resolveAnswers({ convert: 'ocr' })).entries[0].exportAnswer, '⑤');
+  delete f.entries[0].bookObj;
+  assert.equal((await f.resolveAnswers({ convert: 'ocr' })).missing, 1);
+  assert.equal(f.calls.length, 0);
+  assert.equal((await f.resolveAnswers()).entries[0].exportAnswer, '√2', 'local·pdf가 있어도 AI 옮김이 없으면 읽음');
+  assert.equal(f.calls.length, 1);
+});
+
+test('디지털 글자층은 저장된 AI보다 우선, 직접 쓴 해설 끝 답은 자동 출처보다 우선', async t => {
+  const f = aiFixture(t, { count: 1 });
+  f.entries[0].src.answer.getTextTokens = async () => row('답 12');
+  f.store.items[f.key(0)] = { blocks: [para('답 ⑤')] };
+  assert.equal((await f.resolveAnswers()).entries[0].exportAnswer, '12');
+  f.entries[0].writtenAnswer = { blocks: [para('풀이'), para('계산'), para('참고'), para('답 ③')] };
+  assert.equal((await f.resolveAnswers()).entries[0].exportAnswer, '③');
+  assert.equal(f.calls.length, 0);
+});
+
+test('스캔 AI 꺼짐·ocr 방식: 호출 0, 누락·안내·이미지 답지 단추', async t => {
+  const f = aiFixture(t, { count: 1 });
+  for (const extra of [{ aiReady: false }, { convert: 'ocr' }]) {
+    const r = await f.resolveAnswers(extra);
+    assert.equal(r.missing, 1); assert.equal(r.scannedMissing, 1);
+    assert.equal(missingAnswerMessage(r.missing, r.scannedMissing), '답을 찾지 못한 문항 1개. 스캔한 해설은 AI 연동을 켜면 답을 읽을 수 있어요.');
+  }
+  assert.equal(f.calls.length, 0);
+  const book = { docs: { answer: { files: [{ kind: 'image' }] } } };
+  assert.equal(mayHaveAnswers(book, true), true);
+  assert.equal(mayHaveAnswers(book, false), false);
+});
+
+test('스캔 AI 한도: 뒤 요청 중단, 앞 결과 저장·사용', async t => {
+  const f = aiFixture(t, { count: 4, batch: 1, concurrency: 1 });
+  let calls = 0;
+  const original = globalThis.window.ohdap.aiGenerate;
+  globalThis.window.ohdap.aiGenerate = args => ++calls === 1 ? original(args) : Promise.resolve({ ok: false, status: 429, error: 'quota', json: { error: { message: 'PerDay' } } });
+  const r = await f.resolveAnswers();
+  assert.equal(calls, 2);
+  assert.equal(r.entries[0].exportAnswer, '√2');
+  assert.equal(r.missing, 3);
+  assert.equal(Object.keys(f.store.items).length, 1);
+  assert.equal(f.saves(), 1);
+});
+
+test('스캔 AI 취소: 앞 답만 유지, 남은 답은 누락', async t => {
+  const f = aiFixture(t, { count: 3, batch: 1, concurrency: 1 });
+  const original = f.transcriber.run;
+  f.transcriber.run = (blocks, opts) => original(blocks, { ...opts, onResult: (...args) => { opts.onResult(...args); f.abort.abort(); } });
+  const r = await f.resolveAnswers();
+  assert.equal(r.entries[0].exportAnswer, '√2');
+  assert.equal(r.missing, 2);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.saves(), 1);
+});
+
+test('스캔 AI 오류·미리 취소: 뒤 요청 없음, 저장된 답은 유지', async t => {
+  const f = aiFixture(t, { count: 3, batch: 1, concurrency: 1 });
+  f.store.items[f.key(0)] = { blocks: [para('답 ③')] };
+  globalThis.window.ohdap.aiGenerate = async () => {
+    f.calls.push('error');
+    return { ok: false, status: 400, error: '시험용 읽기 오류' };
+  };
+  const r = await f.resolveAnswers();
+  assert.equal(f.calls.length, 1);
+  assert.equal(r.entries[0].exportAnswer, '③');
+  assert.equal(r.missing, 2);
+  f.abort.abort();
+  assert.equal((await f.resolveAnswers()).missing, 2);
+  assert.equal(f.calls.length, 1);
+  assert.equal((await f.resolveAnswers({ aiReady: false })).missing, 3, 'AI 꺼짐은 저장된 AI도 쓰지 않음');
+});
+
+test('같은 열쇠도 책이 다르면 각각 읽고 저장', async t => {
+  const f = aiFixture(t, { count: 1 });
+  const other = { items: {}, dirty: false };
+  f.entries.push({ ...f.entries[0], bookId: 'other' });
+  f.transcriber.load = async id => id === 'other' ? other : f.store;
+  assert.equal((await f.resolveAnswers()).missing, 0);
+  assert.equal(f.renders.length, 2);
+  assert.ok(other.items[f.key(0)]?.blocks.length);
+  assert.ok(f.store.items[f.key(0)]?.blocks.length);
+});
+
+test('기존 HWPX 네 모드: 답 추출 전후 바이트 동일', async t => {
+  const originalDate = globalThis.Date;
+  globalThis.Date = class extends originalDate {
+    constructor(...args) { super(...(args.length ? args : ['2026-11-14T00:00:00Z'])); }
+    static now() { return Date.parse('2026-11-14T00:00:00Z'); }
+  };
+  t.after(() => { globalThis.Date = originalDate; });
+  const entries = [entry(1, { writtenAnswer: { answer: '③', blocks: [para('기존 해설')] } }), entry(2)];
+  const resolved = (await resolveExportAnswers(entries)).entries;
+  for (const mode of ['problems', 'answers', 'both-inline', 'both-end']) {
+    for (const options of [{ space: 'none' }, { columns: 2, labels: false, renumber: false, space: 'page' }]) {
+      const bytes = [];
+      for (const list of [entries, resolved]) bytes.push(await buildHwpx({
+        blocks: makeBlocks(mode, list, options, label), options,
+        renderSeg: () => assert.fail('시험용 항목에는 원본 그림 없음'),
+      }));
+      assert.deepEqual(bytes[0], bytes[1], `${mode}: 기존 HWPX 바이트`);
+    }
+  }
+});
 
 test('답 우선순위: 저장 답 → 입력한 해설 → 짝 영역 → 정답표', () => {
   const e = entry(1, { writtenAnswer: { answer: '③', blocks: [para('정답 12')] } });

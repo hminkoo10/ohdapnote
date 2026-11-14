@@ -4,10 +4,10 @@ import { h, clear, toast, modal, confirmDialog, icon, animateOut, countUp } from
 import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS, CONVERT_MODES } from './exporter.js';
 import { attachAnswers } from './answers.js';
 import { answerContent } from './answer-model.js';
-import { resolveExportAnswers, mayHaveAnswers } from './export-answers.js';
-import { exportHwpx } from './transcribe.js';
+import { resolveExportAnswers, mayHaveAnswers, missingAnswerMessage } from './export-answers.js';
+import { exportHwpx, loadTranscripts, saveTranscripts, transcribeAiBlocks } from './transcribe.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
-import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiLabel, findJob, restartGuard, restartPendingChecks } from './shared.js';
+import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiLabel, findJob, restartGuard, restartPendingChecks, holdSource } from './shared.js';
 import { topbar } from './chrome.js';
 import { studentSearch } from './home.js';
 import { examTeacher } from './exam-teacher.js';
@@ -689,7 +689,7 @@ function exportPanel() {
     );
   const anyAnswers = [...ns.books.values()].some((b) => b.docs.answer?.items?.length || b.docs.problem?.items?.some((item) => answerContent(b.$answers?.items[item.id])));
   const needAns = anyAnswers ? '' : '정답·해설을 직접 쓰거나 답지를 올리세요';
-  const anyShortAnswers = [...ns.books.values()].some(mayHaveAnswers);
+  const anyShortAnswers = [...ns.books.values()].some(book => mayHaveAnswers(book, geminiReady()));
   const needShortAnswer = anyShortAnswers ? '' : '정답을 직접 쓰거나 글자가 있는 답지를 올리세요';
   const exportBtn = (mode, title, sub, tip, disabled) =>
     h('button.export-btn', { onclick: () => doExport(mode), dataset: { mode }, disabled, title: tip }, h('span.xb-icon', icon('download')), h('span.xb-text', h('b', title), sub ? h('small', sub) : null));
@@ -935,6 +935,12 @@ const pendingExports = new Map();
 restartPendingChecks.add(() => pendingExports.size > 0);
 
 async function buildExport(mode) {
+  const releases = [];
+  try { return await buildExportHeld(mode, releases); }
+  finally { releases.forEach(release => release()); }
+}
+
+async function buildExportHeld(mode, releases) {
   const n = ns.note;
   let entries = allEntries();
   if (!entries.length) {
@@ -948,13 +954,25 @@ async function buildExport(mode) {
   }
   const opts = n.exportOptions;
   await attachAnswers(entries);
-  let missingAnswers = 0;
+  let missingAnswers = 0, scannedMissing = 0;
   if (mode === 'answer-inline' || mode === 'answer-end') {
-    const close = toast('답을 찾는 중…', { timeout: 0 });
+    const abort = new AbortController();
+    let close = () => {};
+    // 알림 하나의 글만 바꿈 (그만 읽기를 누른 뒤에는 다시 띄우지 않음)
+    const progress = message => {
+      if (close.update?.(message) || abort.signal.aborted) return;
+      close = toast(message, { timeout: 0, actions: [{ label: '그만 읽기', onClick: () => abort.abort() }] });
+    };
+    progress('답을 찾는 중…');
+    for (const e of entries) for (const role of ['problem', 'answer']) releases.push(holdSource(e.bookObj, role));
     try {
-      const result = await resolveExportAnswers(entries);
+      const result = await resolveExportAnswers(entries, {
+        convert: opts.convert, aiReady: geminiReady(), signal: abort.signal, onProgress: progress,
+        transcriber: { load: loadTranscripts, save: saveTranscripts, run: transcribeAiBlocks },
+      });
       entries = result.entries;
       missingAnswers = result.missing;
+      scannedMissing = result.scannedMissing;
     } finally { close(); }
   }
   const jobKey = `hwpx:${n.id}`;
@@ -1004,7 +1022,7 @@ async function buildExport(mode) {
           { label: '폴더 보기', onClick: () => api.showItemInFolder(r.path) },
         ],
       });
-      if (missingAnswers) toast(`답을 찾지 못한 문항 ${missingAnswers}개`, { timeout: 10000 });
+      if (missingAnswers) toast(missingAnswerMessage(missingAnswers, scannedMissing), { timeout: 10000 });
     };
     if (hwpx) {
       const bytes = await exportHwpx(blocks, entries, opts, { ...info, subtitle: sub }, { key: jobKey, sig });

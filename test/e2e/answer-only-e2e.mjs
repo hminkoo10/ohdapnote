@@ -53,6 +53,20 @@ try {
     const handler = ipcMain._invokeHandlers.get('answers:renderPdf');
     ipcMain.removeHandler('answers:renderPdf');
     ipcMain.handle('answers:renderPdf', (...args) => { globalThis.answerPrintCalls++; return handler(...args); });
+    // 모든 AI 요청을 가로챈다. 시험 중 서비스 주소로 나갈 수 없다.
+    globalThis.answerAiCalls = [];
+    ipcMain.removeHandler('ai:generate');
+    ipcMain.handle('ai:generate', async (_e, { provider, body }) => {
+      const content = body.messages[0].content;
+      const images = content.filter(p => p.type === 'image_url').length;
+      assertMock(provider === 'openai' && JSON.stringify(body).includes('Keep the answer line'));
+      globalThis.answerAiCalls.push({ provider, images });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const blocks = [{ type: 'para', text: '해설을 계산한다' }, { type: 'para', text: '답 $\\sqrt{2}$' }, { type: 'para', text: '참고 다른 풀이' }];
+      const reply = images === 1 ? { blocks } : { items: Array.from({ length: images }, (_, i) => ({ index: i + 1, blocks })) };
+      return { ok: true, status: 200, json: { choices: [{ message: { content: JSON.stringify(reply) } }] } };
+    });
+    function assertMock(ok) { if (!ok) throw new Error('답 옮김 이외의 AI 요청'); }
   });
   const call = (fn, ...args) => win.evaluate(([fn, args]) => window.ohdap[fn](...args), [fn, args]);
   // 분석도 앱에서 쓰는 경로 그대로. 원본은 기존 합성 자료만 사용한다.
@@ -166,6 +180,81 @@ try {
   await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some(el => el.textContent.includes('저장했어요')), null, { timeout: 120000 });
   const legacy = await renderPdf([...readFileSync(dest)], 'both-inline');
   assert.ok(legacy.text.replace(/\s/g, '').includes('풀이확인문장'));
+
+  // 합성 스캔 PDF를 답지로 사용. 원래 문제의 위치를 짝 영역으로 지정해 분석·OCR은 하지 않는다.
+  const scanId = 'aaaaaaaa-1234-4000-8000-000000000072', scanDir = join(tmp, 'local/data/shared/books', scanId);
+  mkdirSync(scanDir, { recursive: true });
+  copyFileSync(join(FIX, 'book-unit.pdf'), join(scanDir, 'problem.pdf'));
+  copyFileSync(join(FIX, 'book-unit-scan.pdf'), join(scanDir, 'answer.pdf'));
+  const scanAnswers = picks.map((p, i) => ({ ...p, id: `scan-answer-${i}` }));
+  const scanBook = { ...book, id: scanId, name: '스캔 해설 답 연습', docs: { problem: docs.problem, answer: { ...docs.problem, files: docs.answer.files, items: scanAnswers, pageInfo: {} } }, answerOverrides: Object.fromEntries(picks.map((p, i) => [p.id, scanAnswers[i].id])) };
+  writeFileSync(join(scanDir, 'book.json'), JSON.stringify(scanBook));
+  const scanNote = await call('createNote', { title: '스캔 해설 답 연습', bookIds: [scanId] });
+  scanNote.selected = { [scanId]: picks.map(p => p.id) };
+  scanNote.exportOptions = { ...note.exportOptions, format: 'pdf', convert: 'ai' };
+  await call('saveNote', scanNote);
+  await win.evaluate(async id => {
+    const { state, nav } = await import('./js/shared.js');
+    // 키를 만들거나 저장하지 않음. 준비 여부는 키 없는 호환 모델 설정으로 흉내.
+    state.settings = { ...state.settings, aiSource: 'personal', aiProvider: 'openai', openaiModel: 'answer-only-mock', openaiModel2: '', openaiRpm: 6000, aiEnabled: false, aiBatch: 2, aiConcurrency: 2 };
+    globalThis.answerDraws = [];
+    const fillText = CanvasRenderingContext2D.prototype.fillText;
+    CanvasRenderingContext2D.prototype.fillText = function(text, ...args) {
+      if (this.fillStyle === '#0f5f58') globalThis.answerDraws.push(text);
+      return fillText.call(this, text, ...args);
+    };
+    await nav.note(id);
+  }, scanNote.id);
+  await win.waitForSelector('.export-btn[data-mode="answer-inline"]');
+  const scanExport = async (name, format) => {
+    await win.locator(`.seg label:has(input[name="format"][value="${format}"])`).click();
+    const dest = join(tmp, `${name}.${format}`), begin = Date.now();
+    await win.locator('.toast').evaluateAll(nodes => nodes.forEach(n => n.remove()));
+    await win.evaluate(() => { globalThis.answerDraws = []; });
+    await app.evaluate(({ dialog }, dest) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: dest }); }, dest);
+    await win.locator('.export-btn[data-mode="answer-inline"]').click();
+    await win.waitForFunction(() => [...document.querySelectorAll('.toast')].some(el => el.textContent.includes('저장했어요')), null, { timeout: 120000 });
+    assert.ok(existsSync(dest));
+    console.log(`${name} ${format}: 저장 (${((Date.now() - begin) / 1000).toFixed(2)}초)`);
+    return readFileSync(dest);
+  };
+  const noAi = await scanExport('scan-ai-off', 'pdf');
+  assert.ok(await win.getByText('답을 찾지 못한 문항 3개. 스캔한 해설은 AI 연동을 켜면 답을 읽을 수 있어요.', { exact: true }).count());
+  assert.ok((await win.evaluate(() => globalThis.answerDraws.join(''))).includes('(답을 찾지 못했어요)'));
+  assert.equal(await app.evaluate(() => globalThis.answerAiCalls.length), 0);
+  assert.ok((await renderPdf([...noAi], 'answer-inline')).images[0] > 0);
+  // AI를 켜고 답 추출. 진행 문구는 MutationObserver로 기록한다.
+  await win.evaluate(async () => {
+    const { state } = await import('./js/shared.js');
+    state.settings.aiEnabled = true;
+    globalThis.answerProgress = [];
+    new MutationObserver(() => {
+      for (const el of document.querySelectorAll('.toast-msg')) if (el.textContent.includes('AI 로 해설을 읽는 중')) globalThis.answerProgress.push(el.textContent);
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  const aiPdf = await scanExport('scan-ai', 'pdf');
+  assert.ok((await win.evaluate(() => globalThis.answerDraws.join(''))).includes('√2'), 'AI 답을 PDF에 그림으로 씀');
+  assert.ok((await win.evaluate(() => globalThis.answerProgress)).some(s => /\(3\/3\)/.test(s)), 'AI 진행 문구');
+  const aiCalls = await app.evaluate(() => globalThis.answerAiCalls);
+  assert.deepEqual(aiCalls.map(c => c.images).sort(), [1, 2]);
+  const savedTranscripts = JSON.parse(readFileSync(join(scanDir, 'transcripts.json'), 'utf8'));
+  const expectedKeys = await win.evaluate(async id => {
+    const { getSources } = await import('./js/shared.js');
+    const { transcriptKey } = await import('./js/transcript-store.js');
+    const b = await window.ohdap.getBook(id), src = await getSources(b);
+    return b.docs.answer.items.map(item => transcriptKey({ role: 'answer', src: src.answer, item }));
+  }, scanId);
+  assert.deepEqual(Object.keys(savedTranscripts.items).sort(), expectedKeys.sort(), '한글 내보내기와 같은 저장 열쇠');
+  assert.ok(Object.values(savedTranscripts.items).every(t => t.blocks.some(b => b.text?.includes('답 $\\sqrt{2}$'))));
+  const renderedAi = await renderPdf([...aiPdf], 'answer-inline');
+  writeFileSync(join(OUT, 'scan-ai-pdf.png'), Buffer.from(renderedAi.first, 'base64'));
+  const aiHwpx = await scanExport('scan-ai-cache', 'hwpx');
+  assert.ok(sectionXml(aiHwpx).includes('√2'), '저장된 AI 답을 HWPX에 실제 글자로 씀');
+  assert.ok(!sectionXml(aiHwpx).includes('(답을 찾지 못했어요)'));
+  assert.equal(await app.evaluate(() => globalThis.answerAiCalls.length), aiCalls.length, '다음 한글 내보내기에서 AI 재호출 없음');
+  await scanExport('scan-ai-cache-again', 'pdf');
+  assert.equal(await app.evaluate(() => globalThis.answerAiCalls.length), aiCalls.length, '다음 PDF 내보내기에서 AI 재호출 없음');
+  console.log('스캔 해설: AI 꺼짐 안내·흉내 AI PDF/HWPX·저장·재사용 통과');
   assert.deepEqual(errors, []);
   console.log(`답 전용 E2E 통과: ${((Date.now() - started) / 1000).toFixed(2)}초`);
 } catch (error) {
