@@ -76,7 +76,8 @@ test('짝 PDF: 모든 rect의 끝 답만, 영역 밖 답·숨은 OCR 제외', as
 });
 
 // 기존 시험과 같은 IPC 흉내. 실제 geminiTranscribeBatch를 거치되 서비스 요청은 없다.
-const transcribeSource = readFileSync(new URL('../../src/renderer/js/transcribe.js', import.meta.url), 'utf8');
+// Windows 배포 서버는 CRLF 로 받으므로 줄바꿈을 맞춘 뒤 잘라 냄
+const transcribeSource = readFileSync(new URL('../../src/renderer/js/transcribe.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const aiBody = transcribeSource.slice(transcribeSource.indexOf('export async function transcribeAiBlocks'), transcribeSource.indexOf('/**\n * 0)')).replace('export ', '');
 let fixtureId = 0;
 function aiFixture(t, { count = 5, batch = 2, concurrency = 2, respond } = {}) {
