@@ -4,7 +4,9 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { createFileQueue } = require('./file-queue');
 
-const RETRY_MS = [20, 40, 80, 120, 160, 200]; // 잠깐 열린 파일만 기다림 (합계 620ms)
+// 다른 프로그램(동기화·백신·색인)이 잠깐 연 파일을 기다림
+const RETRY_MS = [20, 40, 80, 160, 320, ...Array(9).fill(500)]; // 비동기: 화면을 막지 않으니 길게 (합계 5120ms)
+const RETRY_SYNC_MS = [20, 40, 80, 120, 160, 200]; // 동기(창 닫기): 화면을 막으니 짧게 (합계 620ms)
 const retryable = (err) => ['EPERM', 'EACCES', 'EBUSY'].includes(err.code);
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const waitCell = new Int32Array(new SharedArrayBuffer(4));
@@ -60,8 +62,8 @@ function createJsonWriter({ io = fs, withJsonFile = createFileQueue(), markOwn =
         } catch (err) {
           if (!retryable(err)) throw err;
           firstError ||= err;
-          if (attempt === RETRY_MS.length) throw firstError;
-          sleepSync(RETRY_MS[attempt]);
+          if (attempt === RETRY_SYNC_MS.length) throw firstError;
+          sleepSync(RETRY_SYNC_MS[attempt]);
         }
       }
     } finally { try { io.unlinkSync(tmp); } catch {} }

@@ -50,7 +50,8 @@ for (const sync of [false, true]) {
     const run = () => f[sync ? 'writeJsonAtomicSync' : 'writeJsonAtomic'](f.file, { value: 'changed' });
     if (sync) assert.throws(run, (err) => err === original);
     else await assert.rejects(run, (err) => err === original);
-    assert.equal(calls, 7); assert.equal(waits.reduce((a, b) => a + b, 0), 620);
+    // 비동기는 화면을 막지 않으니 약 5초, 동기(창 닫기)는 0.6초까지 기다림
+    assert.equal(calls, sync ? 7 : 15); assert.equal(waits.reduce((a, b) => a + b, 0), sync ? 620 : 5120);
     assert.deepEqual(f.value(), { value: 'original' }); f.clean();
   });
 
@@ -103,6 +104,37 @@ test('실제 열린 읽기 핸들을 잠시 뒤 닫으면 비동기 저장 성�
     await f.writeJsonAtomic(f.file, { value: 'after release' });
     if (blocked) assert.equal(released, true);
     assert.deepEqual(f.value(), { value: 'after release' }); f.clean();
+  } finally { clearTimeout(timer); if (handle !== null) fs.closeSync(handle); }
+});
+
+test('1초 넘게 잡혀 있다가 풀리면 비동기 저장은 성공', async (t) => {
+  let locked = true;
+  let calls = 0;
+  const f = fixture(t, { io: { ...fs, renameSync(...args) {
+    calls++;
+    if (locked) throw Object.assign(new Error('locked'), { code: 'EPERM' });
+    return fs.renameSync(...args);
+  } } });
+  const started = Date.now();
+  const timer = setTimeout(() => { locked = false; }, 1200);
+  try {
+    await f.writeJsonAtomic(f.file, { value: 'after long lock' });
+  } finally { clearTimeout(timer); }
+  assert.ok(Date.now() - started >= 1200);
+  assert.ok(calls > 1);
+  assert.deepEqual(f.value(), { value: 'after long lock' }); f.clean();
+});
+
+test('실제 읽기 핸들이 1초 넘게 열려 있다가 닫히면 비동기 저장은 성공', { skip: process.platform !== 'win32' && 'Windows 에서만 열린 파일 교체가 막힘' }, async (t) => {
+  const f = fixture(t);
+  let handle = fs.openSync(f.file, 'r');
+  const started = Date.now();
+  const timer = setTimeout(() => { fs.closeSync(handle); handle = null; }, 1200);
+  try {
+    await f.writeJsonAtomic(f.file, { value: 'after long handle' });
+    assert.equal(handle, null);
+    assert.ok(Date.now() - started >= 1200);
+    assert.deepEqual(f.value(), { value: 'after long handle' }); f.clean();
   } finally { clearTimeout(timer); if (handle !== null) fs.closeSync(handle); }
 });
 
