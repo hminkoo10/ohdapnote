@@ -1,3 +1,4 @@
+import { numberContextGrid, filterNumberContexts } from './number-context.js';
 import { classifyPageRole, classifyAnswerTableShape } from './pagerole.js';
 import { residualBoundaries, rangesForItems } from './region-boundaries.js';
 import { trailingNonQuestionPages, applyPageExclusions, isExcludedPage } from './page-exclusions.js';
@@ -129,16 +130,20 @@ function inferColumnsFromCandidates(page, splitHint = null) {
 async function readPage(src, index, { forceOcr = false, ocrFallback = true, deep = false, splitHint = null, passages = false, role = 'problem' } = {}) {
   const canvas = await src.renderPage(index, ANALYSIS_WIDTH);
   let grid;
+  let numberContext;
   try {
     grid = inkGridFromCanvas(canvas);
+    numberContext = numberContextGrid(canvas.getContext('2d', {willReadFrequently:true}).getImageData(0,0,canvas.width,canvas.height).data,canvas.width,canvas.height);
   } finally {
     canvas.width = canvas.height = 0;
   }
   const layout = analyzeLayout(grid);
+  // Snapshot ink-only columns BEFORE passage trimming or number-based inference/merging.
+  const contextColumns = layout.columns.map(c => ({x0:c.x0,x1:c.x1}));
   const ocrBody = { bodyTop: layout.bodyTop, bodyBottom: layout.bodyBottom };
   if (passages) trimPassageMargins(grid, layout);
   const answer = role === 'answer' && passages;
-  const page = { index, layout, grid, passages, answer, ocrBody, candidates: [], source: 'text', footerNumbers: [], headings: [], ranges: [], ocrPasses: [], needsOcr: false };
+  const page = { index, layout, grid, numberContext, contextColumns, passages, answer, ocrBody, candidates: [], source: 'text', footerNumbers: [], headings: [], ranges: [], ocrPasses: [], needsOcr: false };
   if (layout.blank) return page;
 
   let tokens = forceOcr ? [] : await src.getTextTokens(index);
@@ -655,6 +660,7 @@ async function findNumbersInRegions(src, page, regions, ref, sig, rangeStarts = 
       reg.missing.delete(num);
       const col = layout.columns[b.col];
       found.push({
+        contextBox: {x0:b.x0,x1:b.x1,y0:b.y0,y1:b.y1},
         num,
         digits: m[1],
         style: sig.style,
@@ -843,6 +849,8 @@ export async function analyzeDocument(src, opts) {
   if (signature) dropStrayRuns(pages, anchors, `${signature.prefix || ''}|${signature.padded ? signature.digitsLen : 0}`, results);
 
   const examSections = role === 'problem' && ['korean', 'math', 'english'].includes(opts.subject) ? (stabilizeExamPages(results, anchors, opts.subject) || stabilizeLegacyExamPages(results, anchors, opts.subject, opts.exam)) : null;
+  // Judge EVERY final anchor identically after all recovery, without chain/group inputs.
+  for (const r of results) anchors.set(r.index,filterNumberContexts(r,anchors.get(r.index)||[]));
   const layouts = new Map(results.map((r) => [r.index, r.layout]));
   const grids = new Map(results.map((r) => [r.index, r.grid]));
   const sourceMap = new Map(results.map((r) => [r.index, r.source]));
@@ -974,7 +982,7 @@ export function buildCutters(results, anchors, signature) {
     // 제목 위 장식(동그라미 번호, 띠)에 걸리지 않게 그 위 빈 줄로
     for (const cut of residualBoundaries(r, anchors.get(r.index) || [])) add(r.index, cut);
     const snap = (x0, x1, y) => (r.grid ? snapUpToGap(r.grid, x0, x1, y) : y);
-    for (const hd of r.headings || []) add(r.index, { x0: hd.x0, x1: hd.x1, y0: snap(hd.x0 - 0.01, hd.x1 + 0.01, hd.y0 - 0.004) });
+    for (const hd of [...(r.headings || []), ...(r.contextHeadings || [])]) add(r.index, { x0: hd.x0, x1: hd.x1, y0: snap(hd.x0 - 0.01, hd.x1 + 0.01, hd.y0 - 0.004) });
     for (const rg of r.ranges || []) add(r.index, { x0: rg.x0, x1: rg.x1, y0: rg.y0 - 0.006 });
     // 번호 없는 말머리 이름표("유제" 띠): 다음 묶음의 시작
     for (const lb of r.sectionLabels || []) add(r.index, { x0: lb.x0, x1: lb.x1, y0: snap(lb.x0 - 0.01, lb.x1 + 0.01, lb.y0 - 0.004) });
@@ -1099,6 +1107,7 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
       chain = [...chain, ...found].sort(byReadingOrder);
     }
   }
+  chain = filterNumberContexts(page,chain);
   if (passages) chain = excludeRangeNumbers(chain, page.ranges || []);
   const anchors = new Map([[idx, chain]]);
   const newItems = computeItems([idx], anchors, new Map([[idx, page.layout]]), new Map([[idx, page.grid]]), {
