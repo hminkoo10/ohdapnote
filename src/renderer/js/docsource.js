@@ -189,30 +189,35 @@ export class DocSource {
     const fullW = p.w * scalePx;
     const fullH = p.h * scalePx;
     const canvas = createCanvas(rect.w * fullW, rect.h * fullH);
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const offX = rect.x * fullW;
-    const offY = rect.y * fullH;
-    if (p.kind === 'pdf') {
-      await this._usePdfPage(i, async (page) => {
-        const viewport = page.getViewport({ scale: scalePx });
-        await page.render({
-          canvas,
-          viewport,
-          transform: [1, 0, 0, 1, -offX, -offY],
-          background: 'rgb(255,255,255)',
-          annotationMode: pdfjsLib.AnnotationMode.ENABLE,
-        }).promise;
-      });
-    } else {
-      await this._withImage(p.fileIndex, (bitmap) => {
-        const k = bitmap.width / fullW; // 화면 px → 이미지 px
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(bitmap, offX * k, offY * k, canvas.width * k, canvas.height * k, 0, 0, canvas.width, canvas.height);
-      });
+    try {
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const offX = rect.x * fullW;
+      const offY = rect.y * fullH;
+      if (p.kind === 'pdf') {
+        await this._usePdfPage(i, async (page) => {
+          const viewport = page.getViewport({ scale: scalePx });
+          await page.render({
+            canvas,
+            viewport,
+            transform: [1, 0, 0, 1, -offX, -offY],
+            background: 'rgb(255,255,255)',
+            annotationMode: pdfjsLib.AnnotationMode.ENABLE,
+          }).promise;
+        });
+      } else {
+        await this._withImage(p.fileIndex, (bitmap) => {
+          const k = bitmap.width / fullW; // 화면 px → 이미지 px
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(bitmap, offX * k, offY * k, canvas.width * k, canvas.height * k, 0, 0, canvas.width, canvas.height);
+        });
+      }
+      return canvas;
+    } catch (err) {
+      canvas.width = canvas.height = 0;
+      throw err;
     }
-    return canvas;
   }
 
   /**
