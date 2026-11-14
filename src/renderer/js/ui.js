@@ -100,17 +100,22 @@ export function modal({ title, body, buttons = [], width = 460, onClose, beforeC
         finally { closing = false; }
       }
       closed = true;
-      document.removeEventListener('keydown', onKey, true);
       overlay.classList.add('closing');
-      const done = () => overlay.remove();
+      const done = () => {
+        document.removeEventListener('keydown', onKey, true);
+        overlay.remove();
+      };
       overlay.addEventListener('animationend', done, { once: true });
       setTimeout(done, 300);
       onClose?.(value);
       resolve(value);
     };
     const onKey = (e) => {
-      if ([...document.querySelectorAll('.modal-overlay:not(.closing)')].at(-1) !== overlay) return;
+      if ([...document.querySelectorAll('.modal-overlay')].at(-1) !== overlay) return;
       if (e.isComposing) return;
+      if ((closed || closing) && ['Enter', 'Delete', 'Backspace', 'Escape'].includes(e.key)) {
+        e.preventDefault(); e.stopPropagation(); return;
+      }
       if (onKeyDown?.(e) === true) { e.preventDefault(); e.stopPropagation(); return; }
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -146,10 +151,20 @@ export function modal({ title, body, buttons = [], width = 460, onClose, beforeC
   });
 }
 
-export async function confirmDialog(message, { title = '확인', ok = '확인', danger = false } = {}) {
+export async function confirmDialog(message, { title = '확인', ok = '확인', danger = false, enter = false } = {}) {
   const r = await modal({
     title,
     body: h('p.modal-text', message),
+    onKeyDown: enter ? (e) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') return true;
+      if (e.key !== 'Enter') return;
+      if (!e.repeat) {
+        const dialog = e.target.closest('.modal');
+        const button = dialog && e.target.closest('button');
+        (button || dialog?.querySelector('.modal-footer button:last-child'))?.click();
+      }
+      return true;
+    } : undefined,
     buttons: [
       { label: '취소', value: false },
       { label: ok, value: true, primary: !danger, danger },
