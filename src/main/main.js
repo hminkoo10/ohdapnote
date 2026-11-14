@@ -17,6 +17,8 @@ const { createFileQueue } = require('./file-queue');
 const { libraryLocation, assertLibraryWritable, createSummaryCache } = require('./library');
 const librarySummaries = createSummaryCache();
 const withJsonFile = createFileQueue();
+const { createJsonWriter } = require('./json-atomic');
+const { writeJsonAtomic, writeJsonAtomicSync } = createJsonWriter({ withJsonFile, markOwn });
 const crypto = require('node:crypto');
 const log = require('electron-log/main');
 const ai = require('./ai');
@@ -260,26 +262,6 @@ function readJsonSync(file, fallback = null, sanitize = sanitizeData) {
     if (err.code !== 'ENOENT') badJson(file);
     return fallback;
   }
-}
-
-async function writeJsonAtomic(file, value) {
-  return withJsonFile(file, async () => {
-    await fsp.mkdir(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${crypto.randomUUID()}.tmp`;
-    try {
-      await fsp.writeFile(tmp, JSON.stringify(value), 'utf8');
-      markOwn(file);
-      await fsp.rename(tmp, file);
-    } finally { await fsp.unlink(tmp).catch(() => {}); }
-  });
-}
-
-function writeJsonAtomicSync(file, value) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(value), 'utf8');
-  markOwn(file);
-  fs.renameSync(tmp, file);
 }
 
 // 파일의 값은 서명 여부와 별개로, 화면에서 만들 수 있는 모양만 받음.
@@ -1170,7 +1152,7 @@ function registerIpc() {
     if (!book || !isValidId(book.id)) throw new Error('잘못된 책');
     const cur = checkBookWrite(book.id);
     if (!subjectOpen(book)) throw new Error('학원이 계약하지 않은 과목으로는 바꿀 수 없어요.');
-    writeJsonAtomicSync(bookFile(book.id), toSave(book, cur));
+    await writeJsonAtomic(bookFile(book.id), toSave(book, cur));
     return true;
   });
 

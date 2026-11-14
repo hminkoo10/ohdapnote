@@ -512,7 +512,7 @@ export function createEditor(ctx) {
     const message = it.rects.length > 1
       ? `${it.number}번의 선택한 영역을 지워요. 다른 영역은 남아요.`
       : `${it.number}번 상자를 지우면 오답노트 선택에서도 빠져요. 원본 파일은 남아요.`;
-    if (!(await confirmDialog(message, { title: '문항 영역 삭제', ok: '삭제', danger: true }))) return;
+    if (!(await confirmDialog(message, { title: '문항 영역 삭제', ok: '삭제', danger: true, enter: true }))) return;
     if (doc() !== d || st.role !== role || selectedItem() !== it || st.selected.rect !== ri) return;
     if (it.rects.length > 1) {
       it.rects.splice(ri, 1);
@@ -582,8 +582,9 @@ export function createEditor(ctx) {
       go(1);
       e.preventDefault();
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
-      deleteSelected();
       e.preventDefault();
+      e.stopPropagation();
+      if (!e.repeat) deleteSelected();
     } else if (e.key === 'Escape') {
       if (st.mode !== 'select') setMode('select');
       else if (st.selected) {
