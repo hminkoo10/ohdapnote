@@ -1,4 +1,5 @@
 import { classifyPageRole, classifyAnswerTableShape } from './pagerole.js';
+import { residualBoundaries, rangesForItems } from './region-boundaries.js';
 import { trailingNonQuestionPages, applyPageExclusions, isExcludedPage } from './page-exclusions.js';
 // 문서 분석 파이프라인: 렌더링 → 레이아웃 → (텍스트 | OCR) → 번호 선택 → 영역 계산
 // (Gemini 는 사용자가 고른 쪽만 따로: detectPageWithGemini)
@@ -836,7 +837,7 @@ export async function analyzeDocument(src, opts) {
   for (const idx of tablePages) flags.set(idx, ['빠른 정답표 같아서 건너뜀']);
   if (answersFrom >= 0) flags.set(answersFrom, ['여기부터는 정답과 풀이 같아서 뺌 (문제 쪽까지만 범위를 정하면 사라짐)']);
   const cutters = buildCutters(results, anchors, signature);
-  const ranges = new Map(results.filter((r) => r.ranges?.length).map((r) => [r.index, r.ranges]));
+  const ranges = rangesForItems(results, anchors);
   let items = computeItems(pages, anchors, layouts, grids, { flow, passages, answer: role === 'answer' && passages, source: sourceMap, cutters, stopPages: tablePages, ranges });
   // 앞 쪽 해설이 통째로 이어지는 쪽(긴 해설의 가운데 쪽)은 번호가 없는 게 맞음
   if (flow === 'continue') {
@@ -948,6 +949,7 @@ export function buildCutters(results, anchors, signature) {
   }
   for (const r of results) {
     // 제목 위 장식(동그라미 번호, 띠)에 걸리지 않게 그 위 빈 줄로
+    for (const cut of residualBoundaries(r, anchors.get(r.index) || [])) add(r.index, cut);
     const snap = (x0, x1, y) => (r.grid ? snapUpToGap(r.grid, x0, x1, y) : y);
     for (const hd of r.headings || []) add(r.index, { x0: hd.x0, x1: hd.x1, y0: snap(hd.x0 - 0.01, hd.x1 + 0.01, hd.y0 - 0.004) });
     for (const rg of r.ranges || []) add(r.index, { x0: rg.x0, x1: rg.x1, y0: rg.y0 - 0.006 });
@@ -1072,7 +1074,7 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
     answer: page.answer,
     source: new Map([[idx, page.source]]),
     cutters: buildCutters([page], anchors, doc.signature),
-    ranges: new Map([[idx, page.ranges || []]]),
+    ranges: rangesForItems([page], anchors),
   });
   return { items: newItems, page, meta: pageMeta(page, chain) };
 }
