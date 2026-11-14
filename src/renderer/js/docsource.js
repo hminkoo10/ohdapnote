@@ -14,6 +14,9 @@ const PDF_OPTIONS = {
   wasmUrl: new URL('../vendor/pdfjs/wasm/', import.meta.url).href,
   iccUrl: new URL('../vendor/pdfjs/iccs/', import.meta.url).href,
   isEvalSupported: false,
+  // 작업자가 그림을 OffscreenCanvas 비트맵으로 넘기면 쪽마다 큰 비트맵이 남아 시험 하나에 수 GB까지 쌓인다
+  // (서버 측정: 렌더러 최대 9.6GB). 픽셀로 넘기게 하면 그리는 결과는 같고 1.6GB 안팎이다.
+  isOffscreenCanvasSupported: false,
   enableXfa: false,
   fontExtraProperties: true, // 글꼴 이름(수식 글꼴 EH… 구분)을 읽으려고
 };
@@ -144,8 +147,9 @@ export class DocSource {
     if (this._pageCache.has(key)) return this._pageCache.get(key);
     const page = await this._pdfDocs.get(p.fileIndex).getPage(p.pageIndex + 1);
     this._pageCache.set(key, page);
-    // 메모리를 위해 최근 페이지 몇 개만 유지
-    if (this._pageCache.size > 12) {
+    // 정리하지 않은 쪽은 그림 데이터를 그대로 들고 있다(스캔본은 쪽마다 수백 MB).
+    // 마지막으로 연 한 쪽만 남긴다 (서버 측정: 스캔본 시험 렌더러 최대 4.8GB → 1.4GB, 걸린 시간은 비슷).
+    if (this._pageCache.size > 1) {
       const [oldKey, oldPage] = this._pageCache.entries().next().value;
       this._pageCache.delete(oldKey);
       oldPage.cleanup();
