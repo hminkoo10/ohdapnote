@@ -82,6 +82,12 @@ export function toast(message, { type = 'info', actions = [], timeout = actions.
   const all = toastRoot.querySelectorAll('.toast:not(.leaving)');
   for (let i = 0; i < all.length - 4; i++) all[i].remove();
   if (timeout) setTimeout(close, timeout);
+  // 진행 안내처럼 같은 알림의 글만 바꿀 때 (닫혔으면 false)
+  close.update = (text) => {
+    if (closed) return false;
+    el.querySelector('.toast-msg').textContent = text;
+    return true;
+  };
   return close;
 }
 

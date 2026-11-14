@@ -116,6 +116,80 @@ export async function pdfTranscribe(segs, { plain = false } = {}) {
   }
 }
 
+/** HWPX·답 내보내기가 함께 쓰는 AI 묶음 옮김. 결과는 같은 저장소·열쇠에 남긴다. */
+export async function transcribeAiBlocks(pending, {
+  storeOf, options = aiOptions(), signal,
+  stopOnError = false,
+  onStart = () => {}, onResult = () => {}, onError = () => {}, onStatus = () => {},
+}) {
+  const { batch, ...ai } = options;
+  let quota = false, failed = false;
+  const stores = new Map();
+  const groups = new Map(); // 열쇠 → 블록들
+  for (const b of pending) {
+    const store = storeOf(b);
+    if (!stores.has(store)) stores.set(store, stores.size);
+    const key = `${stores.get(store)}:${transcriptKey(b)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(b);
+  }
+  // 문제와 해설은 지시문이 달라서 따로 묶음
+  const batches = [];
+  for (const role of ['problem', 'answer']) {
+    const keys = [...groups.keys()].filter((k) => groups.get(k)[0].role === role);
+    for (let i = 0; i < keys.length; i += batch) batches.push({ role, keys: keys.slice(i, i + batch) });
+  }
+  let next = 0;
+  const worker = async () => {
+    while (next < batches.length) {
+      if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
+      const { role, keys } = batches[next++];
+      if (quota || failed) {
+        for (const k of keys) for (const b of groups.get(k)) onError(b, new Error('한도 초과'));
+        continue;
+      }
+      for (const k of keys) for (const b of groups.get(k)) onStart(b);
+      let results;
+      try {
+        // buildHwpx 가 transcribe 에 넘기는 것과 같은 영역(blockSegs)·같은 폭의 그림
+        const images = [];
+        for (const k of keys) images.push(canvasToBase64Jpeg(await renderStack(blockSegs(groups.get(k)[0]), TRANSCRIBE_WIDTH), 0.85));
+        if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
+        if (quota || failed) {
+          for (const k of keys) for (const b of groups.get(k)) onError(b, new Error('한도 초과'));
+          continue;
+        }
+        results = await geminiTranscribeBatch(images, { role, ...ai, signal, onStatus });
+      } catch (err) {
+        if (err?.name === 'AbortError') throw err;
+        results = keys.map(() => err);
+      }
+      if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
+      keys.forEach((k, i) => {
+        const r = results[i];
+        if (r instanceof Error) {
+          if (stopOnError) failed = true;
+          if (/한도/.test(r.message)) {
+            quota = true;
+            onStatus(r.message);
+          }
+          for (const b of groups.get(k)) onError(b, r);
+        } else if (!r?.length) {
+          for (const b of groups.get(k)) onError(b, new Error('읽은 내용이 없음'));
+        } else {
+          const store = storeOf(groups.get(k)[0]);
+          store.items[transcriptKey(groups.get(k)[0])] = { blocks: [...r], model: r.model, at: Date.now() };
+          store.dirty = true;
+          for (const b of groups.get(k)) onResult(b, r);
+        }
+      });
+    }
+  };
+  const settled = await Promise.allSettled(Array.from({ length: Math.min(ai.concurrency, batches.length) }, worker));
+  const rejected = settled.find(r => r.status === 'rejected');
+  if (rejected) throw rejected.reason;
+}
+
 /**
  * 0) 디지털 PDF 문항은 PDF 글자로 바로 옮김 (어느 방식이든)
  * 1) 스캔본 문항은 내보내기 설정 convert 에 따라
@@ -173,7 +247,6 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
   const needsAi = (b) => useAi && !has(aiResult(b)) && !(has(ocrResult(b)) && ocrResult(b).reliable);
   const missing = scanned.filter((b) => !resultOf(b)).length;
   if (missing && !useAi && !useOcr) noConvertToast(mode, missing);
-  let quota = false; // 한도가 차면 나머지는 묻지 않음 (OCR 결과가 있으면 그것, 없으면 그림)
   let ui = null;
   const releases = [];
   const settled = new Set();
@@ -224,62 +297,13 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
     await Promise.all(Array.from({ length: Math.min(2, pending.length) }, worker));
   };
 
-  /** AI 로 옮기기: 묶음으로 동시에 (같은 열쇠의 문항은 한 번만) */
-  const runAi = async (pending) => {
-    const groups = new Map(); // 열쇠 → 블록들
-    for (const b of pending) {
-      const key = aiKey(b);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(b);
-    }
-    // 문제와 해설은 지시문이 달라서 따로 묶음
-    const batches = [];
-    for (const role of ['problem', 'answer']) {
-      const keys = [...groups.keys()].filter((k) => groups.get(k)[0].role === role);
-      for (let i = 0; i < keys.length; i += batchSize) batches.push({ role, keys: keys.slice(i, i + batchSize) });
-    }
-    let next = 0;
-    const worker = async () => {
-      while (next < batches.length) {
-        if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
-        const { role, keys } = batches[next++];
-        if (quota) {
-          for (const k of keys) for (const b of groups.get(k)) aiFailed(b, '한도 초과');
-          continue;
-        }
-        for (const k of keys) for (const b of groups.get(k)) ui.row(b).set('run', '옮기는 중…', 'AI');
-        let results;
-        try {
-          // buildHwpx 가 transcribe 에 넘기는 것과 같은 영역(blockSegs)·같은 폭의 그림
-          const images = [];
-          for (const k of keys) images.push(canvasToBase64Jpeg(await renderStack(blockSegs(groups.get(k)[0]), TRANSCRIBE_WIDTH), 0.85));
-          results = await geminiTranscribeBatch(images, { role, ...ai, signal: abort.signal, onStatus: (msg) => ui.status(msg) });
-        } catch (err) {
-          if (err?.name === 'AbortError') throw err;
-          results = keys.map(() => err);
-        }
-        if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
-        keys.forEach((k, i) => {
-          const r = results[i];
-          if (r instanceof Error) {
-            if (/한도/.test(r.message)) {
-              quota = true;
-              ui.status(r.message);
-            }
-            for (const b of groups.get(k)) aiFailed(b, r.message);
-          } else if (!r.length) {
-            for (const b of groups.get(k)) aiFailed(b, '읽은 내용이 없음');
-          } else {
-            const store = storeOf(groups.get(k)[0]);
-            store.items[k] = { blocks: [...r], model: r.model, at: Date.now() };
-            store.dirty = true;
-            for (const b of groups.get(k)) settle(b, 'ok', `글자·수식으로 옮김 · ${r.model || '기본 모델'}`, 'AI');
-          }
-        });
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(ai.concurrency, batches.length) }, worker));
-  };
+  const runAi = (pending) => transcribeAiBlocks(pending, {
+    storeOf, options: { batch: batchSize, ...ai }, signal: abort.signal,
+    onStart: (b) => ui.row(b).set('run', '옮기는 중…', 'AI'),
+    onResult: (b, r) => settle(b, 'ok', `글자·수식으로 옮김 · ${r.model || '기본 모델'}`, 'AI'),
+    onError: (b, err) => aiFailed(b, err.message),
+    onStatus: (msg) => ui.status(msg),
+  });
 
   let reviewCount = 0;
   const transcribe = async (block, segs) => {
