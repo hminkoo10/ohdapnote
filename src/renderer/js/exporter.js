@@ -6,6 +6,7 @@ import { PDFDocument, StandardFonts, rgb, pushGraphicsState, popGraphicsState } 
 import { createCanvas } from './docsource.js';
 import { stripHiddenText } from './pdfclip.js';
 import { answerContent } from './answer-model.js';
+import { MISSING_ANSWER, shortAnswer, chooseAnswer } from './export-answers.js';
 
 const A4 = { w: 595.28, h: 841.89 };
 const MARGIN = { top: 46, bottom: 42, left: 38, right: 38 };
@@ -48,22 +49,34 @@ export function unitScale(page) {
 // 글자(한글) → PNG. pdf-lib 기본 글꼴은 한글이 없으므로 캔버스로 그려 이미지로 넣습니다.
 // ---------------------------------------------------------------------------
 const SS = 4; // 해상도 배율
-function textImage(text, { size = 9, bold = false, color = '#333', maxWidthPt = 0 } = {}) {
+function textImage(text, { size = 9, bold = false, color = '#333', maxWidthPt = 0, wrap = false } = {}) {
   const font = `${bold ? '700 ' : ''}${size * SS}px ${FONT_STACK}`;
   const probe = createCanvas(10, 10).getContext('2d');
   probe.font = font;
   let str = text;
-  if (maxWidthPt > 0) {
+  if (!wrap && maxWidthPt > 0) {
     while (str.length > 1 && probe.measureText(str).width / SS > maxWidthPt) str = str.slice(0, -2) + '…';
   }
-  const width = Math.ceil(probe.measureText(str).width) + 2 * SS;
-  const height = Math.ceil(size * 1.45 * SS);
+  const lines = [];
+  if (wrap && maxWidthPt > 0) {
+    let line = '';
+    for (const char of str) {
+      if (char === '\n' || (line && probe.measureText(line + char).width / SS > maxWidthPt - 2)) {
+        lines.push(line); line = '';
+      }
+      if (char !== '\n') line += char;
+    }
+    lines.push(line);
+  } else lines.push(str);
+  const width = Math.ceil(Math.max(...lines.map(line => probe.measureText(line).width))) + 2 * SS;
+  const lineH = Math.ceil(size * 1.45 * SS);
+  const height = lineH * lines.length;
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
   ctx.font = font;
   ctx.fillStyle = color;
   ctx.textBaseline = 'middle';
-  ctx.fillText(str, SS, height / 2);
+  lines.forEach((line, i) => ctx.fillText(line, SS, lineH * (i + 0.5)));
   return { canvas, wPt: width / SS, hPt: height / SS };
 }
 
@@ -359,15 +372,40 @@ async function buildPdfInner({ blocks, sources = {}, options, title, info, onPro
       continue;
     }
 
+    if (block.kind === 'answer-table') {
+      const probe = createCanvas(10, 10).getContext('2d');
+      probe.font = `${9 * SS}px ${FONT_STACK}`;
+      const fits = text => probe.measureText(text).width / SS + 2 <= colW;
+      let row = '';
+      const flush = async () => {
+        if (!row) return;
+        const t = await embedText(out, row, { size: 9, color: '#0f5f58', maxWidthPt: colW });
+        if (y + t.hPt + 4 > colH) await nextColumn();
+        page.drawImage(t.img, { x: MARGIN.left + col * (colW + COL_GAP), y: A4.h - MARGIN.top - headH - y - t.hPt, width: t.wPt, height: t.hPt });
+        y += t.hPt + 4; row = '';
+      };
+      for (const cell of block.cells) {
+        const text = `${cell.num} ${cell.text}${cell.source ? ` (${cell.source})` : ''}`;
+        if (row && !fits(`${row}   ${text}`)) await flush();
+        // 긴 출처도 자르지 않고 다음 줄로 이어 씀
+        for (const char of (row ? '   ' : '') + text) {
+          if (row && !fits(row + char)) await flush();
+          row += char;
+        }
+      }
+      await flush();
+      continue;
+    }
+
     // 라벨: 굵은 새 번호 + 회색 출처
     let label = null;
     if (block.num || block.source) {
-      const t = labelImage(block.num || '', block.source || '', { color: block.kind === 'answer' ? '#0f5f58' : '#111', maxWidthPt: colW });
+      const t = labelImage(block.num || '', block.source || '', { color: block.kind === 'answer' || block.kind === 'answer-text' ? '#0f5f58' : '#111', maxWidthPt: colW });
       label = { ...t, img: await out.embedPng(await canvasToBytes(t.canvas)) };
     }
     let note = null;
-    if (block.kind === 'note' || (block.segs && block.segs.length === 0 && block.text)) {
-      note = await embedText(out, block.text || '', { size: 9, color: '#888', maxWidthPt: colW });
+    if (block.kind === 'answer-text' || block.kind === 'note' || (block.segs && block.segs.length === 0 && block.text)) {
+      note = await embedText(out, block.text || '', { size: 9, color: block.kind === 'answer-text' ? '#0f5f58' : '#888', maxWidthPt: colW, wrap: block.kind === 'answer-text' });
     }
 
     const segList = block.segs || [];
@@ -415,7 +453,7 @@ async function buildPdfInner({ blocks, sources = {}, options, title, info, onPro
     });
     y += blockH + BLOCK_GAP;
 
-    if (block.kind === 'problem' && block.addSpace) {
+    if (block.addSpace && (block.kind === 'problem' || block.kind === 'answer-text')) {
       if (space.pageBreak) {
         await newPage();
       } else if (space.pt > 0) {
@@ -448,7 +486,7 @@ export function itemName(item) {
 
 /**
  * 선택 항목 → 내보낼 블록 목록
- * @param {'problems'|'answers'|'both-inline'|'both-end'} mode
+ * @param {'problems'|'answers'|'both-inline'|'both-end'|'answer-inline'|'answer-end'} mode
  *    problems: 문제만, answers: 해설만,
  *    both-inline: 문제마다 바로 뒤에 해설, both-end: 문제를 모두 싣고 해설은 맨 뒤에 모아서
  * @param {{problem:object, answer:object|null, src?:{problem,answer}, book?:string}[]} entries 읽는 순서로 정렬된 선택 항목
@@ -467,7 +505,7 @@ export function makeBlocks(mode, entries, options, pageLabel) {
     src: e.src?.problem,
     // 공통 지문은 그 지문을 쓰는 문항마다 실음 (바로 앞 문항과 지문이 같아도 — 문항만 따로 풀 수 있게)
     stem: e.problem.stem?.length ? e.problem.stem : null,
-    addSpace: mode === 'problems' || mode === 'both-end',
+    addSpace: mode === 'problems' || mode === 'both-end' || mode === 'answer-end',
     num: num(i),
     source: where(e),
   });
@@ -479,8 +517,21 @@ export function makeBlocks(mode, entries, options, pageLabel) {
       ? { kind: 'answer', role: 'answer', item: e.answer, src: e.src?.answer, ...base }
       : { kind: 'note', ...base, text: '(답지에서 짝이 되는 해설을 찾지 못했어요)', segs: [] };
   };
+  const answerText = e => shortAnswer(e.exportAnswer) || chooseAnswer(e).answer || MISSING_ANSWER;
+  const shortBlock = (e, i) => ({ kind: 'answer-text', num: num(i),
+    source: opts.labels ? `답 · ${where(e)}` : '답',
+    text: answerText(e), addSpace: true });
 
-  if (mode === 'problems') entries.forEach((e, i) => blocks.push(problemBlock(e, i)));
+  if (mode === 'answer-inline') {
+    entries.forEach((e, i) => blocks.push(problemBlock(e, i), shortBlock(e, i)));
+  } else if (mode === 'answer-end') {
+    entries.forEach((e, i) => blocks.push(problemBlock(e, i)));
+    blocks.push({ kind: 'section', text: '정답', answerSection: true });
+    blocks.push({ kind: 'answer-table', cells: entries.map((e, i) => ({
+      num: opts.renumber ? num(i) : `${e.problem.number}.`, text: answerText(e),
+      source: opts.labels ? `답 · ${where(e)}` : '',
+    })) });
+  } else if (mode === 'problems') entries.forEach((e, i) => blocks.push(problemBlock(e, i)));
   else if (mode === 'answers') entries.forEach((e, i) => blocks.push(answerBlock(e, i)));
   else if (mode === 'both-inline') {
     entries.forEach((e, i) => {

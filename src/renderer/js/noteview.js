@@ -4,6 +4,7 @@ import { h, clear, toast, modal, confirmDialog, icon, animateOut, countUp } from
 import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS, CONVERT_MODES } from './exporter.js';
 import { attachAnswers } from './answers.js';
 import { answerContent } from './answer-model.js';
+import { resolveExportAnswers, mayHaveAnswers } from './export-answers.js';
 import { exportHwpx } from './transcribe.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiLabel, findJob, restartGuard, restartPendingChecks } from './shared.js';
@@ -688,6 +689,8 @@ function exportPanel() {
     );
   const anyAnswers = [...ns.books.values()].some((b) => b.docs.answer?.items?.length || b.docs.problem?.items?.some((item) => answerContent(b.$answers?.items[item.id])));
   const needAns = anyAnswers ? '' : '정답·해설을 직접 쓰거나 답지를 올리세요';
+  const anyShortAnswers = [...ns.books.values()].some(mayHaveAnswers);
+  const needShortAnswer = anyShortAnswers ? '' : '정답을 직접 쓰거나 글자가 있는 답지를 올리세요';
   const exportBtn = (mode, title, sub, tip, disabled) =>
     h('button.export-btn', { onclick: () => doExport(mode), dataset: { mode }, disabled, title: tip }, h('span.xb-icon', icon('download')), h('span.xb-text', h('b', title), sub ? h('small', sub) : null));
   return h(
@@ -744,6 +747,8 @@ function exportPanel() {
       exportBtn('answers', '해설지', '', needAns, !anyAnswers),
       exportBtn('both-inline', '문제 + 해설', '문제마다 바로 뒤에', needAns || '문제마다 바로 뒤에 그 문제의 해설', !anyAnswers),
       exportBtn('both-end', '문제 + 해설', '해설은 맨 뒤에', needAns || '문제를 모두 싣고, 해설은 맨 뒤에 모아서', !anyAnswers),
+      exportBtn('answer-inline', '문제 + 답', '문제마다 바로 뒤에', needShortAnswer || '해설 대신 답만 문제 바로 뒤에', !anyShortAnswers),
+      exportBtn('answer-end', '문제 + 답', '답은 맨 뒤에 모아서', needShortAnswer || '문제를 모두 싣고, 답만 맨 뒤에 모아서', !anyShortAnswers),
     ),
   );
 }
@@ -931,7 +936,7 @@ restartPendingChecks.add(() => pendingExports.size > 0);
 
 async function buildExport(mode) {
   const n = ns.note;
-  const entries = allEntries();
+  let entries = allEntries();
   if (!entries.length) {
     toast('먼저 표에서 문항을 고르세요.', { type: 'error' });
     return;
@@ -943,10 +948,19 @@ async function buildExport(mode) {
   }
   const opts = n.exportOptions;
   await attachAnswers(entries);
+  let missingAnswers = 0;
+  if (mode === 'answer-inline' || mode === 'answer-end') {
+    const close = toast('답을 찾는 중…', { timeout: 0 });
+    try {
+      const result = await resolveExportAnswers(entries);
+      entries = result.entries;
+      missingAnswers = result.missing;
+    } finally { close(); }
+  }
   const jobKey = `hwpx:${n.id}`;
   const label = (role, it, e) => pageLabel(e.bookObj.docs[role], it.page);
   const blocks = makeBlocks(mode, entries, opts, label);
-  const modeName = { problems: '문제지', answers: '해설지', 'both-inline': '문제+해설', 'both-end': '문제+해설(해설 뒤)' }[mode];
+  const modeName = { problems: '문제지', answers: '해설지', 'both-inline': '문제+해설', 'both-end': '문제+해설(해설 뒤)', 'answer-inline': '문제+답', 'answer-end': '문제+답(답 뒤)' }[mode];
   const info = examInfo();
   // 이 오답노트의 한글 문서를 뒤에서 만드는 중: 내용이 같으면 그 창을 보여 주고,
   // 멈추는 중이거나 그 사이 오답노트를 고쳤으면 그것을 멈추고 고친 내용으로 새로 만듦
@@ -961,7 +975,7 @@ async function buildExport(mode) {
     old.cancel();
     await old.finished;
   }
-  const sub = { problems: `문제 ${entries.length}문항`, answers: `해설 ${entries.length}문항`, 'both-inline': `문제·해설 ${entries.length}문항`, 'both-end': `문제 ${entries.length}문항 · 정답 및 해설` }[mode];
+  const sub = { problems: `문제 ${entries.length}문항`, answers: `해설 ${entries.length}문항`, 'both-inline': `문제·해설 ${entries.length}문항`, 'both-end': `문제 ${entries.length}문항 · 정답 및 해설`, 'answer-inline': `문제·답 ${entries.length}문항`, 'answer-end': `문제 ${entries.length}문항 · 정답` }[mode];
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
   const btn = document.querySelector(`.export-btn[data-mode="${mode}"]`);
@@ -990,6 +1004,7 @@ async function buildExport(mode) {
           { label: '폴더 보기', onClick: () => api.showItemInFolder(r.path) },
         ],
       });
+      if (missingAnswers) toast(`답을 찾지 못한 문항 ${missingAnswers}개`, { timeout: 10000 });
     };
     if (hwpx) {
       const bytes = await exportHwpx(blocks, entries, opts, { ...info, subtitle: sub }, { key: jobKey, sig });
@@ -1114,7 +1129,7 @@ async function applyChange(change) {
 
 /** 한글 문서 내용이 같은지 견주는 열쇠 (문항·영역·지문·번호·출처 + 내보내기 설정·시험지 머리) */
 function exportSig(mode, blocks, opts, info) {
-  return JSON.stringify({ mode, opts, info, blocks: blocks.map((b) => [b.kind, b.item?.id, b.item?.rects, b.stem, b.num, b.source, b.text, b.answerBlocks]) });
+  return JSON.stringify({ mode, opts, info, blocks: blocks.map((b) => [b.kind, b.item?.id, b.item?.rects, b.stem, b.num, b.source, b.text, b.answerBlocks, b.cells]) });
 }
 
 

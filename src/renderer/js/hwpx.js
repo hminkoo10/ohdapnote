@@ -579,6 +579,10 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
     tiny: head.char({ size: 300 }),
     pageNum: sans({ size: 900, color: '#595959' }),
   };
+  if (blocks.some(b => b.kind === 'answer-text' || b.kind === 'answer-table')) {
+    C.answerText = sans({ size: 900, color: '#0F5F58' });
+    C.answerHeading = sans({ size: 1300, bold: true, color: '#0F5F58' });
+  }
   const solid = (width, color) => ['SOLID', width, color];
   const cellLine = solid('0.12 mm', '#A9B4C4');
   const allSides = (l) => ({ left: l, right: l, top: l, bottom: l });
@@ -762,9 +766,32 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
     }
     if (block.kind === 'section') {
       breakPage();
-      addPara(PP.section, [{ cp: C.section, xml: text(block.text) }]);
+      addPara(block.answerSection ? head.para({ align: 'LEFT', line: 130, next: 1000 }) : PP.section, [{ cp: block.answerSection ? C.answerHeading : C.section, xml: text(block.text) }]);
       preview.push('', block.text);
       atTop = false;
+      continue;
+    }
+    if (block.kind === 'answer-text' || block.kind === 'answer-table') {
+      const lines = [];
+      if (block.kind === 'answer-text') lines.push([block.num, block.source, block.text].filter(Boolean).join(' '));
+      else {
+        let row = '';
+        for (const cell of block.cells) {
+          const value = `${cell.num} ${cell.text}${cell.source ? ` (${cell.source})` : ''}`;
+          if (row && textWidth(`${row}   ${value}`, 900) > colW) { lines.push(row); row = ''; }
+          row += (row ? '   ' : '') + value;
+        }
+        if (row) lines.push(row);
+      }
+      for (const line of lines) {
+        addPara(head.para({ align: 'LEFT', line: 150, next: 300 }), [{ cp: C.answerText, xml: text(line) }]);
+        preview.push(line);
+      }
+      atTop = false;
+      if (block.addSpace) {
+        if (space.pageBreak) breakPage();
+        else if (space.pt > 0) addPara(head.para({ align: 'LEFT', line: 100, next: Math.max(0, space.pt * PT - 1000) }), [{ cp: C.body }]);
+      }
       continue;
     }
     const prep = prepared.get(block);
