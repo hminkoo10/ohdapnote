@@ -24,6 +24,19 @@ const PDF_OPTIONS = {
 /** 이미지 페이지의 가상 폭(pt). A4 폭에 맞춰 크기를 정규화합니다. */
 const IMAGE_VIRTUAL_WIDTH = 595.28;
 
+/**
+ * 한 PDF 에서 불러온 글꼴이 이보다 많으면, 다른 쪽으로 넘어갈 때 pdf.js 캐시를 비운다(_usePdfPage).
+ * 받아 둔 시험 PDF 2,445개 가운데 100개를 넘는 것은 글꼴 객체를 글자 묶음마다 따로 둔 해설 4개뿐이다(나머지는 많아야 86개).
+ */
+const MAX_LOADED_FONTS = 100;
+const PDF_FONT_ID = /^g_d\d+_f\d+$/; // pdf.js 가 불러온 글꼴에 붙이는 이름
+
+function countLoadedFonts(commonObjs) {
+  let n = 0;
+  for (const [id] of commonObjs || []) if (PDF_FONT_ID.test(id)) n++;
+  return n;
+}
+
 export function bookFileUrl(bookId, name) {
   return `app://book/${encodeURIComponent(bookId)}/${encodeURIComponent(name)}`;
 }
@@ -58,6 +71,7 @@ export class DocSource {
     /** @type {{fileIndex:number, pageIndex:number, kind:'pdf'|'image', w:number, h:number, rotate:number}[]} */
     this.pages = [];
     this._pdfDocs = new Map();
+    this._pdfUse = new Map(); // 파일별: 진행 중인 작업 수, 마지막으로 쓴 쪽, 캐시 비우는 중인지, 글꼴 목록(commonObjs)
     this._images = new Map();
     this._imageLoads = new Map();
     this._imageUsers = new Map();
@@ -81,9 +95,12 @@ export class DocSource {
         const doc = await task.promise;
         this._pdfDocs.set(fi, doc);
         this._tasks.push(task);
+        const use = { busy: 0, page: -1, cleaning: null, failed: false, commonObjs: null };
+        this._pdfUse.set(fi, use);
         f.pageCount = doc.numPages;
         for (let p = 0; p < doc.numPages; p++) {
           const page = await doc.getPage(p + 1);
+          use.commonObjs ??= page.commonObjs; // 문서 전체가 함께 쓰는 목록
           const vp = page.getViewport({ scale: 1 });
           this.pages.push({ fileIndex: fi, pageIndex: p, kind: 'pdf', w: vp.width, h: vp.height, rotate: page.rotate || 0 });
           page.cleanup();
@@ -178,15 +195,16 @@ export class DocSource {
     const offX = rect.x * fullW;
     const offY = rect.y * fullH;
     if (p.kind === 'pdf') {
-      const page = await this.getPdfPage(i);
-      const viewport = page.getViewport({ scale: scalePx });
-      await page.render({
-        canvas,
-        viewport,
-        transform: [1, 0, 0, 1, -offX, -offY],
-        background: 'rgb(255,255,255)',
-        annotationMode: pdfjsLib.AnnotationMode.ENABLE,
-      }).promise;
+      await this._usePdfPage(i, async (page) => {
+        const viewport = page.getViewport({ scale: scalePx });
+        await page.render({
+          canvas,
+          viewport,
+          transform: [1, 0, 0, 1, -offX, -offY],
+          background: 'rgb(255,255,255)',
+          annotationMode: pdfjsLib.AnnotationMode.ENABLE,
+        }).promise;
+      });
     } else {
       await this._withImage(p.fileIndex, (bitmap) => {
         const k = bitmap.width / fullW; // 화면 px → 이미지 px
@@ -205,7 +223,10 @@ export class DocSource {
   async getTextTokens(i) {
     const p = this.pages[i];
     if (p.kind !== 'pdf') return [];
-    const page = await this.getPdfPage(i);
+    return this._usePdfPage(i, (page) => this._textTokens(page));
+  }
+
+  async _textTokens(page) {
     const vp = page.getViewport({ scale: 1 });
     let content;
     try {
@@ -278,13 +299,12 @@ export class DocSource {
     // 같은 파일에서 3쪽 연달아 그랬다면 스캔 앱으로 만든 PDF 로 보고 더 검사하지 않음(쪽 이미지를 다시 읽느라 느림)
     const streak = this._hiddenStreak.get(p.fileIndex) || 0;
     if (streak >= 3) return true;
-    const hidden = await this._checkHiddenText(i);
+    const hidden = await this._usePdfPage(i, (page) => this._checkHiddenText(page));
     this._hiddenStreak.set(p.fileIndex, hidden ? streak + 1 : 0);
     return hidden;
   }
 
-  async _checkHiddenText(i) {
-    const page = await this.getPdfPage(i);
+  async _checkHiddenText(page) {
     // 방금 그린 쪽이면 pdf.js 가 그릴 때 받아 둔 명령 목록을 그대로 씀 (다시 받으면 도형이 많은 쪽은 0.3초쯤 걸림)
     let ops = [...(page._intentStates?.values() || [])].find((s) => s.operatorList?.lastChunk)?.operatorList;
     try {
@@ -316,11 +336,39 @@ export class DocSource {
     const p = this.pages[i];
     if (!p || p.kind !== 'pdf') return null;
     if (!this._mathLayers.has(i)) {
-      this._mathLayers.set(i, this.getPdfPage(i).then((page) => readPageLayer(page, pdfjsLib)).catch(() => null));
+      this._mathLayers.set(i, this._usePdfPage(i, (page) => readPageLayer(page, pdfjsLib)).catch(() => null));
       // 메모리를 위해 최근 쪽 몇 개만 유지
       if (this._mathLayers.size > 16) this._mathLayers.delete(this._mathLayers.keys().next().value);
     }
     return this._mathLayers.get(i);
+  }
+
+  /**
+   * PDF 쪽 하나로 하는 작업(그리기·글자 읽기)을 감쌉니다.
+   * 글자 묶음마다 글꼴 객체를 따로 둔 PDF 가 있다(해설 4쪽에 같은 한글 글꼴을 가리키는 글꼴 객체 1,300개).
+   * pdf.js 는 이 글꼴을 하나하나 변환해 문서를 닫거나 정리할 때까지 들고 있어서, 쪽을 그릴 때마다 1GB 남짓 쌓인다.
+   * 그래서 불러온 글꼴이 많으면 다른 쪽으로 넘어갈 때 문서를 정리(cleanup)해 글꼴·그림 캐시를 비운다.
+   *  - 그리는 중에는 정리하면 안 되고(pdf.js), 글꼴을 기다리는 중(pdfmath.js)에 비우면 그 글꼴이 오지 않는다.
+   *    그래서 이 문서로 하는 작업이 하나도 없을 때만 정리하고, 정리하는 동안 새 작업은 기다린다.
+   *  - 같은 쪽 작업 사이(그린 뒤 글자 읽기)에는 비우지 않는다. 글자 읽기가 그릴 때 받은 글꼴 이름·굵기를 쓴다.
+   */
+  async _usePdfPage(i, use) {
+    const fi = this.pages[i].fileIndex;
+    const st = this._pdfUse.get(fi);
+    while (st.cleaning) await st.cleaning;
+    if (!st.busy && !st.failed && st.page !== i && countLoadedFonts(st.commonObjs) > MAX_LOADED_FONTS) {
+      st.cleaning = this._pdfDocs.get(fi).cleanup()
+        .catch(() => { st.failed = true; }) // 정리하지 못하면 이 문서는 더 정리하지 않는다(글꼴을 들고 있을 뿐 결과는 같다)
+        .finally(() => { st.cleaning = null; });
+      await st.cleaning;
+    }
+    st.busy++;
+    st.page = i;
+    try {
+      return await use(await this.getPdfPage(i));
+    } finally {
+      st.busy--;
+    }
   }
 
   /** 내보내기용: 원본 파일 바이트 */
