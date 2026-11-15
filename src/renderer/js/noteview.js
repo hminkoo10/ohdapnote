@@ -5,7 +5,7 @@ import { buildPdf, makeBlocks, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS, 
 import { attachAnswers } from './answers.js';
 import { answerContent } from './answer-model.js';
 import { resolveExportAnswers, mayHaveAnswers, missingAnswerMessage } from './export-answers.js';
-import { exportHwpx, loadTranscripts, saveTranscripts, transcribeAiBlocks } from './transcribe.js';
+import { exportHwpx, fallbackSummary, loadTranscripts, saveTranscripts, transcribeAiBlocks } from './transcribe.js';
 import { pageLabel, computeMatches, findItem, missingNumbers, noteSelection, setNoteSelection, noteSelectedCount, selectedItems, parseQuickSelect } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSources, renderPreview, renderQTable, geminiReady, aiOff, aiLabel, findJob, restartGuard, restartPendingChecks, holdSource } from './shared.js';
 import { topbar } from './chrome.js';
@@ -1027,7 +1027,8 @@ async function buildExportHeld(mode, releases) {
     if (hwpx) {
       const bytes = await exportHwpx(blocks, entries, opts, { ...info, subtitle: sub }, { key: jobKey, sig });
       closeToast();
-      if (bytes.stats?.picture && bytes.stats?.text) note = ` (그림으로 넣은 문항 ${bytes.stats.picture}개)`;
+      const fallback = fallbackSummary(bytes.fallbacks);
+      if (fallback) note = ` · ${fallback}`;
       if (bytes.reviewCount) note += ` · 확인 필요 ${bytes.reviewCount}군데`;
       const save = () => api.saveFile({ defaultName: `${fname}.hwpx`, data: bytes, filters: [{ name: '한글 문서', extensions: ['hwpx'] }], title: '한글 문서 저장' });
       // 옮기기를 뒤로 보내 둔 채 끝났으면 저장 창을 바로 띄우지 않고 알림의 [저장하기]로 (다른 화면을 보고 있을 수 있음)
