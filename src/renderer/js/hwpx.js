@@ -529,9 +529,10 @@ export function blockSegs(block, sources = {}) {
  *   transcribe?(block, segs) → Promise<null | {blocks:{type:'para'|'math'|'choices'|'figure', text?, latex?, items?, box?}[], crop?(box)→Promise<Img>}>
  *       null 이거나 실패하면 그 문항은 그림으로. AbortError 는 그대로 던짐(내보내기 취소)
  *   renderSeg?(seg) → Promise<Img>   Img = {bytes:Uint8Array, ext:'jpg'|'png', pxW, pxH}
+ *   onPicture?(block, error)        원본 그림으로 넣은 문항 (옮기기 예외가 있으면 함께 전달)
  * @returns {Promise<Uint8Array>} .hwpx 파일 내용 (결과.stats = {text, picture} 문항 수)
  */
-export async function buildHwpx({ blocks, sources = {}, options, title, info, onProgress, transcribe, renderSeg = renderSegImage, readFigure = readAnswerFigure }) {
+export async function buildHwpx({ blocks, sources = {}, options, title, info, onProgress, transcribe, onPicture, renderSeg = renderSegImage, readFigure = readAnswerFigure }) {
   const opts = { ...DEFAULT_EXPORT_OPTIONS, ...(options || {}) };
   const exam = { title: title || '오답노트', ...(info || {}) };
   const cols = Math.max(1, Math.min(2, opts.columns | 0));
@@ -545,17 +546,19 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
   for (const block of work) {
     const segs = blockSegs(block, sources);
     let t = block.answerBlocks ? { blocks: block.answerBlocks } : null;
+    let error = null;
     if (transcribe && !t) {
       try {
         t = await transcribe(block, segs);
       } catch (err) {
         if (err?.name === 'AbortError') throw err;
         console.warn('글자로 옮기기 실패 → 그림으로', err);
+        error = err;
         t = null;
       }
     }
     if (!t?.blocks?.length) t = null;
-    prepared.set(block, { segs, t });
+    prepared.set(block, { segs, t, error });
     onProgress?.(++done, work.length);
   }
 
@@ -862,6 +865,7 @@ export async function buildHwpx({ blocks, sources = {}, options, title, info, on
         list.push({ spec: { align: 'LEFT', line: 100, next: 200, fill: stemEnd ? F.stemLine : 2 }, runs: [picRun(img, w, h)] });
       }
       preview.push('[그림]');
+      onPicture?.(block, prep.error);
     }
 
     // 번호: 첫 문단이 글이면 그 앞에 내어 쓰고, 아니면(그림·가운데 수식) 번호만 한 줄

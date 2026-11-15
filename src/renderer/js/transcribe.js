@@ -116,6 +116,31 @@ export async function pdfTranscribe(segs, { plain = false } = {}) {
   }
 }
 
+const transcribeItemName = (b) => b.item.passage ? itemName(b.item) : `${b.kind === 'answer' ? '해설' : '문제'} ${itemName(b.item)}`;
+
+/**
+ * 이 컴퓨터에서 난 오류만 사용. 이름 OutOfMemoryError 또는 메시지 앞의 명시적인
+ * 'out of memory'·'not enough memory'·'메모리(가) 부족' 진단만 메모리 부족으로 판단.
+ * Error·RuntimeError·RangeError 접두사는 허용하되 부정문·원인 불명 문구는 제외.
+ * RangeError·배열 크기·할당 실패·자원 부족만으로는 원인을 단정하지 않음.
+ */
+export function fallbackHint(err) {
+  const message = (err?.message || '').trim().replace(/^(?:Error|RuntimeError|RangeError):\s*/i, '');
+  return err?.name === 'OutOfMemoryError'
+    || /^(?:out of memory|not enough memory)(?:$|[.!:]|\s+(?:for|to|while|when)\b)/i.test(message)
+    || /^메모리(?:가)?\s*부족(?:합니다|해요|함)?[.!]?$/.test(message)
+    ? '다른 프로그램을 닫고 다시 해 보세요.' : '';
+}
+
+/** 이번 내보내기에서 못 옮겨 원본 그림으로 넣은 문항만 안내. */
+export function fallbackSummary(fallbacks, { retry = false } = {}) {
+  if (!fallbacks?.length) return '';
+  const names = fallbacks.slice(0, 3).map((f) => f.name).join(', ');
+  const rest = fallbacks.length > 3 ? ` 외 ${fallbacks.length - 3}개` : '';
+  const hints = [...new Set(fallbacks.map((f) => f.hint).filter(Boolean))].join(' ');
+  return `${fallbacks.length}문항은 글자로 옮기지 못해 그림으로 넣었어요: ${names}${rest}.${hints ? ` ${hints}` : ''}${retry ? ' 다시 내보내면 다시 시도해요.' : ''}`;
+}
+
 /** HWPX·답 내보내기가 함께 쓰는 AI 묶음 옮김. 결과는 같은 저장소·열쇠에 남긴다. */
 export async function transcribeAiBlocks(pending, {
   storeOf, options = aiOptions(), signal,
@@ -250,15 +275,48 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
   let ui = null;
   const releases = [];
   const settled = new Set();
+  const attempted = new Map(); // 문항 → 시도한 방법 (인식 수단이 없는 경우와 구별)
+  const failureReasons = new Map();
+  const usedResults = new Map();
+  const fallbacks = new Map(); // 메모리에만 둠. 실패를 저장하면 다음에 다시 인식하지 않음
+  const openDialog = (counts) => {
+    ui = transcribeDialog(work, { ...counts, useAi, useOcr }, abort, {
+      ...job,
+      jobTitle: `${info.student ? `${info.student} · ` : ''}한글 문서 (문항 ${work.length}개)`,
+    });
+    // 뒤에서 도는 동안 다른 책을 열어도 이 원본들은 닫히지 않게
+    for (const e of entries) for (const role of ['problem', 'answer']) releases.push(holdSource(e.bookObj, role));
+  };
   const settle = (b, stateName, msg, path) => {
     ui.row(b).set(stateName, msg, path);
     settled.add(b);
     ui.progress(settled.size, work.length);
   };
+  const failed = (b, stateName, error, path) => {
+    const why = typeof error === 'string' ? error : error.message;
+    failureReasons.set(b, { reason: why, hint: path === 'OCR' ? fallbackHint(error) : '' });
+    settle(b, stateName, `${why} → 그림으로`, path);
+  };
+  const onPicture = (b, err) => {
+    if (!attempted.has(b) && !usedResults.has(b)) return;
+    const failure = failureReasons.get(b);
+    const reason = err?.message || failure?.reason || '한글 문서에 넣을 내용이 없음';
+    const hint = fallbackHint(err) || failure?.hint;
+    fallbacks.set(b, { bookId: bookOf.get(b.src), role: b.role, itemId: b.item.id, name: transcribeItemName(b), reason, ...(hint ? { hint } : {}) });
+    const used = usedResults.get(b);
+    // 예외가 아니라 블록에 넣을 내용이 없는 자동 결과(OCR·AI·PDF)만 지움.
+    // 일시적인 그림 자르기 예외, 사람이 고친 글, 도중 바뀐 결과는 보존.
+    if (!err && used?.entry && !used.key.endsWith('|edit') && used.store.items[used.key] === used.entry) {
+      delete used.store.items[used.key];
+      used.store.dirty = true;
+    }
+    if (ui) settle(b, reason === '읽은 내용이 없음' || reason === '한도 초과' ? 'empty' : 'err', `${reason} → 그림으로`, attempted.get(b) || '');
+  };
   /** AI 가 못 옮긴 문항: OCR 결과가 있으면 그것으로, 없으면 그림으로 */
   const aiFailed = (b, why) => {
+    attempted.set(b, 'AI');
     if (has(ocrResult(b))) settle(b, 'ok', `${why} → 스캔 인식`, 'OCR');
-    else settle(b, why === '읽은 내용이 없음' || why === '한도 초과' ? 'empty' : 'err', `${why} → 그림으로`, 'AI');
+    else failed(b, why === '읽은 내용이 없음' || why === '한도 초과' ? 'empty' : 'err', why, 'AI');
   };
 
   /** 이 컴퓨터에서 옮기기 (문항 둘을 겹쳐서: 하나가 수식을 인식하는 동안 다음 문항의 글자를 읽음) */
@@ -268,6 +326,7 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
       while (next < pending.length) {
         if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
         const b = pending[next++];
+        attempted.set(b, 'OCR');
         const row = ui.row(b);
         row.set('run', '글자 읽는 중…', 'OCR');
         try {
@@ -276,7 +335,7 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
           if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
           if (!r.blocks.length) {
             if (useAi) row.set('wait', '읽은 내용이 없음 → 정밀 인식', 'OCR');
-            else settle(b, 'empty', '읽은 내용이 없음 → 그림으로', 'OCR');
+            else failed(b, 'empty', '읽은 내용이 없음', 'OCR');
             continue;
           }
           const store = storeOf(b);
@@ -290,7 +349,7 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
           if (err?.name === 'AbortError' || abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
           console.warn('OCR 로 옮기지 못함', err);
           if (useAi) row.set('wait', `${err.message} → 정밀 인식`, 'OCR');
-          else settle(b, 'err', `${err.message} → 그림으로`, 'OCR');
+          else failed(b, 'err', err, 'OCR');
         }
       }
     };
@@ -299,7 +358,10 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
 
   const runAi = (pending) => transcribeAiBlocks(pending, {
     storeOf, options: { batch: batchSize, ...ai }, signal: abort.signal,
-    onStart: (b) => ui.row(b).set('run', '옮기는 중…', 'AI'),
+    onStart: (b) => {
+      attempted.set(b, 'AI');
+      ui.row(b).set('run', '옮기는 중…', 'AI');
+    },
     onResult: (b, r) => settle(b, 'ok', `글자·수식으로 옮김 · ${r.model || '기본 모델'}`, 'AI'),
     onError: (b, err) => aiFailed(b, err.message),
     onStatus: (msg) => ui.status(msg),
@@ -311,7 +373,9 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
     let stack = null;
     const getStack = async () => (stack ||= await renderStack(segs, TRANSCRIBE_WIDTH));
     // 그림(그래프·도형)은 바로 잘라 두고 큰 canvas 는 버림
-    const finish = async (list) => {
+    const finish = async (list, key) => {
+      const store = storeOf(block);
+      usedResults.set(block, { store, key, entry: store?.items[key] });
       reviewCount += countLow(list);
       const crops = new Map();
       for (const b of list) if (b.type === 'figure') crops.set(b.box, await cropImage(await getStack(), b.box));
@@ -324,10 +388,10 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
         },
       };
     };
-    if (edited(block)?.blocks?.length) return finish(edited(block).blocks);
-    if (fromPdf.has(block)) return finish(fromPdf.get(block));
+    if (edited(block)?.blocks?.length) return finish(edited(block).blocks, `${transcriptKey(block)}|edit`);
+    if (fromPdf.has(block)) return finish(fromPdf.get(block), `${transcriptKey(block)}|pdf`);
     const r = (useAi || useOcr) && storeOf(block) ? resultOf(block) : null;
-    return r ? finish(r.blocks) : null;
+    return r ? finish(r.blocks, r === aiResult(block) ? aiKey(block) : ocrKey(block)) : null;
   };
 
   try {
@@ -335,12 +399,7 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
       const pendingOcr = useOcr ? scanned.filter((b) => !has(aiResult(b)) && !has(ocrResult(b))) : [];
       const pendingAi = scanned.filter((b) => !pendingOcr.includes(b) && needsAi(b));
       if (pendingOcr.length || pendingAi.length) {
-        ui = transcribeDialog(work, { ocr: pendingOcr.length, ai: pendingAi.length, useAi, useOcr }, abort, {
-          ...job,
-          jobTitle: `${info.student ? `${info.student} · ` : ''}한글 문서 (문항 ${work.length}개)`,
-        });
-        // 뒤에서 도는 동안 다른 책을 열어도 이 원본들은 닫히지 않게
-        for (const e of entries) for (const role of ['problem', 'answer']) releases.push(holdSource(e.bookObj, role));
+        openDialog({ ocr: pendingOcr.length, ai: pendingAi.length });
         for (const b of work) {
           if (edited(b)?.blocks?.length) settle(b, 'ok', '고친 글', '고침');
           else if (fromPdf.has(b)) settle(b, 'ok', 'PDF 글자로 옮김', 'PDF');
@@ -359,9 +418,11 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
         ui.status('한글 문서를 만드는 중…');
       }
     }
-    const bytes = await buildHwpx({ blocks, options: opts, title: info.title, info, transcribe });
+    const bytes = await buildHwpx({ blocks, options: opts, title: info.title, info, transcribe, onPicture });
+    bytes.fallbacks = work.filter((b) => fallbacks.has(b)).map((b) => fallbacks.get(b));
+    ui?.summary(bytes.fallbacks);
     bytes.reviewCount = reviewCount;
-    bytes.job = ui; // 옮기기 창을 띄웠으면 부른 쪽이 finish() — 앞에 보이면 창을 닫고, 뒤로 보내 두었으면 [저장하기] 알림
+    bytes.job = ui; // 부른 쪽이 finish() — 앞에서는 실패 요약만 남기고, 뒤에서는 [저장하기] 알림
     return bytes;
   } catch (err) {
     ui?.finish();
@@ -398,7 +459,7 @@ function transcribeDialog(work, { ocr, ai: aiCount, useAi, useOcr }, abort, { ke
         'div.gem-row',
         { dataset: { state: 'wait' } },
         h('span.gem-dot'),
-        h('strong', b.item.passage ? itemName(b.item) : `${b.kind === 'answer' ? '해설' : '문제'} ${itemName(b.item)}`),
+        h('strong', transcribeItemName(b)),
         h('span.gem-path'),
         h('span.gem-msg.muted', '기다리는 중'),
       );
@@ -409,6 +470,7 @@ function transcribeDialog(work, { ocr, ai: aiCount, useAi, useOcr }, abort, { ke
   const how = useOcr && useAi ? `필요한 문항만 외부 서비스로 보내요.` : useOcr ? '이 컴퓨터에서 읽어요. 문항당 몇 초~수십 초 걸려요.' : `문항을 외부 서비스로 보내요.`;
   const status = h('div.small.muted.gem-status', useAi ? `모델: ${aiModelText()}` : '수식 인식: 이 컴퓨터 (Pix2Text)');
   const bar = h('div.progress-bar');
+  const summary = h('p.small.gem-summary', { hidden: true, role: 'status' });
   const jd = jobDialog({
     key,
     sig,
@@ -418,6 +480,7 @@ function transcribeDialog(work, { ocr, ai: aiCount, useAi, useOcr }, abort, { ke
     title: `문항 ${work.length}개를 글자·수식으로`,
     body: h(
       'div.gem-run',
+      summary,
       h('p.small.muted', `${ocr + aiCount}문항 — ${how} 못 옮긴 문항은 그림으로 넣어요.`),
       h('div.progress', bar),
       status,
@@ -450,10 +513,14 @@ function transcribeDialog(work, { ocr, ai: aiCount, useAi, useOcr }, abort, { ke
       bar.style.width = `${Math.round((done / Math.max(1, total)) * 100)}%`;
       jd.job.progress({ done, total });
     },
-    /** 끝: 창이 앞에 있으면 닫고 false, 뒤로 보내 두었고 r.message 가 있으면 알림(토스트·윈도우)을 띄우고 true */
+    summary: (fallbacks) => {
+      summary.textContent = fallbackSummary(fallbacks, { retry: true });
+      summary.hidden = !summary.textContent;
+    },
+    /** 끝: 앞에 보이면 실패 요약이 있을 때만 남김. 뒤에 있으면 기존 알림을 씀. */
     finish(r) {
       const bg = jd.finish(r);
-      if (!bg) jd.close();
+      if (!bg && !summary.textContent) jd.close();
       return bg;
     },
   };

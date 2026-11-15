@@ -6,7 +6,7 @@ import { SUBJECTS, subjectName, contractedSubjects, subjectOpen } from './subjec
 import { pageLabel } from './store.js';
 import { buildPdf, itemName, SPACE_OPTIONS, DEFAULT_EXPORT_OPTIONS, CONVERT_MODES } from './exporter.js';
 import { bankEntries, filterBank, librarySelected, orderPicked, makeBankBlocks, bankTargets, passageItem, blocksToText, choiceMark, reviewMarks, exportReviewCount } from './bank.js';
-import { loadTranscripts, bestTranscript, setEditedTranscript, clearEditedTranscript, exportHwpx } from './transcribe.js';
+import { loadTranscripts, bestTranscript, setEditedTranscript, clearEditedTranscript, exportHwpx, fallbackSummary } from './transcribe.js';
 import { putBank } from './bank-transcribe.js';
 import { answerEditorButton, showAnswerPreview } from './answer-editor.js';
 import { attachAnswers } from './answers.js';
@@ -511,6 +511,7 @@ async function buildBankExport(mode, all) {
     const lowOf = (entry, block) => countLow(bestTranscript(entry.bookId, block)?.entry.blocks);
     let remaining = exportReviewCount(blocks, entries, lowOf);
     const reviewNote = () => remaining ? ` · 확인 필요 ${remaining}군데` : '';
+    let fallbackNote = '';
     const sig = JSON.stringify({ mode, opts, info, blocks: blocks.map((b) => [b.item?.id, b.item?.rects, b.num, b.source, b.answerBlocks]) });
     const modeName = { problems: '문제지', answers: '해설지', 'both-inline': '문제+해설', 'both-end': '문제+해설(해설 뒤)' }[mode];
     const d = new Date();
@@ -520,14 +521,16 @@ async function buildBankExport(mode, all) {
       if (res.canceled) return;
       pendingExports.delete(token);
       restartGuard.report();
-      toast(`저장 완료${reviewNote()}`, { type: 'success', timeout: 10000, actions: [{ label: '열기', onClick: () => api.openPath(res.path) }, { label: '폴더 보기', onClick: () => api.showItemInFolder(res.path) }] });
+      toast(`저장 완료${reviewNote()}${fallbackNote}`, { type: 'success', timeout: 10000, actions: [{ label: '열기', onClick: () => api.openPath(res.path) }, { label: '폴더 보기', onClick: () => api.showItemInFolder(res.path) }] });
     };
     if (opts.format === 'hwpx') {
       const bytes = await exportHwpx(blocks, entries, opts, info, { key: 'hwpx:bank', sig });
       remaining = exportReviewCount(blocks, entries, lowOf, bytes.reviewCount || 0);
+      const fallback = fallbackSummary(bytes.fallbacks);
+      if (fallback) fallbackNote = ` · ${fallback}`;
       const token = {};
       const save = () => restartGuard.track('export', async () => saved(await api.saveFile({ defaultName: `${name}.hwpx`, data: bytes, filters: [{ name: '한글 문서', extensions: ['hwpx'] }], title: '한글 문서 저장' }), token));
-      if (bytes.job?.finish({ message: `한글 시험지 준비 완료${reviewNote()}`, actions: [{ label: '저장하기', onClick: () => attempt(save) }] })) {
+      if (bytes.job?.finish({ message: `한글 시험지 준비 완료${reviewNote()}${fallbackNote}`, actions: [{ label: '저장하기', onClick: () => attempt(save) }] })) {
         pendingExports.add(token);
         restartGuard.report();
       } else await save();
