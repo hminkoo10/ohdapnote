@@ -15,7 +15,17 @@ const PUNCT_AFTER = /^[,.?!:;)\]」』·…%]$/; // 한글 바로 뒤에 붙는 
 const PUNCT_BEFORE = /^[([「『]$/; // 한글 바로 앞에 붙는 부호 (따옴표는 뺌: 한글 앞 위첨자 "a²의" 의 ² 를 " 로 읽음)
 
 // 문턱값 (h = 본문 한글 글자 높이). 쎈 대수 스캔본 4쪽(문항 55개)에 맞춤
+const LATIN_WORD = /^[\("“‘]*([A-Za-z]+(?:['’-][A-Za-z]+)*)[),.;:?!"”’]*$/;
+const MATH_WORDS = new Set('sin cos tan sec csc cot asin acos atan arcsin arccos arctan sinh cosh tanh sech csch coth log ln lg lim exp max min det mod gcd lcm inf sup arg deg dim ker hom tr rank'.split(' '));
+
 export const T = {
+  latinWordConf: 80,
+  latinSymbolConf: 60,
+  latinMinH: 0.4,
+  latinMaxH: 1.6,
+  latinMinLetters: 2,
+  latinLineMinLetters: 3,
+  latinLineWords: 2,
   hangulConf: 85, // 한글로 믿는 OCR 글자 확신도 (kor+eng)
   hangulConfKor: 90, // 한국어만으로 읽은 것은 더 엄격하게 (수식을 한글로 읽는 일이 더 잦음)
   hangulMinH: 0.8, // 한글 글자 높이 (h 대비)
@@ -235,7 +245,7 @@ export function textHeight(passes, fallback = 0) {
  *  - 두 번 읽은 것(kor+eng, kor)은 겹치면 긴 것·확신도 높은 것 하나만
  * @param passes [{words, kor?}] — kor: 한국어만으로 읽은 결과 (확신도 문턱을 높임)
  * @param comps  잉크 덩어리 (있으면 넓은 상자를 잉크에 맞춤)
- * @returns {{str, x0, y0, x1, y1, conf, kind:'hangul'|'punct'|'jamo', n?, check?}[]} x 순서
+ * @returns {{str, x0, y0, x1, y1, conf, kind:'hangul'|'punct'|'jamo'|'latin', n?, check?}[]} x 순서
  */
 export function textSymbols(passes, h, comps = null) {
   const units = [];
@@ -343,7 +353,39 @@ export function textSymbols(passes, h, comps = null) {
     }
     keep.push(u);
   }
-  // 부호는 한글 바로 옆에 붙은 것만 ("(단," "은?" "때,")
+  // 한글 단위 선택을 마친 뒤 혼합 패스의 라틴 단어만 더함.
+  const latin = [];
+  for (const { words, kor } of passes) {
+    if (kor) continue;
+    for (const w of words || []) {
+      const core = LATIN_WORD.exec(w.str)?.[1];
+      if (!core || MATH_WORDS.has(core.toLowerCase()) || !(w.conf >= T.latinWordConf)) continue;
+      const letters = [...core].filter((s) => /[A-Za-z]/.test(s));
+      if (letters.length < T.latinMinLetters && !['a', 'A', 'I'].includes(core)) continue;
+      const syms = cleanSymbols(w);
+      const normal = (s) => bh(s) >= T.latinMinH * h && bh(s) <= T.latinMaxH * h;
+      if (!normal(w) || syms.map((s) => s.str).join('') !== w.str || !syms.every((s) => s.conf >= T.latinSymbolConf && (!/[A-Za-z]/.test(s.str) || bh(s) <= T.latinMaxH * h))) continue;
+      if (keep.some((k) => (k.kind === 'hangul' || k.kind === 'jamo') && meets(k, w))) continue;
+      const unit = { str: w.str, x0: w.x0, y0: w.y0, x1: w.x1, y1: w.y1, conf: Math.min(w.conf, ...syms.map((s) => s.conf)), kind: 'latin' };
+      latin.push({ unit, letters, restricted: letters.length === 1 || /^[A-Z]+$/.test(core) });
+    }
+  }
+  // 여러 혼합 패스가 있어도 같은 단어를 문장 근거로 중복해서 세지 않음.
+  const candidates = [];
+  for (const c of latin.sort((a, b) => b.unit.conf - a.unit.conf)) {
+    if (!candidates.some((v) => meets(v.unit, c.unit))) candidates.push(c);
+  }
+  const sentences = candidates.filter((c) => candidates.filter((v) => sameLine(c.unit, v.unit) && v.letters.length >= T.latinLineMinLetters && /[a-z]/.test(v.unit.str)).length >= T.latinLineWords);
+  const mixedWords = passes.filter((p) => !p.kor).flatMap((p) => p.words || []);
+  for (const c of sentences) {
+    const normal = sentences.filter((v) => !v.restricted && sameLine(c.unit, v.unit));
+    if (c.letters.length === 1) {
+      const neighbors = [-1, 1].map((side) => mixedWords.filter((w) => sameLine(c.unit, w) && /[A-Za-z가-힣0-9]/.test(w.str) && (side < 0 ? w.x1 <= c.unit.x0 : w.x0 >= c.unit.x1)).sort((a, b) => side * (a.x0 - b.x0))[0]);
+      if (!neighbors.some((w) => w && normal.some((v) => v.unit.str === w.str && v.unit.x0 === w.x0 && v.unit.x1 === w.x1))) continue;
+    } else if (c.restricted && !(normal.some((v) => v.unit.x1 <= c.unit.x0) && normal.some((v) => v.unit.x0 >= c.unit.x1))) continue;
+    keep.push(c.unit);
+  }
+  // 부호는 한글 또는 라틴 단어 바로 옆에 붙은 것만 ("(단," "은?" "때,")
   const near = (p) =>
     keep.some((k) => Math.abs(cy(k) - cy(p)) < 0.7 * h && (PUNCT_BEFORE.test(p.str) ? k.x0 >= p.x1 - 0.2 * h && k.x0 - p.x1 < (/^단/.test(k.str) ? 0.8 : 0.4) * h : p.x0 >= k.x1 - 0.2 * h && p.x0 - k.x1 < 0.4 * h));
   for (const p of others.sort((a, b) => b.conf - a.conf)) {
@@ -578,7 +620,7 @@ export function splitLine(comps, texts, h) {
   }
   const tokens = [];
   const extraText = [];
-  const textComps = comps.filter((c) => unitOf.has(c));
+  const textComps = comps.filter((c) => unitOf.has(c) && unitOf.get(c).kind !== 'latin');
   for (const r of runs) {
     // OCR 글자 상자가 어긋나 한글 한 글자의 일부(식의 ㅣ, 가의 ㅏ, 상의 ㅅ)만 남은 것: 한글 잉크에 바짝 붙은 좁은 조각
     if (bw(r.box) < 0.6 * h && r.comps.length <= 2) {
@@ -623,7 +665,8 @@ export function splitLine(comps, texts, h) {
     if (p.t === 'math') out.push(p);
     else if (last?.t === 'text') {
       const gap = (inkX.get(p.s) || p.s).x0 - (inkX.get(prev) || prev).x1;
-      const sep = gap > T.spaceGap * h && !PUNCT_AFTER.test(p.s.str) && !PUNCT_BEFORE.test(last.s.slice(-1)) ? ' ' : '';
+      const latinGap = prev.kind === 'latin' && p.s.kind === 'latin' && prev !== p.s;
+      const sep = latinGap ? (PUNCT_AFTER.test(p.s.str[0]) ? '' : ' ') : gap > T.spaceGap * h && !PUNCT_AFTER.test(p.s.str) && !PUNCT_BEFORE.test(last.s.slice(-1)) ? ' ' : '';
       const offset = last.s.length + sep.length;
       const low = textLow(p.s).map((mark) => ({ ...mark, start: mark.start + offset, end: mark.end + offset }));
       if (low.length) last.low = [...(last.low || []), ...low];
@@ -672,7 +715,7 @@ export function planScan(img, passes, { number = '', segments = [] } = {}) {
     else if (w < 0.3 * h && hh > T.figureExtent * h) c.kind = 'rule';
     else if (w > T.figureExtent * h && hh > 1.5 * h && borderFraction(c, labels, W, Math.max(3, Math.round(0.08 * h))) >= 0.85) c.kind = 'frame';
   }
-  const inText = (c) => texts.some((s) => s.kind === 'hangul' && cx(c) >= s.x0 && cx(c) <= s.x1 && cy(c) >= s.y0 && cy(c) <= s.y1);
+  const inText = (c) => texts.some((s) => (s.kind === 'hangul' || s.kind === 'latin') && cx(c) >= s.x0 && cx(c) <= s.x1 && cy(c) >= s.y0 && cy(c) <= s.y1);
   const figures = findFigures(comps, h, { isText: inText });
   for (const f of figures) for (const id of f.comps) comps[id].kind = 'figure';
   for (const c of comps) if (!c.kind && c.chroma >= T.colorChroma) c.kind = 'color';
