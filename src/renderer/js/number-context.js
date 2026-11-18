@@ -247,6 +247,17 @@ function localWhitespaceBoundary(g,box,col,hp) {
   }
   return finish();
 }
+function surroundPreserved(color,g,dark,box,hp,hx) {
+  // A filled/tinted badge or band is preservation evidence, not body text.
+  const surround={x0:box.x0-.2*hx,x1:box.x1+.2*hx,y0:box.y0-.2*hp/g.h,y1:box.y1+.2*hp/g.h};
+  if(mean(color,color.fill,surround)>.35 || mean(color,color.pale,surround)>.48 || mean(g,dark,surround)>.65)return 'badge-or-band-preserved';
+  // Closed monochrome number boxes: two horizontal rims and an outside side.
+  const row=(y)=>mean(g,dark,{x0:box.x0-.35*hx,x1:box.x1+.35*hx,y0:y-.5/g.h,y1:y+.5/g.h});
+  const above=[.2,.4,.6].some(d=>row(box.y0-d*hp/g.h)>.6);
+  const below=[.2,.4,.6].some(d=>row(box.y1+d*hp/g.h)>.6);
+  const side=[.2,.4,.6].some(d=>mean(g,dark,{x0:box.x0-d*hx-.5/g.w,x1:box.x0-d*hx+.5/g.w,y0:box.y0,y1:box.y1})>.6);
+  return above && below && side ? 'closed-box-preserved' : null;
+}
 export function lineInteriorEvidence(page, box) {
   const color=page.numberContext, g=color?.line||color, columns=page.contextColumns;
   if(!g || !columns?.length)return {reject:false,gate:'missing-grid-or-ink-columns'};
@@ -261,15 +272,8 @@ export function lineInteriorEvidence(page, box) {
   const col=contextBoundary?{x0:Math.max(baseCol.x0,contextBoundary.x0),x1:baseCol.x1}:baseCol;
   const local={x0:Math.max(col.x0,box.x0-4*hx),x1:box.x0-.12*hx,y0:box.y0,y1:box.y1};
   if(local.x1<=local.x0)return {reject:false,gate:'column-start',...(contextBoundary?{lineProbe:{localXTokens:0,intersectingTokens:0,closest:null,columnBoundary:contextBoundary}}:{})};
-  // A filled/tinted badge or band is preservation evidence, not body text.
-  const surround={x0:box.x0-.2*hx,x1:box.x1+.2*hx,y0:box.y0-.2*hp/g.h,y1:box.y1+.2*hp/g.h};
-  if(mean(color,color.fill,surround)>.35 || mean(color,color.pale,surround)>.48 || mean(g,dark,surround)>.65)return {reject:false,gate:'badge-or-band-preserved'};
-  // Closed monochrome number boxes: two horizontal rims and an outside side.
-  const row=(y)=>mean(g,dark,{x0:box.x0-.35*hx,x1:box.x1+.35*hx,y0:y-.5/g.h,y1:y+.5/g.h});
-  const above=[.2,.4,.6].some(d=>row(box.y0-d*hp/g.h)>.6);
-  const below=[.2,.4,.6].some(d=>row(box.y1+d*hp/g.h)>.6);
-  const side=[.2,.4,.6].some(d=>mean(g,dark,{x0:box.x0-d*hx-.5/g.w,x1:box.x0-d*hx+.5/g.w,y0:box.y0,y1:box.y1})>.6);
-  if(above && below && side)return {reject:false,gate:'closed-box-preserved'};
+  const kept=surroundPreserved(color,g,dark,box,hp,hx);
+  if(kept)return {reject:false,gate:kept};
   const tokens=[...(page.tokens||[]),...(page.ocrPasses||[]).flat()];
   let reached=0;
   const lineProbe={localXTokens:0,intersectingTokens:0,closest:null,...(contextBoundary?{columnBoundary:contextBoundary}:{})};
@@ -311,19 +315,113 @@ export function lineInteriorEvidence(page, box) {
   }
   return {reject:false,gate:tokens.length ? ['no-local-left-token','non-text-or-label','line-height-or-overlap','line-center','left-span','ink-density','solid-core'][reached] : 'no-tokens',lineProbe};
 }
-export function numberContextEvidence(page,box) {
+// Formula interior: one candidate box and connected page-ink components only.
+// No token text, other candidates, number values, order, digit counts or
+// alignment between numbers. Distances are candidate heights (H); the pixel
+// floors are stated for a 1920 px wide page and scaled to this raster.
+// 8-connected components of the whole page, built from row runs (no page-sized
+// label array). Boxes are raster pixels with exclusive x1/y1.
+function inkComponents(g) {
+  const gw=g.w,gh=g.h,bits=g.bits,dark=g.dark;
+  const on=bits?k=>(bits[k>>3]>>(k&7))&1:k=>dark[k]>=64;
+  const parent=[],rx0=[],rx1=[],ry=[];
+  const find=i=>{while(parent[i]!==i)i=parent[i]=parent[parent[i]];return i;};
+  let prevA=0,prevB=0;
+  for(let y=0;y<gh;y++){
+    const rowStart=parent.length,base=y*gw;let p=prevA;
+    for(let x=0;x<gw;x++){
+      if(!on(base+x))continue;
+      let e=x;
+      while(e+1<gw&&on(base+e+1))e++;
+      const id=parent.length;parent.push(id);rx0.push(x);rx1.push(e);ry.push(y);
+      while(p<prevB&&rx1[p]<x-1)p++;
+      for(let q=p;q<prevB&&rx0[q]<=e+1;q++){
+        const a=find(q),b=find(id);
+        if(a!==b)parent[Math.max(a,b)]=Math.min(a,b);
+      }
+      x=e;
+    }
+    prevA=rowStart;prevB=parent.length;
+  }
+  const boxes=new Map();
+  for(let i=0;i<parent.length;i++){
+    const r=find(i),b=boxes.get(r);
+    if(!b)boxes.set(r,{x0:rx0[i],y0:ry[i],x1:rx1[i]+1,y1:ry[i]+1});
+    else{b.x0=Math.min(b.x0,rx0[i]);b.x1=Math.max(b.x1,rx1[i]+1);b.y0=Math.min(b.y0,ry[i]);b.y1=Math.max(b.y1,ry[i]+1);}
+  }
+  return [...boxes.values()];
+}
+const r4=v=>Math.round(v*1e4)/1e4;
+function formulaInteriorEvidence(page,box,shared) {
+  const color=page.numberContext,g=color?.line||color,columns=page.contextColumns;
+  if(!g || !columns?.length)return null;
+  const hp=(box.y1-box.y0)*g.h;
+  if(hp<3)return null;
+  const cx=(box.x0+box.x1)/2;
+  if(!columns.some(c=>cx>=c.x0 && cx<=c.x1))return null;
+  if(surroundPreserved(color,g,g.bits||g.dark,box,hp,hp/g.w))return null;
+  const comps=shared.components||(shared.components=inkComponents(g));
+  const s=g.w/1920,x0=box.x0*g.w,x1=box.x1*g.w,y0=box.y0*g.h,y1=box.y1*g.h;
+  const H=Math.max(y1-y0,4*s),cw=x1-x0,ccx=(x0+x1)/2,ccy=(y0+y1)/2,m=.35*H;
+  // The candidate's own glyph components touch its box and stay near it.
+  const ext=comps.filter(c=>!(c.x0<x1 && c.x1>x0 && c.y0<y1 && c.y1>y0 &&
+    c.x0>=x0-m && c.x1<=x1+m && c.y0>=y0-m && c.y1<=y1+m));
+  // Fraction: a thin stroke wider than the candidate just above/below it, with
+  // ink on the stroke's far side centred on the stroke. The stroke may not be
+  // much wider than both sides together, so a column rule or box edge over a
+  // genuine head and the text above it does not qualify.
+  let bar=null;
+  for(const c of ext){
+    const w=c.x1-c.x0,h=c.y1-c.y0;
+    if(!(h<=Math.max(.2*H,3*s) && w>cw && w>=3*h && c.x0-.1*H<=ccx && ccx<=c.x1+.1*H))continue;
+    for(const side of ['below','above']){
+      const gap=side==='below'?c.y0-y1:y0-c.y1;
+      if(gap>=-.15*H && gap<=1.5*H && (!bar || gap<bar.gap))bar={c,side,gap};
+    }
+  }
+  if(bar && bar.gap<=.6*H){
+    const b=bar.c,bw=b.x1-b.x0;
+    const opp=ext.filter(c=>{
+      const gap=bar.side==='below'?c.y0-b.y1:b.y0-c.y1;
+      return c!==b && gap>=-s && gap<=.6*H && c.x1>b.x0 && c.x0<b.x1 &&
+        Math.max(0,c.x0-x1,x0-c.x1)<=H && c.y1-c.y0<=3*H;
+    });
+    if(opp.length){
+      const ox0=Math.min(...opp.map(c=>c.x0)),ox1=Math.max(...opp.map(c=>c.x1));
+      const ratio=bw/(cw+ox1-ox0),offset=Math.abs((ox0+ox1)/2-(b.x0+b.x1)/2)/bw;
+      // Numerator and denominator both sit centred on the stroke; a head at one
+      // end of an underlined label above it does not.
+      const candOffset=Math.abs(ccx-(b.x0+b.x1)/2)/bw;
+      if(offset<=.25 && candOffset<=.25 && ratio<=3)return {reject:true,reason:'fraction-interior',fractionEvidence:{side:bar.side,
+        gapH:r4(bar.gap/H),widthH:r4(bw/H),thickH:r4((b.y1-b.y0)/H),farWidthH:r4((ox1-ox0)/H),ratio:r4(ratio),offset:r4(offset),candOffset:r4(candOffset)}};
+    }
+  }
+  // Bracket pair: a tall narrow component crossing the candidate's middle on
+  // each side. A cell border joined to its horizontal rules is one wide
+  // component, so it is not a bracket.
+  const tall=ext.filter(c=>c.y0<=ccy && c.y1>=ccy && c.y1-c.y0>=2.5*H && c.y1-c.y0<=12*H && c.x1-c.x0<=H);
+  const nearest=dist=>tall.map(c=>({c,d:dist(c)})).filter(v=>v.d>=-.1*H && v.d<=8*H).sort((a,b)=>a.d-b.d)[0];
+  const left=nearest(c=>x0-c.x1),right=nearest(c=>c.x0-x1);
+  if(left && right)return {reject:true,reason:'bracket-pair-interior',bracketEvidence:{
+    leftGapH:r4(left.d/H),leftHeightH:r4((left.c.y1-left.c.y0)/H),rightGapH:r4(right.d/H),rightHeightH:r4((right.c.y1-right.c.y0)/H)}};
+  return null;
+}
+export function numberContextEvidence(page,box,shared={}) {
   const shape=choiceShapeObservation(page,box);
   if(shape.horizontalPeer)return {reject:true,reason:'choice-shape-horizontal',shapeEvidence:shape};
   const heading=headingEvidence(page,box);
-  return heading.reject ? heading : lineInteriorEvidence(page,box);
+  if(heading.reject)return heading;
+  const line=lineInteriorEvidence(page,box);
+  return line.reject ? line : formulaInteriorEvidence(page,box,shared) || line;
 }
 // Final emission only: selection/retry/crop/fill inputs stay untouched. Every
 // final candidate, including primary/auxiliary and answer pages, uses this path.
 export function filterNumberContexts(page,candidates) {
   page.contextHeadings=[];
+  const shared={};
   return candidates.filter(c=>{
     const box=c.contextBox || {x0:c.x0,x1:c.x1,y0:c.y0,y1:c.y1};
-    const e=numberContextEvidence(page,box);
+    const e=numberContextEvidence(page,box,shared);
     if(e.heading)page.contextHeadings.push(e.heading);
     return !e.reject;
   });
