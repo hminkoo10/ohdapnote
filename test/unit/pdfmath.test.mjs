@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { transcribeParts, decodeGlyph, fontFamily, hancomEquationRegions } from '../../src/renderer/js/pdfmath.js';
 
-// 실제 교재 대신 글자 위치를 직접 만든 가짜 쪽으로 시험 (글꼴 이름·코드는 EBS 교재 PDF 의 수식 글꼴 규칙)
+// 실제 교재 대신 글자 위치를 직접 만든 가짜 쪽으로 시험 (글꼴 이름·코드는 실제 교재 PDF 의 수식 글꼴 규칙)
 // 글자 조각: [글자, 글꼴, 모양, 폭(em)]
 const T = (s) => [...s].map((c) => [c, 'YDVYMjOStd', '', c === ' ' ? 0.3 : c === ',' ? 0.35 : 1]); // 본문 글꼴
 const M = (s) => [...s].map((c) => [c, 'EHsang', /[A-Za-z]/.test(c) ? 'Italic' : '', /[=+<>-]/.test(c) ? 1 : 0.5]); // 수식(기울임)

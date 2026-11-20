@@ -51,10 +51,10 @@ test('오답노트 선택: 책별로 저장하고 사라진 문항은 빠짐', (
 test('makeBlocks: 같은 공통 지문이 이어져도 문항마다 지문을 실음, 책이 여럿이면 출처에 책 이름', () => {
   const stem = [{ page: 0, x: 0.1, y: 0.05, w: 0.3, h: 0.05 }];
   const e = (n, book = '') => ({ book, problem: item(0, n, 0.1 * n, { stem, stemLabel: '1~3' }), answer: null });
-  const blocks = makeBlocks('problems', [e(1, '쎈'), e(2, '쎈'), e(3, '쎈')], { labels: true, renumber: true }, (r, it) => `p.${it.page + 1}`);
+  const blocks = makeBlocks('problems', [e(1, '수학책'), e(2, '수학책'), e(3, '수학책')], { labels: true, renumber: true }, (r, it) => `p.${it.page + 1}`);
   assert.deepEqual(blocks.map((b) => b.stem), [stem, stem, stem]);
   assert.equal(blocks[0].num, '1.');
-  assert.equal(blocks[0].source, '쎈 p.1 1번');
+  assert.equal(blocks[0].source, '수학책 p.1 1번');
 });
 
 test('missingNumbers: 번호 하나만 잘못 읽은 경우(1, 9, 3, 4 …)는 9 앞을 모두 빠졌다고 하지 않음', () => {
@@ -74,20 +74,20 @@ test('missingNumbers: 다음 단원(멀리 떨어진 쪽)의 같은 번호 때�
 
 test('파일 추가: 지금 파일·쪽·문항·쪽 정보·선택·옮긴 결과 열쇠는 그대로, 새 쪽은 맨 뒤', () => {
   const files = [
-    { name: 'problem-a-000.pdf', originalName: '쎈 1권.pdf', kind: 'pdf' },
-    { name: 'problem-a-001.pdf', originalName: '쎈 2권.pdf', kind: 'pdf' },
+    { name: 'problem-a-000.pdf', originalName: '수학 1권.pdf', kind: 'pdf' },
+    { name: 'problem-a-001.pdf', originalName: '수학 2권.pdf', kind: 'pdf' },
   ];
   const old = [item(0, 1), item(0, 2, 0.3), item(3, 1)];
-  const doc = { files: files.map((f) => ({ ...f })), originalName: '쎈 1권.pdf 외 1개', range: '1-4', items: old.map((it) => ({ ...it })), pageInfo: { 0: { analyzed: true }, 3: { analyzed: true, ok: true } }, edited: true, signature: { prefix: '' }, analyzedAt: 1 };
+  const doc = { files: files.map((f) => ({ ...f })), originalName: '수학 1권.pdf 외 1개', range: '1-4', items: old.map((it) => ({ ...it })), pageInfo: { 0: { analyzed: true }, 3: { analyzed: true, ok: true } }, edited: true, signature: { prefix: '' }, analyzedAt: 1 };
   const before = JSON.parse(JSON.stringify(doc));
   const book = { docs: { problem: doc } };
   const note = { selected: { b1: ['0:2', '3:1'] } };
   const keyBefore = transcriptFiles(doc.files);
 
-  addFiles(doc, { files: [{ name: 'problem-b-000.pdf', originalName: '쎈 3권.pdf', kind: 'pdf' }], originalName: '쎈 3권.pdf' });
+  addFiles(doc, { files: [{ name: 'problem-b-000.pdf', originalName: '수학 3권.pdf', kind: 'pdf' }], originalName: '수학 3권.pdf' });
   assert.deepEqual(doc.files.slice(0, 2), before.files); // 지금 파일은 그대로 앞에 (쪽 번호 = 파일 순서대로 이어 붙인 것)
-  assert.deepEqual(doc.files[2], { name: 'problem-b-000.pdf', originalName: '쎈 3권.pdf', kind: 'pdf', added: true });
-  assert.equal(doc.originalName, '쎈 1권.pdf 외 2개');
+  assert.deepEqual(doc.files[2], { name: 'problem-b-000.pdf', originalName: '수학 3권.pdf', kind: 'pdf', added: true });
+  assert.equal(doc.originalName, '수학 1권.pdf 외 2개');
   for (const k of ['items', 'pageInfo', 'edited', 'signature', 'analyzedAt', 'range']) assert.deepEqual(doc[k], before[k], k);
   assert.deepEqual(transcriptFiles(doc.files), keyBefore); // 한글 내보내기에 저장해 둔 결과를 그대로 씀
 
@@ -101,5 +101,5 @@ test('파일 추가: 지금 파일·쪽·문항·쪽 정보·선택·옮긴 결�
   // 두 번째로 더해도 첫 파일들은 열쇠에 그대로
   addFiles(doc, { files: [{ name: 'problem-c-000.png', originalName: 'p.png', kind: 'image' }], originalName: 'p.png' });
   assert.deepEqual(transcriptFiles(doc.files), keyBefore);
-  assert.equal(doc.originalName, '쎈 1권.pdf 외 3개');
+  assert.equal(doc.originalName, '수학 1권.pdf 외 3개');
 });

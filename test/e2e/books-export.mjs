@@ -2,7 +2,7 @@
 import { chromium } from '../lib/playwright.mjs';
 import { startServer } from '../lib/server.mjs';
 import { writeFileSync, mkdirSync } from 'node:fs';
-const [name = 'ssen', ...nums] = process.argv.slice(2);
+const [name = 'serial', ...nums] = process.argv.slice(2);
 const want = nums.length ? nums : ['0024', '0031'];
 const { server, url } = await startServer();
 const browser = await chromium.launch();

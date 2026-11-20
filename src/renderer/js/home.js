@@ -532,7 +532,7 @@ async function createBook() {
     });
     return;
   }
-  const input = h('input.input', { placeholder: '책 이름 (예: 쎈 수학Ⅰ, 수능특강 영어)' });
+  const input = h('input.input', { placeholder: '책 이름 (예: 수학Ⅰ 유형 문제집, 영어 독해 교재)' });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') input.closest('.modal').querySelector('.btn-primary').click();
   });
