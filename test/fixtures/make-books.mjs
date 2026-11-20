@@ -1,6 +1,6 @@
 // 시중 문제집 편집 구조를 흉내 낸 테스트용 문제집/답지 생성
-//  - ssen   : 4자리 연번(0001…) 번호 상자, 유형 제목, 2단 문제집 / 빠른 정답표 + 3단 해설(단·쪽을 넘어가는 긴 해설)
-//  - suteuk : 개념 → 예제(풀이 포함) → 유제(1, 2…, 단원 내 연번) → Level 1~3(01…, 단계마다 다시 시작)
+//  - serial : 4자리 연번(0001…) 번호 상자, 유형 제목, 2단 문제집 / 빠른 정답표 + 3단 해설(단·쪽을 넘어가는 긴 해설)
+//  - level  : 개념 → 예제(풀이 포함) → 유제(1, 2…, 단원 내 연번) → Level 1~3(01…, 단계마다 다시 시작)
 //             답지는 2단, "본문 ○쪽" 머리글, Level 제목, 쪽을 넘어가는 긴 해설
 // 각 해설 끝에는 흰색 1px 표식(ZZE<키>)을 넣어, 해설이 실제로 어디서 끝나는지 PDF 글자로 확인할 수 있게 합니다.
 // 사용: node test/fixtures/make-books.mjs
@@ -60,9 +60,9 @@ function explanation(lines, withEq = true) {
 }
 
 // ---------------------------------------------------------------------------
-// 쎈 스타일
+// 4자리 연번 문제집 스타일
 // ---------------------------------------------------------------------------
-function ssenBooks() {
+function serialBooks() {
   const units = [
     { title: '01 지수', types: ['유형 01 거듭제곱근', '유형 02 지수의 확장', '유형 03 지수법칙의 활용'] },
     { title: '02 로그', types: ['유형 04 로그의 정의', '유형 05 로그의 성질', '유형 06 상용로그'] },
@@ -135,13 +135,13 @@ function ssenBooks() {
     .a{margin-bottom:3mm}.an{font-weight:800;color:#1f4fbf;font-size:9pt}.dap{color:#d02f2f}
     .other{background:#f3f6fd;border-radius:1mm;padding:1mm 1.5mm;margin-top:1mm}
   </style></head><body>${quickHtml}${ansHtml}</body></html>`;
-  return { prob, ans: ansDoc, probKeys, ansKeys, longKeys: [...longKeys], header: '수학Ⅰ 쎈', ansHeader: '정답과 해설' };
+  return { prob, ans: ansDoc, probKeys, ansKeys, longKeys: [...longKeys], header: '수학Ⅰ 유형', ansHeader: '정답과 해설' };
 }
 
 // ---------------------------------------------------------------------------
-// 수능특강 스타일
+// 단계별(Level) 교재 스타일
 // ---------------------------------------------------------------------------
-function suteukBooks() {
+function levelBooks() {
   const units = [
     { title: '01 지수와 로그', concepts: ['1 거듭제곱과 거듭제곱근', '2 지수의 확장', '3 로그의 뜻과 성질'] },
     { title: '02 지수함수와 로그함수', concepts: ['1 지수함수의 뜻과 그래프', '2 로그함수의 뜻과 그래프'] },
@@ -223,7 +223,7 @@ function suteukBooks() {
     .lvh{font-size:11.5pt;font-weight:800;color:#e0662a;border-bottom:1pt solid #e0662a;margin:3mm 0 2mm;break-after:avoid}
     .a{margin-bottom:3.5mm}.an{font-weight:800;color:#0b6e4f;font-size:10.5pt}.ln{font-weight:800;color:#e0662a;font-size:10.5pt}.dap{color:#c0392b}
   </style></head><body>${ansHtml}</body></html>`;
-  return { prob, ans: ansDoc, probKeys, ansKeys, longKeys: [...longKeys], header: '수능특강 수학Ⅰ', ansHeader: '정답과 풀이' };
+  return { prob, ans: ansDoc, probKeys, ansKeys, longKeys: [...longKeys], header: '단계학습 수학Ⅰ', ansHeader: '정답과 풀이' };
 }
 
 // ---------------------------------------------------------------------------
@@ -299,11 +299,11 @@ async function pdf(html, file, label, color, size) {
 }
 const expected = {};
 for (const [name, make, color] of [
-  ['ssen', ssenBooks, '#1f4fbf'],
-  ['suteuk', suteukBooks, '#0b6e4f'],
+  ['serial', serialBooks, '#1f4fbf'],
+  ['level', levelBooks, '#0b6e4f'],
   ['hard', hardBooks, '#444444'],
 ]) {
-  seed = name === 'ssen' ? 11 : name === 'suteuk' ? 23 : 37;
+  seed = name === 'serial' ? 11 : name === 'level' ? 23 : 37;
   const b = make();
   await pdf(b.prob, `${name}-problem.pdf`, b.header, color, {});
   await pdf(b.ans, `${name}-answer.pdf`, b.ansHeader, color, {});
@@ -314,5 +314,5 @@ for (const [name, make, color] of [
 await browser.close();
 writeFileSync(join(outDir, 'books-expected.json'), JSON.stringify(expected, null, 1));
 // 스캔본 답지 (OCR 경로 확인용)
-execFileSync('python3', [join(here, 'make-scan.py'), join(outDir, 'ssen-answer.pdf'), join(outDir, 'ssen-answer-scan.pdf')], { stdio: 'inherit' });
+execFileSync('python3', [join(here, 'make-scan.py'), join(outDir, 'serial-answer.pdf'), join(outDir, 'serial-answer-scan.pdf')], { stdio: 'inherit' });
 console.log('books →', outDir);

@@ -345,9 +345,9 @@ export function extractCandidates(tokens, layout, opts = {}) {
     const cy = (w.y0 + w.y1) / 2;
     return !(layout?.hasHeader && cy < bodyTop) && !(layout?.hasFooter && cy > bodyBottom);
   };
-  // "유형 01" 머리 (만렙 PM 등). 답지에서는 해설 머리("유형 02 답 65/4")라 문항이고,
+  // "유형 01" 머리 (유형별 문제집 등). 답지에서는 해설 머리("유형 02 답 65/4")라 문항이고,
   // 문제집에서는 제목("유형 01 구분구적법")이라 그 뒤 "대표 문제" 가 이 번호의 문항.
-  // (쎈처럼 유형 제목 아래 문제마다 번호가 붙은 책은 "대표 문제" 가 없어서 해당 없음)
+  // (유형 제목 아래 문제마다 번호가 붙은 책은 "대표 문제" 가 없어서 해당 없음)
   // 한 줄에 여럿 있는 것("유형01 ④ 유형02 65/4 …" 빠른 정답표)은 뺌
   const str0 = (w) => (opts.ocr ? normalizeOcrWord(w.str) : w.str);
   // 바로 오른쪽 글자 (작은 "유형" 옆의 큰 "01" 처럼 기준선이 달라 다른 줄로 묶인 것까지)
@@ -431,7 +431,7 @@ export function extractCandidates(tokens, layout, opts = {}) {
     if (layout?.hasFooter && cy > bodyBottom) continue;
     const blocked = hasLeftNeighbor(w);
     if (blocked && (opts.ocr || prefix || !numWord.font)) continue;
-    // 소단원 제목의 번호표(자이스토리 "❶ 제곱근의 뜻과 표현"): 바로 뒤 한글 제목이 번호보다 확실히 크고 본문보다도 크면 번호가 아님
+    // 소단원 제목의 번호표(예: "❶ 제곱근의 뜻과 표현"): 바로 뒤 한글 제목이 번호보다 확실히 크고 본문보다도 크면 번호가 아님
     // (문항 번호는 뒤 글자보다 크거나 같음. 제목 글씨가 본문의 1.2배가 안 돼 위의 제목 줄 찾기에 걸리지 않는 책)
     if (!opts.ocr && !prefix && parsed.style === 'plain') {
       const hOf = (u) => u.h ?? u.y1 - u.y0;
@@ -744,7 +744,7 @@ export function chooseChain(cands, prevLast, priorFn) {
 }
 
 /**
- * 글자 레이어 번호들의 글꼴 크기 무리 (한 체계 안에 크기가 다른 번호가 섞일 수 있음: 수능특강 유제 / Level).
+ * 글자 레이어 번호들의 글꼴 크기 무리 (한 체계 안에 크기가 다른 번호가 섞일 수 있음: 유제 / Level).
  * 4% 안쪽으로 붙은 값끼리 묶고, 전체의 15% 이상인 무리의 가운데 값만
  */
 function sizeClusters(chosen) {
@@ -1138,7 +1138,7 @@ export function dropStrayRuns(order, anchors, key, pages = []) {
 
 /**
  * 한 쪽 번호(또는 문항)들의 읽는 순서. 보통은 받은 순서(단 → 위→아래) 그대로지만,
- * 두 단에 문항을 짝지어 놓고 줄마다 왼쪽→오른쪽으로 번호 매긴 쪽(자이스토리 "잘 틀리는 유형 훈련": 105 | 106, 107 | 108 …)은 번호 순서.
+ * 두 단에 문항을 짝지어 놓고 줄마다 왼쪽→오른쪽으로 번호 매긴 쪽(예: 유형 훈련 쪽 105 | 106, 107 | 108 …)은 번호 순서.
  * 단 순서로는 번호가 건너뛰는데, 번호 순서로 놓으면 1씩 빠짐없이 이어지고, 다음 번호가 늘 다른 단에 있으면서
  * 오른쪽 단으로는 같은 줄(오른쪽이 조금 내려앉기도 함), 왼쪽 단으로는 아랫줄로 갈 때만 그렇게 봄
  * (진짜 빠진 번호가 있는 쪽, 단 순서로 이미 이어지는 보통 쪽은 그대로)

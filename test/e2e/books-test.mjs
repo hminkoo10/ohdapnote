@@ -1,17 +1,17 @@
 // 시중 문제집형 테스트 책으로 인식·매칭·"쪽을 넘어가는 해설"을 자동 채점합니다.
 // 먼저: node test/fixtures/make-books.mjs
-// 사용: node test/e2e/books-test.mjs [ssen|suteuk|ssen-scan]
+// 사용: node test/e2e/books-test.mjs [serial|level|serial-scan]
 import { chromium } from '../lib/playwright.mjs';
 import { startServer } from '../lib/server.mjs';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const expected = JSON.parse(readFileSync(new URL('../fixtures/generated/books-expected.json', import.meta.url)));
 const CASES = {
-  ssen: { prob: 'ssen-problem.pdf', ans: 'ssen-answer.pdf', key: 'ssen', cols: 3 },
-  suteuk: { prob: 'suteuk-problem.pdf', ans: 'suteuk-answer.pdf', key: 'suteuk', cols: 2 },
+  serial: { prob: 'serial-problem.pdf', ans: 'serial-answer.pdf', key: 'serial', cols: 3 },
+  level: { prob: 'level-problem.pdf', ans: 'level-answer.pdf', key: 'level', cols: 2 },
   // 스캔본(흐림·잡티·기울기)은 OCR 특성상 90% 이상이면 통과로 봄 (놓친 쪽은 '확인 필요'로 표시됨)
   hard: { prob: 'hard-problem.pdf', ans: 'hard-answer.pdf', key: 'hard', cols: 2, stems: true },
-  'ssen-scan': { prob: 'ssen-problem.pdf', ans: 'ssen-answer-scan.pdf', markers: 'ssen-answer.pdf', key: 'ssen', cols: 3, tolerance: 0.9 },
+  'serial-scan': { prob: 'serial-problem.pdf', ans: 'serial-answer-scan.pdf', markers: 'serial-answer.pdf', key: 'serial', cols: 3, tolerance: 0.9 },
 };
 const only = process.argv.slice(2);
 const { server, url } = await startServer();

@@ -1,6 +1,6 @@
 // 가지고 있는 실제 문제집·답지 PDF(스캔본 포함)로 번호 인식을 확인합니다. (PDF 는 저장소에 넣지 않음)
 // 사용: node test/e2e/scan-check.mjs <PDF 경로> [problem|answer] [쪽 범위]
-//   예) node test/e2e/scan-check.mjs "C:\Users\me\Downloads\쎈 대수.pdf" problem
+//   예) node test/e2e/scan-check.mjs "C:\Users\me\Downloads\대수 문제집.pdf" problem
 //   또는 test/e2e/local-books.json(내 컴퓨터에만, git 에 안 올라감)에 책 목록을 적고 인자 없이: npm run test:scan
 //   (형식은 local-books.example.json 참고)
 // 번호가 1씩 이어지는지(단원마다 1부터 다시 시작은 허용, 예제·유제 같은 말머리는 따로)로 채점:

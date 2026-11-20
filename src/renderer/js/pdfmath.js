@@ -1,7 +1,7 @@
 import { isHancomMath, isPrivateChar, normalizeHancomText } from './hancom.js';
 import { importAnswerBlocks } from './answer-model.js';
 // PDF 글자 정보로 문항을 글자·수식 블록으로 옮기기 (AI 없이, 내 컴퓨터에서)
-//  - EBS 수능특강처럼 Mac 조판 프로그램의 수식 글꼴(EHsang, EHboNB, EHSusic …)로 만든 디지털 PDF 는
+//  - 일부 교재처럼 Mac 조판 프로그램의 수식 글꼴(EHsang, EHboNB, EHSusic …)로 만든 디지털 PDF 는
 //    수식이 그림이 아니라 글자로 들어 있습니다. 다만 글꼴마다 자판 자리에 기호를 따로 넣어 두어서
 //    PDF 에서 읽으면 "xÛ"(x²), ";2#;"(3/2) 처럼 암호 같은 글자가 나옵니다.
 //  - 글꼴별 기호표로 글자를 풀고, 글자 위치(첨자 높이, 분수선 위·아래, 루트 윗선)로 구조를 되살려 LaTeX 로 만듭니다.
@@ -67,7 +67,7 @@ export async function readPageLayer(page, pdfjsLib) {
   let tlm = ID;
   let pendingClip = false;
   const toPage = (m, x, y) => apply(vp.transform, ...apply(m, x, y));
-  // 색 진하기(0 검정 ~ 1 흰색). 흐린 배경 무늬("EBS" 물결 글자 등)를 그림으로 보지 않으려고
+  // 색 진하기(0 검정 ~ 1 흰색). 흐린 배경 무늬(출판사 이름 물결 글자 등)를 그림으로 보지 않으려고
   const lightness = (hex) => {
     const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(String(hex));
     return m ? (0.3 * parseInt(m[1], 16) + 0.5 * parseInt(m[2], 16) + 0.2 * parseInt(m[3], 16)) / 255 : 0;

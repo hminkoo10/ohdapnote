@@ -340,7 +340,7 @@ test('looksLikeAnswerTable: 해설 쪽 분수·지수 속 작은 숫자(1, 1, 1 
 test('looksLikeAnswerTable: 단원 첫머리 작은 정답 상자 한 줄 + 해설 속 표 숫자는 정답표가 아님, 문제집 끝 정답표는 정답표', async () => {
   const { looksLikeAnswerTable } = await import('../../src/renderer/js/detect.js');
   const c = (num, x, y, h = 0.0118, col = 0) => ({ num, col, x0: x, y0: y, h, prefix: '' });
-  // 수능특강 해설 첫 쪽: "1 48 2 ① 3 32 …" 상자 한 줄, 해설 번호 1~4, 증감표 속 숫자들
+  // 단계별 교재 해설 첫 쪽: "1 48 2 ① 3 32 …" 상자 한 줄, 해설 번호 1~4, 증감표 속 숫자들
   const unitStart = [
     ...[1, 2, 3, 4, 5, 6].map((n, i) => c(n, 0.13 + i * 0.061, 0.178, 0.0152)),
     c(7, 0.13, 0.201, 0.0152),
@@ -431,7 +431,7 @@ test('dropStrayRuns: 소개 쪽 견본 번호·만화 쪽·부록 표의 동떨�
   // 단원마다 1부터 다시 시작하는 짧은 단원은 그대로
   const units = new Map([[0, range(1, 9)], [1, range(1, 3)], [2, range(1, 8)]]);
   assert.equal(dropStrayRuns([0, 1, 2], units, '|4'), 0);
-  // 번호가 큰 책(수능특강)에서 책 소개 쪽 견본 그림 속 번호, 개념 쪽 소제목 "1, 2" 는 뺌 (Level 3 의 1~3 은 둠)
+  // 번호가 큰 책에서 책 소개 쪽 견본 그림 속 번호, 개념 쪽 소제목 "1, 2" 는 뺌 (Level 3 의 1~3 은 둠)
   const plain = (num, h) => ({ num, digits: String(num), padded: false, prefix: '', h, ocr: false });
   const book = new Map([
     [0, [plain(1, 0.0053), plain(2, 0.0053)]],
@@ -607,7 +607,7 @@ test('flagPages: 번호가 없는 쪽이라도 앞뒤 번호가 체계마다 그
 
 test('rowMajorOrder + flagPages: 두 단에 짝지어 줄마다 왼쪽→오른쪽으로 번호 매긴 쪽(105 | 106, 107 | 108 …)은 빠진 번호가 아님, 진짜 빠진 쪽은 그대로 표시', async () => {
   const { rowMajorOrder } = await import('../../src/renderer/js/detect.js');
-  // 자이스토리 "잘 틀리는 유형 훈련" 쪽 (실제 위치): 오른쪽 번호가 왼쪽보다 조금 내려앉아 있음
+  // 두 단 짝 번호 유형 훈련 쪽 (실제 위치): 오른쪽 번호가 왼쪽보다 조금 내려앉아 있음
   const mk = (num, col, y) => ({ num, digits: String(num), style: 'plain', prefix: '', col, x0: col ? 0.523 : 0.093, x1: col ? 0.553 : 0.123, y0: y, y1: y + 0.0194, h: 0.0194, relX: col ? -0.002 : 0.001, hRatio: 1.52, conf: 100, padded: false, font: 'sans-serif|100|-21|', ocr: false });
   const L = [0.141, 0.398, 0.668];
   const R = [0.175, 0.432, 0.702];
@@ -643,7 +643,7 @@ test('rowMajorOrder + flagPages: 두 단에 짝지어 줄마다 왼쪽→오른�
 test('sortItems: 줄마다 두 단을 건너 번호 매긴 쪽은 번호 순서로, 보통 쪽(단 → 위→아래)과 한 단 안에 나란한 문항은 그대로', async () => {
   const { sortItems, assignIds } = await import('../../src/renderer/js/detect.js');
   const it = (page, col, num, x, y, w = 0.389) => ({ page, zone: 0, col, number: String(num), num, prefix: '', rects: [{ page, x, y, w, h: 0.05 }], source: 'text', conf: 100 });
-  // 자이스토리 22쪽 (실제 영역 위치)
+  // 같은 책 22쪽 (실제 영역 위치)
   const p22 = [it(21, 0, 105, 0.086, 0.136), it(21, 0, 107, 0.086, 0.395), it(21, 0, 109, 0.086, 0.655), it(21, 1, 106, 0.519, 0.169), it(21, 1, 108, 0.519, 0.425), it(21, 1, 110, 0.519, 0.696)];
   // 보통 2단 쪽, 한 단 안에 0001 | 0002 가 나란한 쪽
   const p21 = [it(20, 1, 101, 0.519, 0.14), it(20, 0, 97, 0.086, 0.14), it(20, 0, 98, 0.086, 0.5), it(20, 1, 102, 0.519, 0.5)];
@@ -739,7 +739,7 @@ test('extractCandidates: 소단원 제목 번호표("❶ 제곱근의 뜻과 표
   const t = (str, x0, x1, y, h) => ({ str, x0, x1, y0: y, y1: y + h });
   const one = { columns: [{ x0: 0.09, x1: 0.46 }], bodyTop: 0.05, bodyBottom: 0.95 };
   const tokens = [
-    // 자이스토리 개념 체크 쪽 (실제 크기): 번호표 1 은 0.0116, 제목은 0.0145, 본문 0.0127, 문항 번호 001 은 0.0182
+    // 같은 책 개념 체크 쪽 (실제 크기): 번호표 1 은 0.0116, 제목은 0.0145, 본문 0.0127, 문항 번호 001 은 0.0182
     t('1', 0.099, 0.107, 0.118, 0.0116), t('제곱근의', 0.121, 0.18, 0.118, 0.0145), t('뜻과', 0.195, 0.224, 0.118, 0.0145), t('표현', 0.239, 0.268, 0.118, 0.0145),
     t('다음', 0.181, 0.209, 0.14, 0.0121), t('수의', 0.214, 0.242, 0.14, 0.0121), t('제곱근을', 0.247, 0.304, 0.14, 0.0121),
     t('001', 0.093, 0.127, 0.169, 0.0182), t('36', 0.14, 0.157, 0.169, 0.0127),
@@ -752,7 +752,7 @@ test('extractCandidates: 소단원 제목 번호표("❶ 제곱근의 뜻과 표
   assert.deepEqual(extractCandidates(tokens, one).candidates.map((c) => c.digits), ['001', '002', '003', '4']);
 });
 
-// 자이스토리 글자 레이어 (실제 좌표·크기): 문항 번호 글꼴 N(0.0182~0.0194), 본문 수식 T·글 P(0.0127)
+// 같은 책 글자 레이어 (실제 좌표·크기): 문항 번호 글꼴 N(0.0182~0.0194), 본문 수식 T·글 P(0.0127)
 const XN = 'sans-serif|100|-21|';
 const XT = 'serif|75|-25|';
 const XP = 'serif|80|-25|';

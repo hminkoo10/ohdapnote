@@ -85,7 +85,7 @@ async function canvasToBytes(canvas, type = 'image/png', quality) {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-/** 굵은 번호 + 회색 출처를 한 줄로 그린 PNG (예: "3.  쎈 p.12 · 0153번") */
+/** 굵은 번호 + 회색 출처를 한 줄로 그린 PNG (예: "3.  수학 문제집 p.12 · 0153번") */
 function labelImage(numText, srcText, { color = '#111', srcColor = '#8a8f98', maxWidthPt = 0 } = {}) {
   const numFont = `800 ${11 * SS}px ${FONT_STACK}`;
   const srcFont = `500 ${7.6 * SS}px ${FONT_STACK}`;

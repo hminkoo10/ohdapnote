@@ -14,7 +14,7 @@ const JAMO_ITEM = /^[ㄱ-ㅎ]$/; // <보기>의 ㄱ. ㄴ. ㄷ.
 const PUNCT_AFTER = /^[,.?!:;)\]」』·…%]$/; // 한글 바로 뒤에 붙는 부호 (따옴표는 뺌: 위첨자·프라임을 따옴표로 읽음)
 const PUNCT_BEFORE = /^[([「『]$/; // 한글 바로 앞에 붙는 부호 (따옴표는 뺌: 한글 앞 위첨자 "a²의" 의 ² 를 " 로 읽음)
 
-// 문턱값 (h = 본문 한글 글자 높이). 쎈 대수 스캔본 4쪽(문항 55개)에 맞춤
+// 문턱값 (h = 본문 한글 글자 높이). 대수 문제집 스캔본 4쪽(문항 55개)에 맞춤
 const LATIN_WORD = /^[\("“‘]*([A-Za-z]+(?:['’-][A-Za-z]+)*)[),.;:?!"”’]*$/;
 const MATH_WORDS = new Set('sin cos tan sec csc cot asin acos atan arcsin arccos arctan sinh cosh tanh sech csch coth log ln lg lim exp max min det mod gcd lcm inf sup arg deg dim ker hom tr rank'.split(' '));
 
