@@ -75,6 +75,8 @@ const session = isBatch ? {
   user: { id: 'local-' + crypto.createHash('sha256').update(require('node:os').userInfo().username).digest('hex').slice(0, 24), name: '' },
 } : startCloudSession();
 if (session) app.setPath('userData', session.localDir); // 이 컴퓨터에만 두는 것 (모델, 로그, 화면 캐시)
+const viewOnly = session?.viewOnly === true;
+const { guard: viewGuard } = require('./view-only');
 const me = session?.user || {}; // { id: 계정 ID, name, role, academy: 학원 이름 }
 // 설정 서명 키 (매니페스트 dataSigning — 예전 통합 클라우드는 주지 않음). 다른 프로그램(Codex 등)에 넘어가지 않게 환경 변수에서 지움
 const dataKey = process.env.MAGOEDU_DATA_KEY || '';
@@ -134,7 +136,7 @@ const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
 // ---------------------------------------------------------------------------
 
 const academyMode = () => !!session.academyDir; // 학원 선생님끼리 함께 씀
-const isManager = () => me.role === 'director' || me.role === 'admin'; // 원장(운영자): 남의 교재도 고치고 오답노트를 모두 봄
+const isManager = () => viewOnly || me.role === 'director' || me.role === 'admin'; // 원장: 전체 자료 확인. 보기 전용 운영자도 읽기는 허용하되 쓰기는 별도로 막음
 const sharedDir = () => session.academyDir || path.join(session.dataDir, 'shared');
 const dataDir = sharedDir;
 const booksDir = () => path.join(sharedDir(), 'books');
@@ -482,6 +484,7 @@ async function fetchBookFiles(id, names) {
 
 /** 이 컴퓨터에 받지 않은 원본은 폴더에서 지울 수 없으니 서버에서 지워 달라고 함 (책을 지우거나 원본을 바꿀 때) */
 async function removeRemoteOnly(id, names) {
+  if (viewOnly) return;
   const dir = bookDir(id);
   const files = names.map((n) => safeJoin(dir, n));
   const gone = files.filter((file) => !fs.existsSync(file)).map(cloudRel);
@@ -600,7 +603,7 @@ const createdByMe = () => ({ id: me.id, name: me.name || '' });
 
 /** 교재를 고칠 수 있는지: 학원 공간에서는 만든 사람과 원장만. 서버도 같은 규칙이라 다른 사람이 고치면 통합 클라우드가 되돌림 */
 function canEdit(obj) {
-  return !academyMode() || isManager() || obj?.createdBy?.id === me.id;
+  return !viewOnly && (!academyMode() || isManager() || obj?.createdBy?.id === me.id);
 }
 
 /** 책을 고칠 수 있는지: 다른 선생님의 나만 보기 책(members/<그 사람>/)은 그 사람만 고침 — 원장도 보기만. 계약에서 빠진 과목은 아무도 */
@@ -639,7 +642,7 @@ function summarizeBook(book, place = 'shared') {
 }
 
 /** 오답노트를 고칠 수 있는지: 학생 폴더는 학원 사람 누구나 (지운 학생은 보기만), 선생님 폴더는 그 선생님만 */
-const canWriteLoc = (loc) => (loc.sid ? studentWritable(loc.sid) : loc.owner === me.id);
+const canWriteLoc = (loc) => !viewOnly && (loc.sid ? studentWritable(loc.sid) : loc.owner === me.id);
 
 /** 학생 폴더에 있으면 그 학생 (서버가 옮긴 0.3 노트는 studentId 가 비어 있을 수 있음) */
 const studentIdOf = (note, loc) => loc.sid || (isValidId(note.studentId) ? note.studentId : '');
@@ -724,6 +727,7 @@ async function memberNames() {
 
 /** 원장이 오답노트 목록에서 누구 것인지 알 수 있게 내 이름을 남김 */
 async function saveProfile() {
+  if (viewOnly) return;
   if (!academyMode()) return;
   const file = path.join(memberDir(me.id), 'profile.json');
   const cur = await readJson(file, null, sanitizeProfile);
@@ -885,6 +889,7 @@ function sanitizeLegacyProject(v) {
 }
 
 async function importLegacy() {
+  if (viewOnly) return;
   const src = legacyDir();
   if (!fs.existsSync(src)) return null;
   const done = { books: 0, notes: 0 };
@@ -997,9 +1002,15 @@ function stopMathocrWorker() {
 }
 
 function registerIpc() {
+  const syncOn = (channel, fn) => ipcMain.on(channel, (event, ...args) => {
+    try { return viewGuard(viewOnly, channel, fn)(event, ...args); }
+    catch (err) { event.returnValue = { error: err.message }; }
+  });
   // 저장·파일 받기·내보내기·AI 요청이 끝나기 전에는 재시작하지 않는다.
-  const handle = (channel, fn) => ipcMain.handle(channel, (...args) => updateMonitor.track(() => fn(...args)));
+  const handle = (channel, fn) => ipcMain.handle(channel, (...args) => updateMonitor.track(() => viewGuard(viewOnly, channel, fn)(...args)));
   handle('app:info', () => ({
+    viewOnly,
+    academyName: me.academy || '',
     version: app.getVersion(),
     isPackaged: app.isPackaged,
     updateRestartEnabled: updateMonitor.enabled,
@@ -1088,7 +1099,7 @@ function registerIpc() {
   };
   handle('answers:get', (_e, id) => readAnswers(id));
   handle('answers:save', (_e, args) => saveAnswer(args));
-  ipcMain.on('answers:saveSync', (event, args) => {
+  syncOn('answers:saveSync', (event, args) => {
     try { event.returnValue = saveAnswer(args); }
     catch (err) { log.warn('[answers:saveSync]', err.message); event.returnValue = false; }
   });
@@ -1157,7 +1168,7 @@ function registerIpc() {
   });
 
   // 창을 닫을 때 마지막 변경 사항을 동기적으로 저장
-  ipcMain.on('books:saveSync', (event, book) => {
+  syncOn('books:saveSync', (event, book) => {
     try {
       if (book && isValidId(book.id)) writeJsonAtomicSync(bookFile(book.id), toSave(book, checkBookWrite(book.id)));
       event.returnValue = true;
@@ -1311,7 +1322,7 @@ function registerIpc() {
       noteSeen.set(id, noteSig(readJsonSync(locFile(loc, id), null, sanitizeNote) || note));
       return { ...note, ...meta };
     }
-    return { ...note, ...meta, $readonly: true, $why: loc.sid ? 'deleted' : 'other', $ownerName: loc.owner ? (await memberNames())[loc.owner] || '' : '' };
+    return { ...note, ...meta, $readonly: true, $why: viewOnly ? 'view' : loc.sid ? 'deleted' : 'other', $ownerName: loc.owner ? (await memberNames())[loc.owner] || '' : '' };
   });
 
   // base: 화면이 열 때 받은 내용 (그사이 바뀐 파일과 합칠 때) → true | { merged: true } (합쳤으니 다시 읽어 주세요)
@@ -1321,7 +1332,7 @@ function registerIpc() {
     return saveNoteFile(note, base);
   });
 
-  ipcMain.on('notes:saveSync', (event, note, base) => {
+  syncOn('notes:saveSync', (event, note, base) => {
     try {
       if (note && isValidId(note.id) && !note.$readonly) saveNoteFile(note, base);
       event.returnValue = true;
@@ -1345,7 +1356,7 @@ function registerIpc() {
   //         명단 파일을 새로 써 준 뒤 답함). 지운 학생도 deletedAt 과 함께 (purgeAt 에 완전히 지워짐)
   //   학원이 없는 계정: 개인 공간 students/<id>.json
   handle('students:list', async () => {
-    const list = academyMode() ? (academyInfo()?.students || []).map((s) => ({ ...s, canEdit: !s.deletedAt })) : (await listStudents()).map((s) => ({ ...s, canEdit: true }));
+    const list = academyMode() ? (academyInfo()?.students || []).map((s) => ({ ...s, canEdit: !viewOnly && !s.deletedAt })) : (await listStudents()).map((s) => ({ ...s, canEdit: !viewOnly }));
     list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
     return list;
   });
@@ -1445,6 +1456,17 @@ function registerIpc() {
   handle('files:commit', (_e, { token, book }) => photoImports.commit(token, book));
   handle('files:discard', (_e, token) => photoImports.discard(token));
 
+  // 내보내기도 학원 자료·동기화 폴더 안에는 덮어쓰지 않는다 (연결 폴더 포함).
+  function checkExportPath(file) {
+    if (!viewOnly) return;
+    const resolved = fs.existsSync(file) ? fs.realpathSync(file) : path.join(fs.realpathSync(path.dirname(file)), path.basename(file));
+    for (const root of [session.academyDir, session.dataDir, session.libraryDir].filter(Boolean)) {
+      const base = fs.existsSync(root) ? fs.realpathSync(root) : path.resolve(root);
+      const rel = path.relative(base, resolved);
+      if (!rel || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel))) throw new Error('학원 자료 폴더 밖에 저장해 주세요.');
+    }
+  }
+
   handle('files:savePdf', async (_e, { defaultName, data }) => {
     const result = await dialog.showSaveDialog(mainWindow, {
       title: 'PDF 저장',
@@ -1452,6 +1474,7 @@ function registerIpc() {
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
     });
     if (result.canceled || !result.filePath) return { canceled: true };
+    checkExportPath(result.filePath);
     await fsp.writeFile(result.filePath, Buffer.from(data));
     return { canceled: false, path: result.filePath };
   });
@@ -1464,6 +1487,7 @@ function registerIpc() {
       filters: Array.isArray(filters) && filters.length ? filters : undefined,
     });
     if (result.canceled || !result.filePath) return { canceled: true };
+    checkExportPath(result.filePath);
     await fsp.writeFile(result.filePath, Buffer.from(data));
     return { canceled: false, path: result.filePath };
   });
@@ -1611,7 +1635,7 @@ function watchData() {
   const roots = [...new Set([session.academyDir, session.dataDir, session.libraryDir].filter(Boolean))];
   for (const root of roots) {
     try {
-      if (root !== session.libraryDir) fs.mkdirSync(root, { recursive: true });
+      if (!viewOnly && root !== session.libraryDir) fs.mkdirSync(root, { recursive: true });
       const w = fs.watch(root, { recursive: true }, (_type, name) => {
         if (!name) return;
         const abs = path.resolve(root, String(name));

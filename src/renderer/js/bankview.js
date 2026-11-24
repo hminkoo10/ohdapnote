@@ -109,7 +109,7 @@ export function bankView(summaries) {
 
 function renderBank(root, summaries, books, entries, failed) {
   clear(root);
-  root.append(examImportButton());
+  if (!state.appInfo.viewOnly) root.append(examImportButton());
   const intro = h('div');
   const introButton = h('button.btn.btn-ghost.btn-small', { hidden: bs.intro, onclick: () => { bs.intro = true; writeLocal('ohdap.bankIntro', false); renderIntro(); } }, '사용 순서');
   const intake = h('details.bank-intake', { open: bs.intake, ontoggle: (e) => { bs.intake = e.target.open; } }, h('summary', icon('bookPlus'), '교재 넣기', null));
@@ -172,7 +172,7 @@ function renderBank(root, summaries, books, entries, failed) {
       else if (!s.problemAnalyzed && !total) card.append(h('p.small.muted', '책 분석이 필요해요'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
       else if (!book) card.append(h('p.small.warn-text', '교재를 읽지 못했어요. 책장에서 확인하세요.'), h('button.btn', { onclick: () => nav.book(s.id) }, '책 열기'));
       else if (total && n === total) card.append(h('p.small.bank-complete', `${total}문항 다 넣었어요`));
-      else card.append(h('p.small.muted', n ? `${total}문항 중 ${n}문항 넣었어요` : `${total}문항 · 아직 안 넣었어요`), h('button.btn.btn-primary', { onclick: () => attempt(() => putBank(book, { onChange: changed })) }, n || bankTargets(book).some((b) => bestTranscript(book.id, { ...b, src: { files: book.docs.problem.files } })) ? '이어서 넣기' : '문제은행에 넣기'));
+      else if (!state.appInfo.viewOnly) card.append(h('p.small.muted', n ? `${total}문항 중 ${n}문항 넣었어요` : `${total}문항 · 아직 안 넣었어요`), h('button.btn.btn-primary', { onclick: () => attempt(() => putBank(book, { onChange: changed })) }, n || bankTargets(book).some((b) => bestTranscript(book.id, { ...b, src: { files: book.docs.problem.files } })) ? '이어서 넣기' : '문제은행에 넣기'));
       if (low) card.append(h('button.btn.btn-ghost.btn-small.bank-review-count', { onclick: () => {
         bs.filters.bookId = s.id; bs.filters.review = true; bs.limit = 200; bs.scroll = 0;
         filters.querySelector('[data-bank-focus="bookId"]').value = s.id;
@@ -306,7 +306,7 @@ function renderBank(root, summaries, books, entries, failed) {
       const [problem, answer] = await Promise.all([itemImage(src.problem, e.item, 700, { stem: e.item.stem }), e.answer ? itemImage(src.answer, e.answer, 700) : null]);
       if (run !== previewRun || !root.isConnected) return;
       clear(preview).append(h('h3', `${e.bookName} · ${itemName(e.item)}`));
-      if (e.bookObj.$library) preview.append(h('div.bank-heading', h('p.small.muted', '마고 공용 책장 · 읽기 전용'), h('button.btn.btn-small', { onclick: (ev) => { const button = ev.currentTarget; button.disabled = true; attempt(async () => { try { const copy = await api.copyBook(e.bookId); toast('내 책으로 복사했어요.'); nav.book(copy.id); } finally { button.disabled = false; } }); } }, '내 책으로 복사')));
+      if (e.bookObj.$library && !state.appInfo.viewOnly) preview.append(h('div.bank-heading', h('p.small.muted', '마고 공용 책장 · 읽기 전용'), h('button.btn.btn-small', { onclick: (ev) => { const button = ev.currentTarget; button.disabled = true; attempt(async () => { try { const copy = await api.copyBook(e.bookId); toast('내 책으로 복사했어요.'); nav.book(copy.id); } finally { button.disabled = false; } }); } }, '내 책으로 복사')));
       if (!open(e)) preview.append(h('p.readonly-banner', '학원 계약에 없는 과목 · 보기만'));
       if (problem) preview.append(h('img.bank-image', { src: problem, alt: '지문을 포함한 문제 그림' }));
       if (answer) preview.append(h('h4', '짝 해설'), h('img.bank-image', { src: answer, alt: '짝 해설 그림' }));
@@ -329,14 +329,14 @@ function renderBank(root, summaries, books, entries, failed) {
     const panel = h('div.bank-transcript', { dataset: { passage: String(!!item.passage) } },
       h('div.bank-heading', h('h4', item.passage ? `${itemName(item)} · 옮긴 글` : '옮긴 글'),
         r ? h('span.small.muted', pathName[r.path]) : null,
-        open(e) && !e.bookObj.$library ? h('button.btn.btn-small', { onclick: () => attempt(() => editTranscript(e, block)) }, '글 고치기') : null,
-        !item.passage && !e.bookObj.$library ? answerEditorButton({ book: e.bookObj, item: e.item, answerItem: e.answer, onChange: changed }) : null));
+        open(e) && !state.appInfo.viewOnly && !e.bookObj.$library ? h('button.btn.btn-small', { onclick: () => attempt(() => editTranscript(e, block)) }, '글 고치기') : null,
+        !state.appInfo.viewOnly && !item.passage && !e.bookObj.$library ? answerEditorButton({ book: e.bookObj, item: e.item, answerItem: e.answer, onChange: changed }) : null));
     if (r) panel.append(...r.entry.blocks.map((b) => b.type === 'para' ? h('p.bank-para', b.text)
       : b.type === 'math' ? h('div.bank-math', b.latex)
         : b.type === 'choices' ? h('div.bank-choices', b.items.map((v, i) => h('p', `${choiceMark(i)} ${v}`))) : h('p.muted', '[그림]')));
     else {
       panel.append(h('p.small.muted', open(e) ? '아직 글자로 옮긴 결과가 없어요.' : '아직 글자로 옮긴 결과가 없어요.'));
-      if (open(e) && !e.bookObj.$library) panel.append(h('button.btn', { onclick: () => attempt(() => putBank(e.bookObj, { item: e.item, onChange: changed })) }, '이 문항만 옮기기'));
+      if (open(e) && !state.appInfo.viewOnly && !e.bookObj.$library) panel.append(h('button.btn', { onclick: () => attempt(() => putBank(e.bookObj, { item: e.item, onChange: changed })) }, '이 문항만 옮기기'));
     }
     return panel;
   }

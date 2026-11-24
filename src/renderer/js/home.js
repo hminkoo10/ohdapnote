@@ -251,6 +251,7 @@ export async function showHome({ tab } = {}) {
 
   /** 새 오답노트 카드 (student: 그 학생을 골라 둔 채로) */
   function newNoteCard(student = null) {
+    if (state.appInfo.viewOnly) return null;
     return h(
       'button.card.card-new',
       { onclick: () => createNote(books, { student }), style: { '--i': 0 } },
@@ -341,7 +342,7 @@ export async function showHome({ tab } = {}) {
     const out = [
       h(
         'div.card-grid',
-        h(
+        state.appInfo.viewOnly ? null : h(
           'button.card.card-new',
           { onclick: () => editStudent(), style: { '--i': 0 } },
           h('div.new-plus', icon('plus')),
@@ -399,7 +400,7 @@ export async function showHome({ tab } = {}) {
             h('div.nc-top', h('span.nc-avatar', initial(st.name)), h('div.nc-who', h('div.nc-title', st.name), h('div.nc-student', stMeta(st) || '학교·학년 없음'))),
             h('div.purge-badge', icon('trash'), purgeText(st)),
             st.memo ? h('div.sc-memo', st.memo) : null,
-            h('div.nc-foot', h('span.creator', k ? `오답노트 ${k}개` : '오답노트 없음'), h('button.btn.btn-small.restore-btn', { onclick: (e) => restoreStudent(st, e.currentTarget) }, icon('refresh'), '되살리기')),
+            h('div.nc-foot', h('span.creator', k ? `오답노트 ${k}개` : '오답노트 없음'), state.appInfo.viewOnly ? null : h('button.btn.btn-small.restore-btn', { onclick: (e) => restoreStudent(st, e.currentTarget) }, icon('refresh'), '되살리기')),
           );
         }),
       ),
@@ -444,7 +445,7 @@ export async function showHome({ tab } = {}) {
     const showSubject = contractedSubjects(state.appInfo).length > 1 || books.some((b) => subjectOf(b) !== 'math' || b.subjectOpen === false);
     return h(
       'div.card-grid',
-      withNew
+      withNew && !state.appInfo.viewOnly
         ? h(
             'button.card.card-new',
             { onclick: createBook, style: { '--i': 0 } },
@@ -490,7 +491,7 @@ export async function showHome({ tab } = {}) {
           ),
           h('div.bc-date', formatDate(b.updatedAt)),
           // 고칠 수 없는 책(다른 선생님이 만든 책)은 이름 바꾸기·삭제 대신 내 책으로 복사. 계약 빠진 과목은 둘 다 없음
-          b.subjectOpen === false
+          state.appInfo.viewOnly || b.subjectOpen === false
             ? null
             : b.canEdit
             ? h(

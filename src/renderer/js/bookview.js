@@ -11,7 +11,7 @@ import { importBookFiles } from './photoimport.js';
 import { subjectOf, subjectName, contractedSubjects } from './subjects.js';
 
 /** 고칠 수 있는 책인지 — 학원 공간에서 남이 만든 책은 절대 저장하지 않음 (통합 클라우드가 되돌리고 충돌 사본을 남김) */
-const canSave = (b) => !!b && b.$canEdit !== false;
+const canSave = (b) => !!b && !state.appInfo?.viewOnly && b.$canEdit !== false;
 
 // 바뀐 횟수 / 저장할 때의 횟수 — 실시간으로 다시 읽을 때 고치는 중인지 보려고 (makeSaver 는 알려 주지 않음)
 let dirtySeq = 0;
@@ -154,6 +154,7 @@ export async function openBook(id, { tab, role, page, itemId } = {}) {
 
 /** 보기만 하는 책: 누가 만들었는지 + 내 책으로 복사 (계약에서 빠진 과목은 그 이유만) */
 function readonlyBanner(b) {
+  if (state.appInfo?.viewOnly) return null;
   if (b.$subjectOpen === false) {
     return h('div.readonly-banner.subject-closed', icon('eye'), h('span', `${subjectName(subjectOf(b))} 계약 없음: 보기만 가능해요. 계약은 원장님께 확인하세요.`));
   }
@@ -296,7 +297,7 @@ function render({ enter = false, tabAnim = null, thumbFrom = null } = {}) {
   const creator = state.appInfo?.academy && b.createdBy ? h('span.creator', `생성자: ${b.createdBy.name || '알 수 없음'}`) : null;
   // 학원 공간의 내 책: 학원 공유 켜고 끄기 (끄면 나만 보기 — 원장은 볼 수 있음)
   const share =
-    state.appInfo?.academy && b.createdBy?.id && b.createdBy.id === state.appInfo.user?.id
+    !ro && state.appInfo?.academy && b.createdBy?.id && b.createdBy.id === state.appInfo.user?.id
       ? h(
           'label.switch.small.share-switch',
           { title: b.$shared ? '학원 선생님 모두가 이 책을 보고 오답노트에 써요' : '나만 봐요 (원장도 볼 수 있어요)' },

@@ -14,6 +14,7 @@ export function topbar(left, right = null) {
     h('div.topbar-left', left),
     h(
       'div.topbar-right',
+      state.appInfo?.viewOnly ? h('span', `${state.appInfo.academyName || '학원'} · 보기 전용`) : null,
       right,
       jobBadge,
       h('button.btn.btn-ghost#help-btn', { onclick: () => openHelp(), title: '브라우저에서 열어요' }, icon('help'), h('span', '도움말')),
@@ -130,7 +131,7 @@ export function applyMotion(motion) {
 
 export async function openSettings() {
   const s = { ...state.settings };
-  const ai = aiSettingsCard(s); // AI 보조 인식 (학원 AI 또는 내 키 — 기본 Gemini, 세부 설정에서 다른 AI)
+  const ai = state.appInfo?.viewOnly ? null : aiSettingsCard(s); // AI 보조 인식 (학원 AI 또는 내 키 — 기본 Gemini, 세부 설정에서 다른 AI)
   const ocrSelect = h(
     'select.input',
     [
@@ -156,7 +157,7 @@ export async function openSettings() {
       h('label.field', h('span', '학원 이름'), academyInput),
       h('label.field', h('span', '시험지에 쓸 선생님 이름(기본값)'), teacherInput),
     ),
-    ai.card,
+    ai?.card,
     h('section.set-card',
       h('h4', icon('scan'), '스캔본 글자 인식'),
       h('label.field', h('span', '언어'), ocrSelect),
@@ -182,7 +183,7 @@ export async function openSettings() {
         primary: true,
         onClick: async () => {
           state.settings = await api.setSettings({
-            ...ai.values(),
+            ...(ai?.values() || {}),
             ocrLang: ocrSelect.value,
             academy: academyInput.value.trim(),
             teacher: teacherInput.value.trim(),

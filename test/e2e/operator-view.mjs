@@ -1,0 +1,51 @@
+import { _electron } from '../lib/playwright.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
+const require = createRequire(import.meta.url);
+const { PDFDocument } = require('pdf-lib');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opv2-screen-'));
+const academy = path.join(root, 'academy'), sync = path.join(root, 'sync'), local = path.join(root, 'local');
+const shots = process.env.OPERATOR_VIEW_SHOTS || path.join(process.cwd(), 'test/e2e/out/operator-view');
+for (const dir of [academy, sync, local, shots]) fs.mkdirSync(dir, { recursive: true });
+const bid = 'book-12345678', nid = 'note-12345678', sid = 'student-12345678';
+const write = (rel, obj) => { const f = path.join(academy, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(obj)); };
+const pdf = await PDFDocument.create(); const page = pdf.addPage([600, 800]); page.drawText('1. Find x when x + 2 = 5.', { x: 50, y: 700, size: 18 });
+const doc = { files: [{ name: 'problem-sample.pdf', kind: 'pdf', originalName: 'sample.pdf' }], pageCount: 1, items: [{ id: 'q1', number: '1', page: 0, x: .07, y: .08, w: .8, h: .2 }], pageInfo: {}, analyzedAt: 1, options: {} };
+write(`books/${bid}/book.json`, { id: bid, name: '보기 시험 교재', subject: 'math', docs: { problem: doc, answer: null }, createdBy: { id: 'dev', name: '선생님' }, updatedAt: 1 });
+fs.writeFileSync(path.join(academy, `books/${bid}/problem-sample.pdf`), await pdf.save());
+write(`students/${sid}/notes/${nid}.json`, { id: nid, title: '보기 시험 노트', studentId: sid, bookIds: [bid], selected: { [bid]: ['q1'] }, exportOptions: {}, createdAt: 1 });
+write('members/dev/profile.json', { name: '원래 이름' });
+const info = path.join(root, 'academy-info.json'); fs.writeFileSync(info, JSON.stringify({ academy: { subjects: ['math'] }, students: [{ id: sid, name: '홍길동' }], members: [] }));
+const hash = () => Object.fromEntries([academy, sync].flatMap(base => fs.readdirSync(base, { recursive: true }).filter(rel => fs.statSync(path.join(base, rel)).isFile()).map(rel => [path.relative(root, path.join(base, rel)), createHash('sha256').update(fs.readFileSync(path.join(base, rel))).digest('hex')])));
+const before = hash();
+delete process.env.ELECTRON_RUN_AS_NODE;
+const app = await _electron.launch({ executablePath: require('electron'), args: [process.cwd()], env: { ...process.env, MAGOEDU_DEV: '1', MAGOEDU_VIEW_ONLY: '1', MAGOEDU_DATA_KEY: '', MAGOEDU_TICKET: '', MAGOEDU_SERVER: '', MAGOEDU_LOCAL_DIR: local, MAGOEDU_DATA_DIR: sync, MAGOEDU_ACADEMY_DIR: academy, MAGOEDU_ACADEMY_INFO: info, MAGOEDU_REQUEST_DIR: '', MAGOEDU_ACADEMY: '한빛학원', OHDAP_E2E: '1' } });
+const errors = [];
+try {
+ const win = await app.firstWindow(); win.setDefaultTimeout(15000); win.on('pageerror', e => errors.push(e.message));
+ await win.waitForSelector('.seg-tabs');
+ async function check(name) { await win.waitForTimeout(600); assert.match(await win.locator('.topbar').innerText(), /한빛학원 · 보기 전용/); await win.screenshot({ path: path.join(shots, name + '.png') }); }
+ await check('home'); assert.equal(await win.locator('.card-new').count(), 0);
+ await win.evaluate(async id => (await import('./js/shared.js')).nav.book(id), bid); await win.waitForSelector('.doc-row'); await check('book');
+ assert.equal(await win.locator('.share-switch').count(), 0); assert.equal(await win.getByText('페이지 검토·수정', { exact: true }).count(), 0);
+ await win.evaluate(async id => (await import('./js/shared.js')).nav.note(id), nid); await win.waitForSelector('.note-sheet'); await check('note');
+ assert.equal(await win.getByText('책 인식 고치기', { exact: true }).count(), 0); assert.equal(await win.locator('.add-book, .sel-x, #answers-for-student').count(), 0);
+ await win.click('#settings-btn'); await win.waitForSelector('.modal'); assert.equal(await win.getByText('정밀 인식 사용', { exact: true }).count(), 0); await win.getByRole('button', { name: '취소', exact: true }).click();
+ await win.evaluate(async () => {
+   window.dispatchEvent(new Event('beforeunload'));
+   const { restartSaveHooks } = await import('./js/shared.js');
+   for (const save of restartSaveHooks) await save();
+ });
+ await win.evaluate(async () => (await import('./js/shared.js')).nav.home({ tab: 'bank' }));
+ await win.waitForSelector('.bank-view'); await check('bank');
+ assert.equal(await win.getByText('모의고사 넣기', { exact: true }).count(), 0);
+ assert.equal(await win.getByText('글 고치기', { exact: true }).count(), 0);
+ assert.deepEqual(errors, []); assert.deepEqual(hash(), before);
+ console.log(JSON.stringify({ shots, root, errors, hashesUnchanged: true }));
+} finally { await app.evaluate(({ app }) => app.exit(0)).catch(() => {}); }
+assert.deepEqual(hash(), before);
+fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

@@ -61,6 +61,7 @@ export function makeSaver(saveFn) {
     el.classList.toggle('saving', text.endsWith('…'));
   };
   const saver = createSaveQueue(async (target) => {
+    if (state.appInfo?.viewOnly) return;
     target.updatedAt = Date.now();
     await saveFn(target);
     failed = false;
@@ -286,7 +287,7 @@ export async function renderPreview(box, o) {
         h('span.tag.teal', '해설'),
         h('strong', ans ? `답지 ${pageLabel(ansDoc, ans.page)} ${itemName(ans)}` : '짝을 못 찾음'),
         h('span.push'),
-        answerEditorButton({ book, item, sources, answerItem: ans, onChange: () => renderPreview(box, o) }),
+        state.appInfo?.viewOnly ? null : answerEditorButton({ book, item, sources, answerItem: ans, onChange: () => renderPreview(box, o) }),
         sel,
         ans && o.onShow ? h('button.btn.btn-small.btn-ghost', { title: '답지에서 보기', onclick: () => o.onShow('answer', ans.page, ans.id) }, icon('eye'), '답지 보기') : null,
       ),
@@ -661,6 +662,7 @@ export const aiOff = () => state.settings?.aiEnabled === false;
 
 /** 고른 AI 를 쓸 준비가 됐는지 (이름은 예전 그대로) — 꺼 두었으면 false. 학원 AI 를 쓰면 학원 AI 기준 */
 export function geminiReady() {
+  if (state.appInfo?.viewOnly) return false;
   const s = aiConf();
   if (aiOff()) return false;
   const p = aiProvider();
