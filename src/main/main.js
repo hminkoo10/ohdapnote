@@ -544,7 +544,8 @@ function createWindow() {
       sandbox: true,
       spellcheck: false,
       backgroundThrottling: !isBatch,
-      additionalArguments: isBatch && batch ? [`--exam-ocr-threads=${batch.threads}`] : [],
+      // 이 프로그램이 실제로 쓸 수 있는 CPU 수: CPU 를 몇 개로 묶어 띄우면 화면 쪽 hardwareConcurrency 는 그대로라 OCR 워커가 넘쳐 화면이 굳음
+      additionalArguments: [`--ohdap-cpus=${require('node:os').availableParallelism()}`, ...(isBatch && batch ? [`--exam-ocr-threads=${batch.threads}`] : [])],
       devTools,
     },
   });

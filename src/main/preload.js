@@ -120,6 +120,10 @@ contextBridge.exposeInMainWorld('ohdap', {
   openHelp: (section) => ipcRenderer.invoke('app:openHelp', section),
 });
 
+// 이 프로그램이 쓸 수 있는 CPU 수 (OCR 워커 수를 정할 때)
+const cpus = process.argv.find((arg) => arg.startsWith('--ohdap-cpus='));
+if (cpus) contextBridge.exposeInMainWorld('ohdapCpus', Number(cpus.split('=')[1]));
+
 const batchThreads = process.argv.find((arg) => arg.startsWith('--exam-ocr-threads='));
 if (batchThreads) contextBridge.exposeInMainWorld('examBatch', {
   threads: Number(batchThreads.split('=')[1]),
