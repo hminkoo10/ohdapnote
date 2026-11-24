@@ -2,6 +2,12 @@
 
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
+function saveSync(channel, ...args) {
+  const result = ipcRenderer.sendSync(channel, ...args);
+  if (result?.error) throw new Error(result.error);
+  return result;
+}
+
 contextBridge.exposeInMainWorld('ohdap', {
   appInfo: () => ipcRenderer.invoke('app:info'),
   setEditorShortcutScope: (scope) => ipcRenderer.invoke('editor:shortcut-scope', scope),
@@ -28,7 +34,7 @@ contextBridge.exposeInMainWorld('ohdap', {
   createBook: (name, shared, subject) => ipcRenderer.invoke('books:create', { name, shared, subject }), // shared 를 빼면 학원 공유, subject: math · english · korean (계약한 과목만)
   getBook: (id) => ipcRenderer.invoke('books:get', id),
   saveBook: (book) => ipcRenderer.invoke('books:save', book),
-  saveBookSync: (book) => ipcRenderer.sendSync('books:saveSync', book),
+  saveBookSync: (book) => saveSync('books:saveSync', book),
   deleteBook: (id) => ipcRenderer.invoke('books:delete', id),
   renameBookItems: (bookId, renames, removed) => ipcRenderer.invoke('books:renameItems', { bookId, renames, removed }),
   copyBook: (id) => ipcRenderer.invoke('books:copy', id), // 남의 책을 내 책으로
@@ -41,7 +47,7 @@ contextBridge.exposeInMainWorld('ohdap', {
   getNote: (id) => ipcRenderer.invoke('notes:get', id),
   // base: 열 때 받은 내용 (그사이 다른 사람이 고쳤으면 합쳐서 저장 → { merged: true })
   saveNote: (note, base) => ipcRenderer.invoke('notes:save', note, base),
-  saveNoteSync: (note, base) => ipcRenderer.sendSync('notes:saveSync', note, base),
+  saveNoteSync: (note, base) => saveSync('notes:saveSync', note, base),
   deleteNote: (id) => ipcRenderer.invoke('notes:delete', id),
 
   // 학생 명단 (학원: 통합 클라우드 명단 — 지운 학생도 deletedAt 과 함께)
@@ -84,7 +90,7 @@ contextBridge.exposeInMainWorld('ohdap', {
   saveTranscripts: (bookId, data) => ipcRenderer.invoke('books:saveTranscripts', { bookId, data }),
   getAnswers: (bookId) => ipcRenderer.invoke('answers:get', bookId),
   saveAnswer: (bookId, itemId, data) => ipcRenderer.invoke('answers:save', { bookId, itemId, data }),
-  saveAnswerSync: (bookId, itemId, data) => ipcRenderer.sendSync('answers:saveSync', { bookId, itemId, data }),
+  saveAnswerSync: (bookId, itemId, data) => saveSync('answers:saveSync', { bookId, itemId, data }),
   putAnswerImage: (bookId, data) => ipcRenderer.invoke('answers:putImage', { bookId, data }),
   getAnswerImage: (bookId, file) => ipcRenderer.invoke('answers:getImage', { bookId, file }),
   renderAnswerPdf: (args) => ipcRenderer.invoke('answers:renderPdf', args),

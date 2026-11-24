@@ -172,7 +172,7 @@ function render({ enter = false } = {}) {
     icon('user'),
     h('span.student-name', studentLabel(n)),
   );
-  const why = n.$why === 'deleted' ? '지운 학생의 노트예요. 복구 전에는 보기·내보내기만 가능해요' : `${n.$ownerName || '다른'} 선생님의 오답노트 · 보기와 내보내기만 할 수 있어요`;
+  const why = state.appInfo?.viewOnly ? '보기와 내보내기만 할 수 있어요.' : n.$why === 'deleted' ? '지운 학생의 노트예요. 복구 전에는 보기·내보내기만 가능해요' : `${n.$ownerName || '다른'} 선생님의 오답노트 · 보기와 내보내기만 할 수 있어요`;
   root.append(
     topbar(
       h(
@@ -198,7 +198,7 @@ const studentLabel = (n) => n.$studentName || n.student || '학생 미지정';
 
 function studentSettings() {
   const n = ns.note;
-  if (!n.$shared) return h('section.note-student-settings', { hidden: true });
+  if (state.appInfo?.viewOnly || !n.$shared) return h('section.note-student-settings', { hidden: true });
   return h(
     'section.note-student-settings',
     { 'aria-label': '학생 PDF 설정' },
@@ -283,7 +283,8 @@ function bookBar() {
     );
   });
   if (!ns.readonly) bar.append(h('button.btn.btn-small.btn-ghost.add-book', { onclick: addBook }, icon('plus'), '책 추가'));
-  bar.append(h('span.spacer'), h('button.btn.btn-small.btn-ghost', { onclick: () => ns.books.has(ns.active) && nav.book(ns.active), disabled: !ns.active, title: '이 책의 인식 결과를 고치러 책 화면으로' }, icon('edit'), '책 인식 고치기'));
+  bar.append(h('span.spacer'));
+  if (!ns.readonly) bar.append(h('button.btn.btn-small.btn-ghost', { onclick: () => ns.books.has(ns.active) && nav.book(ns.active), disabled: !ns.active, title: '이 책의 인식 결과를 고치러 책 화면으로' }, icon('edit'), '책 인식 고치기'));
   return bar;
 }
 

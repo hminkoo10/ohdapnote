@@ -18,7 +18,7 @@ export { transcriptKey } from './transcript-store.js';
 export const TRANSCRIBE_WIDTH = 1500; // AI·OCR 에 넘기는 그림 폭(px)
 const MAX_TRANSCRIPTS = 3000; // 책 하나에 저장해 두는 개수
 const transcripts = new Map(); // 책 id → {items: {열쇠: {blocks, model, at}}, dirty}  (책 폴더의 transcripts.json)
-restartPendingChecks.add(() => [...transcripts.values()].some((t) => t.dirty));
+restartPendingChecks.add(() => !state.appInfo?.viewOnly && [...transcripts.values()].some((t) => t.dirty));
 restartSaveHooks.add(saveTranscripts);
 
 const loading = new Map();
@@ -46,6 +46,7 @@ export async function loadTranscripts(bookId, { reload = false } = {}) {
 }
 
 export function saveTranscripts(bookId) {
+  if (state.appInfo?.viewOnly) return Promise.resolve(true);
   saving = saving.then(() => flushTranscripts(bookId), () => flushTranscripts(bookId));
   return saving;
 }
