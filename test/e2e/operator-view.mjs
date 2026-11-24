@@ -46,6 +46,6 @@ try {
  assert.equal(await win.getByText('글 고치기', { exact: true }).count(), 0);
  assert.deepEqual(errors, []); assert.deepEqual(hash(), before);
  console.log(JSON.stringify({ shots, root, errors, hashesUnchanged: true }));
-} finally { await app.evaluate(({ app }) => app.exit(0)).catch(() => {}); }
+} finally { await app.evaluate(({ app }) => app.exit(0)).catch(() => {}); await app.close().catch(() => {}); }
 assert.deepEqual(hash(), before);
 fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
