@@ -4,8 +4,11 @@ import Tesseract from '../vendor/tesseract/tesseract.esm.min.js';
 
 const BASE = new URL('../vendor/tesseract/', import.meta.url).href;
 
+/** 이 프로그램이 쓸 수 있는 CPU 수 — CPU 를 묶어 띄우면 hardwareConcurrency 는 컴퓨터 전체 수라 main 이 알려 준 수와 비교 */
+const CPUS = Math.min(globalThis.navigator?.hardwareConcurrency || 2, globalThis.ohdapCpus || Infinity);
+
 /** 동시에 돌리는 OCR 워커 수 */
-export const OCR_WORKERS = globalThis.examBatch?.threads || Math.max(1, Math.min(8, Math.floor((globalThis.navigator?.hardwareConcurrency || 2) / 2)));
+export const OCR_WORKERS = globalThis.examBatch?.threads || Math.max(1, Math.min(8, Math.floor(CPUS / 2)));
 
 /** @type {{lang: string, promise: Promise<any>, busy: boolean, params: Record<string,string>}[]} */
 let slots = [];

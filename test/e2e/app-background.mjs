@@ -3,10 +3,11 @@
 //  → 그 사이 책 이름 고치기 → 끝나면 토스트 [책 열기] + 윈도우 알림(흉내) + 그 책에만 저장
 //  → Gemini 창 숨기기·다시 열기·같은 작업은 하나만 → 끄기 전에 물어보기
 // Gemini 는 실제로 부르지 않고 메인 프로세스의 IPC 처리기를 바꿔 끼워서 흉내냅니다.
+// 화면을 오가는 동안에는 OCR 워커에 가는 일을 붙잡아 두어, PC 가 느려도(CPU 를 묶어 돌려도) 분석이 먼저 끝나지 않게 합니다.
 // 실행: xvfb-run -a node test/e2e/app-background.mjs
 import { _electron as electron } from '../lib/playwright.mjs';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, availableParallelism } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +20,7 @@ mkdirSync(OUT, { recursive: true });
 const userData = mkdtempSync(join(tmpdir(), 'ohdap-bg-'));
 const app = await electron.launch({ executablePath: require('electron'), args: ['--no-sandbox', ROOT], env: { ...process.env, OHDAP_E2E: '1', OHDAP_USER_DATA: userData } });
 const win = await app.firstWindow();
+win.setDefaultTimeout(60000); // CPU 를 2개로 묶어 돌리면 분석 중 화면 동작 하나에 수십 초 걸리기도 함
 const errors = [];
 win.on('pageerror', (e) => errors.push(e.message));
 win.on('console', (m) => m.type() === 'error' && !/diacritics/.test(m.text()) && errors.push(m.text()));
@@ -28,13 +30,14 @@ const stub = (p) => app.evaluate(({ dialog }, q) => { dialog.showOpenDialog = as
 const books = () => win.evaluate(() => window.ohdap.listBooks());
 const getBook = (id) => win.evaluate((i) => window.ohdap.getBook(i), id);
 const busyHere = () => win.$('.doc-card[data-role="problem"] .doc-foot.busy');
-const fakeGemini = (ms) =>
-  app.evaluate(({ ipcMain }, wait) => {
+// 답은 releaseGemini() 를 부를 때 돌려줌 (PC 가 느려도 창을 오가는 동안 끝나지 않게)
+const fakeGemini = () =>
+  app.evaluate(({ ipcMain }) => {
     globalThis.__gem = 0;
     ipcMain.removeHandler('ai:generate');
     ipcMain.handle('ai:generate', async () => {
       globalThis.__gem++;
-      await new Promise((r) => setTimeout(r, wait));
+      await new Promise((r) => (globalThis.__gemRelease = r));
       const boxes = [
         { number: '1', box_2d: [70, 66, 420, 470] },
         { number: '2', box_2d: [430, 66, 900, 470] },
@@ -42,13 +45,41 @@ const fakeGemini = (ms) =>
       ];
       return { ok: true, status: 200, json: { candidates: [{ content: { parts: [{ text: JSON.stringify(boxes) }] } }] } };
     });
-  }, ms);
+  });
+const releaseGemini = () => app.evaluate(() => globalThis.__gemRelease?.());
 const closeWindow = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+// OCR(Tesseract) 워커에 보내는 메시지를 on 인 동안 모아 두었다가 off 할 때 보냄 (워커를 만들기 전에 한 번 불러 둘 것)
+const holdOcr = (on) =>
+  win.evaluate((v) => {
+    if (!window.__ocrHold) {
+      const hold = (window.__ocrHold = { on: false, queue: [] });
+      window.Worker = class extends window.Worker {
+        constructor(url, opts) {
+          super(url, opts);
+          this.ocr = /tesseract/i.test(String(url));
+        }
+        postMessage(...args) {
+          if (this.ocr && hold.on) hold.queue.push(() => super.postMessage(...args));
+          else super.postMessage(...args);
+        }
+      };
+    }
+    window.__ocrHold.on = v;
+    const held = v ? [] : window.__ocrHold.queue.splice(0);
+    for (const send of held) send();
+    return held.length;
+  }, on);
 let exited = false;
 
 try {
   step('책 두 권 등록: 스캔본 문제집 + 보통 문제집');
   await win.waitForSelector('.seg-tab[data-tab="books"]');
+  // CPU 를 몇 개로 묶어 띄워도 OCR 워커가 그 CPU 보다 많으면 분석하는 동안 화면이 굳어 단추를 못 누름
+  const workers = await win.evaluate(async () => (await import('./js/ocr.js')).OCR_WORKERS);
+  const cpus = availableParallelism();
+  console.log(`    OCR 워커 ${workers}개 (쓸 수 있는 CPU ${cpus}개)`);
+  if (workers > Math.max(1, Math.floor(cpus / 2))) throw new Error(`OCR 워커 ${workers}개가 쓸 수 있는 CPU ${cpus}개보다 많습니다`);
+  await holdOcr(false);
   await win.click('.seg-tab[data-tab="books"]');
   const newBook = async (name, files) => {
     await win.click('.card-new:has-text("새 책 등록")');
@@ -71,11 +102,12 @@ try {
 
   step('분석 시작 → [다른 일 하면서 기다리기] → 책장, 위쪽 막대에 진행 상황');
   const t0 = Date.now();
+  await holdOcr(true); // 오답노트 탭에 갈 때까지 OCR 을 붙잡아 둠
   await win.click('.doc-card[data-role="problem"] .doc-foot .btn-primary');
   await win.waitForSelector('.doc-card[data-role="problem"] .doc-foot.busy');
   await win.click('.doc-foot.busy .bg-btn');
   await win.waitForSelector('.book-card');
-  await win.waitForSelector('.job-chip', { timeout: 3000 });
+  await win.waitForSelector('.job-chip', { timeout: 15000 });
   const chipText = await win.$eval('.job-chip', (e) => e.textContent);
   console.log('    위쪽 막대:', chipText);
   if (!chipText.includes('스캔 문제집')) throw new Error('위쪽 막대에 분석이 보이지 않습니다');
@@ -92,7 +124,7 @@ try {
   step('위쪽 막대를 누르면 그 책으로 → 진행 중 카드, 그 사이 책 이름 고치기');
   await win.click('.job-chip');
   await win.waitForFunction(() => document.querySelector('.title-input')?.value === '스캔 문제집');
-  await win.waitForSelector('.doc-card[data-role="problem"] .doc-foot.busy', { timeout: 3000 });
+  await win.waitForSelector('.doc-card[data-role="problem"] .doc-foot.busy', { timeout: 15000 });
   await win.waitForTimeout(300);
   if (await win.$('.job-chip')) throw new Error('그 책 화면에서도 위쪽 막대에 보입니다');
   await win.fill('.title-input', '스캔 문제집 2');
@@ -112,6 +144,7 @@ try {
   await win.waitForSelector('.seg-tab[data-tab="notes"]');
   await win.click('.seg-tab[data-tab="notes"]');
   if (!(await win.$('.job-chip'))) throw new Error('분석이 너무 빨리 끝나서 뒤에서 도는 것을 확인하지 못했습니다');
+  console.log('    붙잡아 둔 OCR 일:', await holdOcr(false));
   const doneToast = win.locator('.toast', { hasText: '개 인식' }).filter({ has: win.locator('.toast-actions .btn', { hasText: '책 열기' }) });
   await doneToast.waitFor({ timeout: 180000 });
   console.log(`    분석 ${Math.round((Date.now() - t0) / 1000)}초:`, await doneToast.locator('.toast-msg').textContent());
@@ -130,7 +163,7 @@ try {
 
   step('토스트 [책 열기] → 결과가 그대로');
   await doneToast.locator('.toast-actions .btn', { hasText: '책 열기' }).click();
-  await win.waitForSelector('.doc-card[data-role="problem"] .sum-main', { timeout: 10000 });
+  await win.waitForSelector('.doc-card[data-role="problem"] .sum-main', { timeout: 30000 });
   const chips = await win.$$eval('.qtable .chip:not(.missing)', (els) => els.length);
   if (chips !== n) throw new Error(`책 화면 문항 수가 다릅니다: ${chips} / ${n}`);
 
@@ -142,7 +175,7 @@ try {
   await win.fill('.settings .ai-only[data-provider="gemini"] input[type="number"]', '60');
   await win.click('.modal-footer .btn-primary');
   await win.waitForSelector('.modal', { state: 'detached' });
-  await fakeGemini(6000);
+  await fakeGemini();
   await win.click('.tabs-row .seg-tab[data-tab="review"]');
   await win.waitForSelector('.editor-toolbar');
   await win.waitForTimeout(500);
@@ -151,7 +184,7 @@ try {
   await win.waitForSelector(bgBtn);
   await win.click(bgBtn);
   await win.waitForSelector('.gem-modal', { state: 'detached' });
-  await win.waitForSelector('.job-chip:has-text("· 정밀 인식")', { timeout: 3000 });
+  await win.waitForSelector('.job-chip:has-text("· 정밀 인식")', { timeout: 15000 });
   await win.click('.editor-toolbar .btn >> text="정밀 인식"');
   await win.waitForSelector(bgBtn);
   const dialogs = await win.$$eval('.gem-modal', (els) => els.length);
@@ -164,6 +197,7 @@ try {
   await win.click(bgBtn);
   await win.click('#back-btn');
   await win.waitForSelector('.book-card');
+  await releaseGemini();
   const gemToast = win.locator('.toast', { hasText: '정밀 인식 완료' });
   await gemToast.waitFor({ timeout: 30000 });
   console.log('    ', await gemToast.locator('.toast-msg').textContent());
@@ -176,7 +210,7 @@ try {
   if (gemPages.length !== 1 || onPage !== 3) throw new Error('뒤에서 끝난 Gemini 결과가 저장되지 않았습니다');
 
   step('작업이 남아 있으면 끄기 전에 물어봄 → [취소]면 그대로, [끄기]면 꺼짐');
-  await fakeGemini(20000);
+  await fakeGemini(); // 끝까지 풀어 주지 않음: 끌 때 작업이 남아 있어야 함
   await win.locator('.book-card', { hasText: '스캔 문제집 2' }).click();
   await win.click('.tabs-row .seg-tab[data-tab="review"]');
   await win.waitForSelector('.editor-toolbar');
@@ -186,14 +220,14 @@ try {
   await win.waitForSelector('.gem-modal', { state: 'detached' });
   await closeWindow();
   const ask = '.modal:has-text("아직 끝나지 않은 작업")';
-  await win.waitForSelector(ask, { timeout: 5000 });
+  await win.waitForSelector(ask, { timeout: 15000 });
   await shot('6-close-confirm');
   await win.click(`${ask} .modal-footer .btn:has-text("취소")`);
   await win.waitForSelector(ask, { state: 'detached' });
   await win.waitForTimeout(500);
   if (!(await win.$('.job-chip:has-text("· 정밀 인식")'))) throw new Error('끄기를 취소했는데 작업이 사라졌습니다');
   await closeWindow();
-  await win.waitForSelector(ask, { timeout: 5000 });
+  await win.waitForSelector(ask, { timeout: 15000 });
   const gone = new Promise((r) => app.process().once('exit', r));
   await win.click(`${ask} .modal-footer .btn-danger`);
   const ok = await Promise.race([gone.then(() => true), new Promise((r) => setTimeout(() => r(false), 10000))]);
