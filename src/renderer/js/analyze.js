@@ -38,7 +38,7 @@ import { stabilizeExamPages, stabilizeLegacyExamPages } from './exam-sections.js
 
 const ANALYSIS_WIDTH = 960; // 레이아웃 분석용 렌더링 폭(px)
 
-// A fresh render, long side 1024. Never upscale the analysis canvas.
+// 번호 찾기 모델: 학습 때처럼 긴 변 1024px 로 새로 그려 넘김 (분석용 960px 그림을 늘려 쓰지 않음)
 async function detectPageNumbers(src, page, numberModel, signal) {
   const start = performance.now();
   let canvas;
@@ -65,7 +65,7 @@ async function detectPageNumbers(src, page, numberModel, signal) {
   }
 }
 
-// Abort only the wait. Native inference may finish later; its result is ignored.
+// 취소하면 기다림만 멈춤 (돌고 있던 계산은 뒤에서 끝나고 결과는 버림)
 function waitNumberDetection(task, signal) {
   if (!signal) return task;
   abortIfNeeded(signal);
@@ -79,15 +79,18 @@ function waitNumberDetection(task, signal) {
 function hasNumberCandidates(page) {
   if (page.candidates.length) return true;
   if (!page.ocrPasses.length) return false;
-  // Early OCR may be ready before its normal application phase. Probe the same
-  // extractor on a copy; never change rules-only candidates/layout or wait for OCR.
+  // 미리 읽은 OCR 결과가 있으면 사본으로 후보만 세어 봄 (원래 쪽은 건드리지 않고 OCR 도 기다리지 않음)
   const probe = { ...page };
   extractOcr(probe);
   return probe.candidates.length > 0;
 }
 
+/**
+ * 모델 결과를 믿을 만한 문서면 번호를 모델 상자대로 다시 정함 (못 믿으면 아무것도 바꾸지 않음)
+ *  - 모델이 못 보는 말머리 묶음(예: 디자인이 다른 "예제")은 지금 고른 번호를 그대로 둠
+ */
 export function applyNumberModel(results, anchors, numberModel, { allowTrust = true, ...options } = {}) {
-  // Include candidates recovered by the existing OCR retry/crop paths too.
+  // OCR 다시 읽기·잘라 읽기로 되살린 후보도 포함
   for (const page of results) page.numberCandidates = [...new Set([
     ...(page.numberCandidates || []), ...(page.candidates || []), ...(anchors.get(page.index) || []),
   ])];
@@ -102,9 +105,8 @@ export function applyNumberModel(results, anchors, numberModel, { allowTrust = t
     const supported = mergeNumberModelAnchors(page, anchors.get(page.index) || [], trust.blindPrefixes);
     anchors.set(page.index, supported);
     page.candidates = supported;
-    // A heading can also delimit a blind item, including a continuation from
-    // another page. Preserve every context boundary whenever a blind group exists.
-    // Otherwise remove only boundaries overlapping a restored visual anchor.
+    // 제목 경계는 못 보는 묶음의 영역(앞 쪽에서 이어지는 것 포함)도 끊으므로, 그런 묶음이 있으면 그대로 둠.
+    // 없으면 모델이 되살린 번호와 겹치는 제목 경계만 뺌
     if (!trust.blindPrefixes.length && supported.length && page.contextHeadings?.length) {
       page.contextHeadings = page.contextHeadings.filter(h => !supported.some(c =>
         c.x0 < h.x1 && c.x1 > h.x0 && c.y0 < h.y1 && c.y1 > h.y0));
@@ -861,7 +863,7 @@ export async function analyzeDocument(src, opts) {
     results.push(page);
     if (page.needsOcr) early.push(page);
     if (opts.numberModel && !page.layout.blank && !numberRun.earlyStopped) {
-      // Bounded to one inference: read the next page while this one runs.
+      // 모델 계산은 한 번에 한 쪽만: 이 쪽을 계산하는 동안 다음 쪽을 읽음
       if (numberPending) await waitNumberDetection(numberPending, signal);
       abortIfNeeded(signal);
       if (!numberRun.earlyStopped) {
@@ -1215,7 +1217,7 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
   if (passages) chain = excludeRangeNumbers(chain, page.ranges || []);
   const anchors = new Map([[idx, chain]]);
   if (numberModel) {
-    // A single page cannot upgrade an untrusted/legacy document on its own.
+    // 한 쪽만으로는 정하지 않음: 문서 전체 분석에서 모델을 믿기로 한 경우에만, 그때 정한 못 보는 묶음 그대로
     const savedModel = doc.numberModel;
     applyNumberModel([page], anchors, numberModel, { minBoxes: 1, minAnchors: 1,
       allowTrust: savedModel?.trusted === true && Array.isArray(savedModel.blindPrefixes), blindPrefixes: savedModel?.blindPrefixes || [] });

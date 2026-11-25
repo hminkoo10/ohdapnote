@@ -1,7 +1,7 @@
 import { buildLines, extractCandidates, parseNumberWord, PREFIXES, byReadingOrder, columnOf, zoneOf } from './detect.js';
 
-// Probe visual coverage, not number continuity: after 12 nonblank candidate
-// pages, fewer than 8 boxes means this design is unknown. Skip the remainder.
+// 번호 찾기 모델(문항 번호 위치를 그림에서 찾음)의 결과를 번호 고르기에 보탭니다.
+// 번호 후보가 있는 쪽을 12쪽 봤는데 모델이 찾은 번호가 8개도 안 되면 모델이 모르는 디자인 → 나머지 쪽은 돌리지 않음
 export const NUMBER_MODEL_PROBE_PAGES = 12;
 export const NUMBER_MODEL_PROBE_BOXES = 8;
 
@@ -11,8 +11,7 @@ export function boxIou(a, b) {
   return union > 0 ? overlap / union : 0;
 }
 
-// Digit centre in a model box padded by 10% on each side, OR IoU >= .3.
-// Padding is relative to the detected number, not the page or nearby prose.
+// 숫자 가운데가 모델 상자(사방으로 상자 크기의 10% 넓힘) 안에 있거나, 두 상자가 IoU 0.3 이상 겹치면 같은 번호
 export function supportsNumber(digit, box) {
   const px = (box.x1 - box.x0) * 0.1, py = (box.y1 - box.y0) * 0.1;
   const cx = (digit.x0 + digit.x1) / 2, cy = (digit.y0 + digit.y1) / 2;
@@ -28,7 +27,7 @@ function tokenNumbers(tokens) {
     const prefix = glued && PREFIXES.includes(glued[1]) ? glued[1] : '';
     const parsed = parseNumberWord(prefix ? glued[2] + glued[3] : word.str);
     if (!parsed) continue;
-    // Keep the digit box separate from the candidate's prefix/punctuation box.
+    // 말머리("예제")·점·괄호를 뺀 숫자 부분만의 상자
     const offset = word.str.indexOf(parsed.digits);
     const digit = { ...word, x0: word.x0 + (word.x1 - word.x0) * offset / word.str.length,
       x1: word.x0 + (word.x1 - word.x0) * (offset + parsed.digits.length) / word.str.length };
@@ -42,11 +41,11 @@ function candidateDigit(c, numbers) {
     (n.digit.x0 + n.digit.x1) / 2 >= c.x0 - 0.002 && (n.digit.x0 + n.digit.x1) / 2 <= c.x1 + 0.002 &&
     (n.digit.y0 + n.digit.y1) / 2 >= c.y0 - 0.002 && (n.digit.y0 + n.digit.y1) / 2 <= c.y1 + 0.002);
   own.sort((a, b) => boxIou(b.digit, c) - boxIou(a.digit, c));
-  // OCR candidates already have a number-local box. Never read hidden text.
+  // 글자 레이어에 없는 후보(OCR)는 후보 상자가 곧 숫자 상자. 보이지 않는 글자 레이어는 쓰지 않음
   return own[0]?.digit || c;
 }
 
-/** Rescue only text-layer digits. Use the existing candidate constructor/parser. */
+/** 모델이 찾았는데 후보에 없는 번호를 글자 레이어 숫자에서 되살림 (후보는 extractCandidates 로 똑같이 만듦) */
 export function rescueNumberTokens(page, boxes = page.numberBoxes || []) {
   if (page.hiddenText || !page.tokens?.length) return [];
   const { words, numbers, lines } = tokenNumbers(page.tokens);
@@ -75,7 +74,7 @@ export function rescueNumberTokens(page, boxes = page.numberBoxes || []) {
   return rescued;
 }
 
-/** One candidate per visual box. No sequence, expected-count or cross-document evidence. */
+/** 모델 상자마다 후보 하나 (모델이 못 보는 말머리 묶음은 빼고) */
 export function supportedNumberCandidates(page, blindPrefixes = []) {
   const boxes = page.numberBoxes || [];
   const { numbers } = tokenNumbers(page.hiddenText ? [] : page.tokens);
@@ -98,13 +97,19 @@ export function mergeNumberModelAnchors(page, today, blindPrefixes) {
   const blind = new Set(blindPrefixes);
   const { numbers } = tokenNumbers(page.hiddenText ? [] : page.tokens);
   const merged = [];
-  // Preserve blind-group objects first; a visual duplicate must not replace one.
+  // 모델이 못 보는 말머리 묶음은 기존 결과를 그대로 먼저 두고, 같은 자리의 모델 후보는 겹치면 버림
   for (const c of [...today.filter(c => blind.has(c.prefix || '')), ...supportedNumberCandidates(page, blindPrefixes)]) {
     if (!merged.some(d => c === d || boxIou(candidateDigit(c, numbers), candidateDigit(d, numbers)) >= 0.7)) merged.push(c);
   }
   return merged.sort(byReadingOrder);
 }
 
+/**
+ * 이 문서에서 모델을 믿을지 (모델 상자와 쪽 글자·후보가 얼마나 맞는지만 봄)
+ *  - 모델 상자 8개 이상, 그중 90% 이상이 글자 레이어 숫자나 후보와 맞아야 함
+ *  - 지금 고른 번호를 말머리 묶음별로 보고, 70% 이상 모델과 맞는 묶음(작은 묶음은 그냥)만 모델대로. 나머지는 "못 보는 묶음"
+ *  - 실패한 쪽이 있거나 일찍 멈췄으면 믿지 않음
+ */
 export function numberModelTrust(pages, anchors, { minBoxes = NUMBER_MODEL_PROBE_BOXES, minAnchors = 4, blindPrefixes: savedBlind, earlyStopped = false, pagesRun, evidencePages = 0, probeBoxes = 0 } = {}) {
   let boxes = 0, explained = 0, finalAnchors = 0, supported = 0, failed = false;
   const perPage = [];
@@ -143,7 +148,7 @@ export function numberModelTrust(pages, anchors, { minBoxes = NUMBER_MODEL_PROBE
     blindPrefixes, groups, failed, earlyStopped, pagesRun: pagesRun ?? perPage.filter(p => p.ran).length, evidencePages, probeBoxes, perPage };
 }
 
-// A failed/unavailable optional detector leaves the rules-only path intact.
+// 모델이 없거나 실패하면 undefined → 예전 방식 그대로
 export async function installedNumberModel(api = window.ohdap) {
   try {
     if (!(await api?.numbersStatus?.())?.installed) return undefined;

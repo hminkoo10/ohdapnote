@@ -1,6 +1,9 @@
 'use strict';
 
-// Single-class visual number detector. No numbering/sequence assumptions here.
+// 문항 번호 찾기 모델 (한 종류 'number', Ultralytics YOLO11n 을 미세 조정, AGPL-3.0) 을 onnxruntime-node 로 실행
+// - 앱에서는 utilityProcess(numberdet-worker.js) 안에서 돌림. 모델은 설치 파일에 들어 있음(resources/models/ohdap-pnd-1)
+// - 입력: 쪽 그림(RGBA, 긴 변 1024px 로 그린 것) → 1024×1024 레터박스(회색 114) → RGB /255
+// - 출력: 쪽 크기 대비 비율 상자 [{ x0, y0, x1, y1, score }]
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
@@ -24,7 +27,7 @@ function modelStatus(dir) {
   return { installed, dir, bytes };
 }
 
-// Python round(): ties go to the even integer, including odd padding widths.
+// 학습 때 쓴 Python round() 와 같게: 딱 .5 면 짝수 쪽으로
 function roundEven(x) {
   const lo = Math.floor(x);
   return (x - lo === 0.5 ? lo + (lo % 2 !== 0 ? 1 : 0) : Math.round(x)) || 0;
@@ -37,7 +40,7 @@ function letterbox(width, height) {
   return { width, height, r, nw, nh, left: roundEven((SIZE - nw) / 2 - 0.1), top: roundEven((SIZE - nh) / 2 - 0.1) };
 }
 
-/** RGBA -> RGB bilinear letterbox -> float32 NCHW /255. Alpha is not a model input. */
+/** RGBA → RGB, 크기가 다르면 쌍선형으로 맞춰 레터박스 → float32 NCHW /255 (알파는 안 씀) */
 function preprocess({ data, width, height }) {
   const geometry = letterbox(width, height);
   if (!data || data.length !== width * height * 4) throw new Error('Invalid RGBA length');
@@ -68,7 +71,7 @@ function iou(a, b) {
   return area > 0 ? intersection / area : 0;
 }
 
-/** Decode [1,5,N], stable score order, clipped boxes, greedy IoU > .7 NMS. */
+/** 출력 [1,5,N] 풀기: 점수 높은 순(같으면 앞 것), 0.25 이상, 쪽 안으로 자르고, IoU 0.7 넘게 겹치면 버림, 최대 300개 */
 function decode({ data, dims }, geometry, { conf = 0.25, nms = 0.7, max = 300 } = {}) {
   if (dims?.length !== 3 || dims[0] !== 1 || dims[1] !== 5 || data.length !== 5 * dims[2]) throw new Error('Invalid detector output');
   const n = dims[2], { width, height, r, left, top } = geometry;

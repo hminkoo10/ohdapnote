@@ -1003,7 +1003,8 @@ function stopMathocrWorker() {
   w.proc.kill(); // 남은 요청은 'exit' 에서 실패로 끝남
 }
 
-// Bundled only in production; local model override is development-only.
+// 번호 찾기 모델 (문항 번호 위치를 그림에서 찾음) — 설치 파일에 들어 있음(resources/models). 개발 실행에서만 OHDAP_PND_DIR 로 바꿀 수 있음
+// 수식 인식처럼 utilityProcess(numberdet-worker.js)에서 돌리고, 2분 동안 안 쓰면 끔
 const numberdetDir = () => !app.isPackaged && process.env.OHDAP_PND_DIR
   ? process.env.OHDAP_PND_DIR : path.join(process.resourcesPath, 'models', numberdet.MODEL_DIR_NAME);
 let numberdetWorker = null;
@@ -1011,7 +1012,7 @@ let numberdetSeq = 0;
 
 function startNumberdetWorker() {
   if (numberdetWorker) return numberdetWorker;
-  const proc = utilityProcess.fork(path.join(__dirname, 'numberdet-worker.js'), [], { serviceName: 'OhdapNote numbers' });
+  const proc = utilityProcess.fork(path.join(__dirname, 'numberdet-worker.js'), [], { serviceName: 'OhdapNote 번호 찾기' });
   const w = { proc, pending: new Map(), idle: null };
   proc.on('message', (msg) => {
     if (msg?.type !== 'done') return;

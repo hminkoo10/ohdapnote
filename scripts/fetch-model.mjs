@@ -1,4 +1,6 @@
-// 설치 파일에 넣을 수식 인식 모델(Pix2Text MFR-1.5 를 문제집 수식으로 미세 조정한 모델, MIT)을 build/models 에 받아 둡니다.
+// 설치 파일에 넣을 모델 둘을 build/models 에 받아 둡니다.
+//  - 수식 인식(Pix2Text MFR-1.5 를 문제집 수식으로 미세 조정한 모델, MIT) → ohdap-mfr-1
+//  - 문항 번호 찾기(Ultralytics YOLO11n 을 미세 조정한 모델, AGPL-3.0) → ohdap-pnd-1
 // 저장소에는 올리지 않고(.gitignore), electron-builder 가 extraResources 로 resources/models 에 넣습니다.
 // (npm run dist · 배포 워크플로가 빌드 전에 실행. 이미 받아 둔 파일은 크기·sha256 이 맞으면 건너뜀)
 import { readdirSync, rmSync, writeFileSync, createReadStream } from 'node:fs';
@@ -18,7 +20,7 @@ async function sha256(file) {
   return hash.digest('hex');
 }
 
-// Exported so integrity, caching and failure paths can be tested without a release/network.
+// 파일 하나를 받아 크기·sha256 확인 뒤 저장 (이미 맞는 파일은 건너뜀). 시험에서 fetch 를 바꿔 끼울 수 있게 내보냄
 export async function fetchVerifiedFile({ dir, spec, url, fetch: fetchFn = globalThis.fetch }) {
   await mkdir(dir, { recursive: true });
   const dest = join(dir, spec.name), part = `${dest}.part`;
@@ -45,6 +47,7 @@ export async function fetchVerifiedFile({ dir, spec, url, fetch: fetchFn = globa
   }
 }
 
+// build/models 는 통째로 설치 파일에 들어감 → 예전 모델 폴더(배포 캐시로 되살아난 것 등)는 지움
 export function pruneModelFolders(modelsDir) {
   for (const entry of readdirSync(modelsDir, { withFileTypes: true })) {
     if (entry.isDirectory() && ![MODEL_DIR_NAME, NUMBER_DIR].includes(entry.name)) {
@@ -67,7 +70,6 @@ async function main() {
   });
   const st = modelStatus(dir);
   if (!st.installed) throw new Error(`[fetch-model] 모델 파일이 맞지 않습니다: ${dir}`);
-  // build/models 는 통째로 설치 파일에 들어감 → 예전 모델 폴더(배포 캐시로 되살아난 것 등)는 지움
   const numberDir = join(root, 'build', 'models', NUMBER_DIR);
   for (const spec of NUMBER_FILES) {
     await fetchVerifiedFile({ dir: numberDir, spec, url: `https://github.com/hminkoo10/ohdapnote/releases/download/pnd-model-1/${spec.name}` });

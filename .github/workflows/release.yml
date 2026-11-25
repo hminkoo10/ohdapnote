@@ -144,8 +144,8 @@ jobs:
         run: |
           npx electron-builder --win dir --x64 --publish never
           test -f dist/win-unpacked/resources/models/ohdap-mfr-1/encoder_model.onnx || { echo "::error::묶음에 수식 인식 모델이 없습니다"; exit 1; }
-          test -f dist/win-unpacked/resources/models/ohdap-pnd-1/model.onnx || { echo "::error::Missing number model"; exit 1; }
-          [ "$(find dist/win-unpacked/resources/models -mindepth 1 -maxdepth 1 -type d | wc -l)" = 2 ] || { echo "::error::Expected exactly two model folders"; exit 1; }
+          test -f dist/win-unpacked/resources/models/ohdap-pnd-1/model.onnx || { echo "::error::묶음에 번호 찾기 모델이 없습니다"; exit 1; }
+          [ "$(find dist/win-unpacked/resources/models -mindepth 1 -maxdepth 1 -type d | wc -l)" = 2 ] || { echo "::error::묶음의 모델 폴더가 두 개가 아닙니다"; ls dist/win-unpacked/resources/models; exit 1; }
           node scripts/write-manifest.mjs
           v="$(node -p "require('./package.json').version")"
           (cd dist/win-unpacked && 7z a -tzip -mx=5 "../OhdapNote-$v-win-x64.zip" . > /dev/null)
