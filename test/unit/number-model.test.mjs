@@ -220,41 +220,42 @@ test('cancellation: late model rejection is consumed after abort', async () => {
   await new Promise(setImmediate);
 });
 
-test('probe: stop after 12 candidate pages below 8 boxes and preserve the entire rules-only result', async () => {
+const manyPages = (n, extra = {}) => {
   const src = source(page());
-  src.syntheticPages = Array.from({ length: 16 }, (_, index) => ({ ...page(), index }));
-  src.syntheticPages[0].candidates = [];
-  src.syntheticPages[1].layout.blank = true;
+  src.syntheticPages = Array.from({ length: n }, (_, index) => ({ ...page(), index, ...extra }));
   src.pages = src.syntheticPages.map(() => ({ w: 724, h: 1024 })); src.numPages = src.pages.length;
+  return src;
+};
+
+test('probe: 빈 쪽이 아닌 앞 24쪽에서 번호가 20개 미만이면 멈추고 규칙 결과는 그대로', async () => {
+  const src = manyPages(30);
+  src.syntheticPages[0].candidates = []; // 표지처럼 후보가 없는 쪽도 셈
+  src.syntheticPages[1].layout.blank = true; // 빈 쪽은 모델도 안 돌리고 세지도 않음
   const pages = src.pages.map((_, i) => i);
   const before = await analyzeDocument(src, { pages });
   let calls = 0, stats;
-  const after = await analyzeDocument(src, { pages, numberModel: { async detect() { calls++; return []; }, onResult(s) { stats = s; } } });
-  assert.equal(calls, 13); // one nonblank non-candidate page + 12 candidate pages
-  assert.equal(stats.pagesRun, 13); assert.equal(stats.evidencePages, 12);
-  assert.equal(stats.earlyStopped, true); assert.equal(stats.trusted, false);
-  assert.equal(stats.failed, false);
+  // 쪽마다 상자 0개, 단 첫 쪽만 19개 → 24쪽까지 19개
+  const after = await analyzeDocument(src, { pages, numberModel: { async detect() { return calls++ ? [] : Array.from({ length: 19 }, () => box(tokens()[0])); }, onResult(s) { stats = s; } } });
+  assert.equal(calls, 24);
+  assert.equal(stats.pagesRun, 24); assert.equal(stats.evidencePages, 24); assert.equal(stats.probeBoxes, 19);
+  assert.equal(stats.earlyStopped, true); assert.equal(stats.trusted, false); assert.equal(stats.failed, false);
   assert.deepEqual(after, before);
 });
 
-test('probe: sufficient visual evidence keeps detection enabled beyond 12 candidate pages', async () => {
-  const src = source(page());
-  src.syntheticPages = Array.from({ length: 14 }, (_, index) => ({ ...page(), index }));
-  src.pages = src.syntheticPages.map(() => ({ w: 724, h: 1024 })); src.numPages = src.pages.length;
+test('probe: 앞 24쪽에 번호가 20개 이상이면 끝까지 돌림', async () => {
+  const src = manyPages(26);
   let calls = 0, stats;
   await analyzeDocument(src, { pages: src.pages.map((_, i) => i), numberModel: {
     async detect() { calls++; return tokens().map(box); }, onResult(s) { stats = s; } } });
-  assert.equal(calls, 14); assert.equal(stats.pagesRun, 14); assert.equal(stats.earlyStopped, false);
+  assert.equal(calls, 26); assert.equal(stats.pagesRun, 26); assert.equal(stats.evidencePages, 24); assert.equal(stats.earlyStopped, false);
 });
 
-test('probe: already available OCR candidates count without mutating the rules-only page', async () => {
-  const src = source(page());
-  src.syntheticPages = Array.from({ length: 14 }, (_, index) => ({ ...page(), index, source: 'ocr', candidates: [], ocrPasses: [tokens()] }));
-  src.pages = src.syntheticPages.map(() => ({ w: 724, h: 1024 })); src.numPages = src.pages.length;
+test('probe: 번호를 OCR 로 읽는 책(모델이 끝날 때 후보가 아직 없음)도 24쪽에서 멈춤', async () => {
+  const src = manyPages(30, { source: 'ocr', candidates: [], ocrPasses: [] });
   const pages = src.pages.map((_, i) => i);
   const before = await analyzeDocument(src, { pages });
   let calls = 0, stats;
   const after = await analyzeDocument(src, { pages, numberModel: { async detect() { calls++; return []; }, onResult(s) { stats = s; } } });
-  assert.equal(calls, 12); assert.equal(stats.evidencePages, 12); assert.equal(stats.earlyStopped, true);
+  assert.equal(calls, 24); assert.equal(stats.earlyStopped, true);
   assert.deepEqual(after, before);
 });

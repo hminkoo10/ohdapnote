@@ -1,9 +1,11 @@
 import { buildLines, extractCandidates, parseNumberWord, PREFIXES, byReadingOrder, columnOf, zoneOf } from './detect.js';
 
 // 번호 찾기 모델(문항 번호 위치를 그림에서 찾음)의 결과를 번호 고르기에 보탭니다.
-// 번호 후보가 있는 쪽을 12쪽 봤는데 모델이 찾은 번호가 8개도 안 되면 모델이 모르는 디자인 → 나머지 쪽은 돌리지 않음
-export const NUMBER_MODEL_PROBE_PAGES = 12;
-export const NUMBER_MODEL_PROBE_BOXES = 8;
+// 빈 쪽이 아닌 앞 24쪽에서 모델이 찾은 번호가 20개도 안 되면 모델이 모르는 디자인 → 나머지 쪽은 돌리지 않음
+// (앞쪽에 개념 설명이 많은 문제집도 24쪽이면 30개 안팎, 모르는 디자인은 10개 안팎이었음. 번호를 OCR 로 읽는 책은
+//  모델이 끝날 때 아직 번호 후보가 없을 수 있어서, 후보가 아니라 쪽 수로 셈)
+export const NUMBER_MODEL_PROBE_PAGES = 24;
+export const NUMBER_MODEL_PROBE_BOXES = 20;
 
 export function boxIou(a, b) {
   const overlap = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
@@ -110,7 +112,7 @@ export function mergeNumberModelAnchors(page, today, blindPrefixes) {
  *  - 지금 고른 번호를 말머리 묶음별로 보고, 70% 이상 모델과 맞는 묶음(작은 묶음은 그냥)만 모델대로. 나머지는 "못 보는 묶음"
  *  - 실패한 쪽이 있거나 일찍 멈췄으면 믿지 않음
  */
-export function numberModelTrust(pages, anchors, { minBoxes = NUMBER_MODEL_PROBE_BOXES, minAnchors = 4, blindPrefixes: savedBlind, earlyStopped = false, pagesRun, evidencePages = 0, probeBoxes = 0 } = {}) {
+export function numberModelTrust(pages, anchors, { minBoxes = 8, minAnchors = 4, blindPrefixes: savedBlind, earlyStopped = false, pagesRun, evidencePages = 0, probeBoxes = 0 } = {}) {
   let boxes = 0, explained = 0, finalAnchors = 0, supported = 0, failed = false;
   const perPage = [];
   const prefixGroups = new Map();
