@@ -2,6 +2,7 @@
 
 import { h, clear, toast, confirmDialog, debounce, formatDate, icon, animateOut } from './ui.js';
 import { analyzeDocument, parsePageRange, reanalyzeSinglePage, replacePageItems } from './analyze.js';
+import { installedNumberModel } from './number-model.js';
 import { ROLES, ROLE_NAME, pageLabel, bookPage, computeMatches, normalizeDoc, findItem, flaggedPages, missingNumbers, missingCount } from './store.js';
 import { api, state, nav, leaveHooks, makeSaver, getSource, getSources, dropSources, clearPreviewCache, renderPreview, renderQTable, runGeminiPages, geminiReady, aiOff, jobs, findJob, startJob, holdBook, holdSource, liveBook, errMsg, restartSaveHooks, restartPendingChecks, setRestartBusy } from './shared.js';
 import { topbar } from './chrome.js';
@@ -641,7 +642,9 @@ async function analyzeRole(role, { only = null } = {}) {
   const openAction = [{ label: '책 열기', onClick: () => nav.book(b.id, { role }) }];
   try {
     const before = (doc.items || []).map((it) => it.id);
+    const numberModel = await installedNumberModel();
     const res = await analyzeDocument(src, {
+      numberModel,
       previousDoc: doc,
       pages,
       role,
@@ -655,6 +658,10 @@ async function analyzeRole(role, { only = null } = {}) {
         updateProgress();
       },
     });
+    if (numberModel) {
+      doc.numberModelTrusted = !!numberModel.trust?.trusted;
+      doc.numberModel = { trusted: doc.numberModelTrusted, blindPrefixes: numberModel.trust?.blindPrefixes || [] };
+    }
     if (only) {
       // 새 쪽 것만 더함 (번호 모양·쪽 번호 맞춤·직접 고친 표시는 처음 분석한 대로)
       doc.items = [...doc.items.filter((it) => !only.includes(it.page)), ...res.items.filter(it => only.includes(it.page))];
@@ -914,7 +921,7 @@ async function deepPage(role, page) {
   setRestartBusy('deep-page', true);
   try {
     const before = (doc.items || []).filter((it) => it.page === page);
-    const { items, page: info, meta } = await reanalyzeSinglePage(src, doc, page, { ocrLang: state.settings.ocrLang, deep: true, role, subject: b.subject });
+    const { items, page: info, meta } = await reanalyzeSinglePage(src, doc, page, { ocrLang: state.settings.ocrLang, deep: true, role, subject: b.subject, numberModel: await installedNumberModel() });
     close();
     const sameAsBefore = items.length === before.length && items.every((it, k) => it.num === before[k]?.num);
     if (items.length < before.length) {

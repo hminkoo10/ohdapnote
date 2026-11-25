@@ -3,6 +3,7 @@ import { identifyExam, examForm, selections } from './mockexam.js';
 import { planExamImport, examImportItems, examAnswerFiles } from './mockexam-plan.js';
 import { newDoc } from './store.js';
 import { analyzeDocument } from './analyze.js';
+import { installedNumberModel } from './number-model.js';
 import { parseAnswerKey, answerKeyToAnswers } from './mockexam-answers.js';
 import { recognizeWords } from './ocr.js';
 import { recognizeAnswerGrid, preferGridAnswerKey, answerGridScope } from './mockexam-image.js';
@@ -151,7 +152,12 @@ export async function importExamFolder(paths, { onProgress = () => {}, signal, p
           const doc = book.docs[role], src = sources[role];
           if (!doc || doc.analyzedAt) continue;
           if (!src) throw Error('시험지 파일을 열지 못했어요.');
-          const res = await analyzeDocument(src, { previousDoc: doc, pages: Array.from({ length: src.numPages }, (_, i) => i), role, subject: book.subject, ...doc.options, exam: row.metadata, ocrLang: 'kor+eng', signal, onProgress: (p) => onProgress({ ...p, name: row.name, queue: q }) });
+          const numberModel = await installedNumberModel();
+          const res = await analyzeDocument(src, { previousDoc: doc, pages: Array.from({ length: src.numPages }, (_, i) => i), role, subject: book.subject, ...doc.options, numberModel, exam: row.metadata, ocrLang: 'kor+eng', signal, onProgress: (p) => onProgress({ ...p, name: row.name, queue: q }) });
+          if (numberModel) {
+            doc.numberModelTrusted = !!numberModel.trust?.trusted;
+            doc.numberModel = { trusted: doc.numberModelTrusted, blindPrefixes: numberModel.trust?.blindPrefixes || [] };
+          }
           Object.assign(doc, { items: examImportItems(res.items), pageInfo: res.pageInfo, signature: res.signature, analyzedAt: Date.now() });
           await api.saveBook(book);
         }

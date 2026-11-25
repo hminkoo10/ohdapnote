@@ -1,4 +1,5 @@
 import { numberContextGrid, filterNumberContexts } from './number-context.js';
+import { numberModelTrust, mergeNumberModelAnchors, NUMBER_MODEL_PROBE_PAGES, NUMBER_MODEL_PROBE_BOXES } from './number-model.js';
 import { classifyPageRole, classifyAnswerTableShape } from './pagerole.js';
 import { residualBoundaries, rangesForItems } from './region-boundaries.js';
 import { trailingNonQuestionPages, applyPageExclusions, isExcludedPage } from './page-exclusions.js';
@@ -36,6 +37,83 @@ import { createCanvas } from './docsource.js';
 import { stabilizeExamPages, stabilizeLegacyExamPages } from './exam-sections.js';
 
 const ANALYSIS_WIDTH = 960; // 레이아웃 분석용 렌더링 폭(px)
+
+// 번호 찾기 모델: 학습 때처럼 긴 변 1024px 로 새로 그려 넘김 (분석용 960px 그림을 늘려 쓰지 않음)
+async function detectPageNumbers(src, page, numberModel, signal) {
+  const start = performance.now();
+  let canvas;
+  try {
+    const size = src.pages[page.index];
+    canvas = await src.renderPage(page.index, 1024 * size.w / Math.max(size.w, size.h));
+    const image = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);
+    page.numberRenderMs = performance.now() - start;
+    canvas.width = canvas.height = 0;
+    if (signal?.aborted) return;
+    const t = performance.now();
+    page.numberModelRan = true;
+    const boxes = await numberModel.detect({ data: image.data, width: image.width, height: image.height });
+    if (signal?.aborted) return;
+    if (!Array.isArray(boxes) || boxes.some(b => ![b.x0, b.y0, b.x1, b.y1, b.score].every(Number.isFinite) ||
+      b.x0 < 0 || b.y0 < 0 || b.x1 > 1 || b.y1 > 1 || b.x1 <= b.x0 || b.y1 <= b.y0)) throw new Error('Invalid number boxes');
+    page.numberBoxes = boxes;
+    page.numberDetectMs = performance.now() - t;
+  } catch {
+    if (!signal?.aborted) page.numberModelFailed = true;
+  } finally {
+    if (canvas) canvas.width = canvas.height = 0;
+    if (!signal?.aborted) page.numberModelMs = performance.now() - start;
+  }
+}
+
+// 취소하면 기다림만 멈춤 (돌고 있던 계산은 뒤에서 끝나고 결과는 버림)
+function waitNumberDetection(task, signal) {
+  if (!signal) return task;
+  abortIfNeeded(signal);
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new DOMException('분석을 취소했습니다.', 'AbortError'));
+    signal.addEventListener('abort', abort, { once: true });
+    task.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort)).catch(() => {});
+  });
+}
+
+function hasNumberCandidates(page) {
+  if (page.candidates.length) return true;
+  if (!page.ocrPasses.length) return false;
+  // 미리 읽은 OCR 결과가 있으면 사본으로 후보만 세어 봄 (원래 쪽은 건드리지 않고 OCR 도 기다리지 않음)
+  const probe = { ...page };
+  extractOcr(probe);
+  return probe.candidates.length > 0;
+}
+
+/**
+ * 모델 결과를 믿을 만한 문서면 번호를 모델 상자대로 다시 정함 (못 믿으면 아무것도 바꾸지 않음)
+ *  - 모델이 못 보는 말머리 묶음(예: 디자인이 다른 "예제")은 지금 고른 번호를 그대로 둠
+ */
+export function applyNumberModel(results, anchors, numberModel, { allowTrust = true, ...options } = {}) {
+  // OCR 다시 읽기·잘라 읽기로 되살린 후보도 포함
+  for (const page of results) page.numberCandidates = [...new Set([
+    ...(page.numberCandidates || []), ...(page.candidates || []), ...(anchors.get(page.index) || []),
+  ])];
+  const trust = numberModelTrust(results, anchors, options);
+  trust.trusted &&= allowTrust;
+  numberModel.onResult?.(trust);
+  if (!trust.trusted) {
+    for (const page of results) for (const key of ['numberBoxes', 'numberCandidates', 'numberModelFailed', 'numberModelRan', 'numberModelMs', 'numberRenderMs', 'numberDetectMs']) delete page[key];
+    return false;
+  }
+  for (const page of results) {
+    const supported = mergeNumberModelAnchors(page, anchors.get(page.index) || [], trust.blindPrefixes);
+    anchors.set(page.index, supported);
+    page.candidates = supported;
+    // 제목 경계는 못 보는 묶음의 영역(앞 쪽에서 이어지는 것 포함)도 끊으므로, 그런 묶음이 있으면 그대로 둠.
+    // 없으면 모델이 되살린 번호와 겹치는 제목 경계만 뺌
+    if (!trust.blindPrefixes.length && supported.length && page.contextHeadings?.length) {
+      page.contextHeadings = page.contextHeadings.filter(h => !supported.some(c =>
+        c.x0 < h.x1 && c.x1 > h.x0 && c.y0 < h.y1 && c.y1 > h.y0));
+    }
+  }
+  return true;
+}
 // OCR 방식(렌더링 폭 px): 처음엔 쪽 전체 + 번호 띠, 번호가 빠진 쪽은 해상도를 바꿔 한 번 더(놓치는 글자가 달라짐)
 const OCR_PASSES = [
   { width: 1700, mode: 'page' },
@@ -770,6 +848,8 @@ export async function analyzeDocument(src, opts) {
   let { pages } = opts;
   let results = [];
   let splitHint = null; // 번호 위치로 추정한 단 위치(같은 책 다음 쪽에도 적용)
+  let numberPending;
+  const numberRun = { pagesRun: 0, evidencePages: 0, probeBoxes: 0, earlyStopped: false };
 
   // 1) 쪽마다 레이아웃·글자 레이어 (빠름). 스캔한 쪽은 읽는 대로 쪽 전체 OCR 을 시작
   const count = { done: 0, total: 0 }; // OCR 진행 (쪽 × 방식)
@@ -782,6 +862,22 @@ export async function analyzeDocument(src, opts) {
     if (page.layout.inferred) splitHint = page.layout.inferred;
     results.push(page);
     if (page.needsOcr) early.push(page);
+    if (opts.numberModel && !page.layout.blank && !numberRun.earlyStopped) {
+      // 모델 계산은 한 번에 한 쪽만: 이 쪽을 계산하는 동안 다음 쪽을 읽음
+      if (numberPending) await waitNumberDetection(numberPending, signal);
+      abortIfNeeded(signal);
+      if (!numberRun.earlyStopped) {
+        numberPending = detectPageNumbers(src, page, opts.numberModel, signal).then(() => {
+          if (signal?.aborted) return;
+          if (page.numberModelRan) numberRun.pagesRun++;
+          if (page.numberModelRan && hasNumberCandidates(page)) {
+            numberRun.evidencePages++;
+            numberRun.probeBoxes += page.numberBoxes?.length || 0;
+            if (numberRun.evidencePages === NUMBER_MODEL_PROBE_PAGES && numberRun.probeBoxes < NUMBER_MODEL_PROBE_BOXES) numberRun.earlyStopped = true;
+          }
+        }).catch(() => { if (!signal?.aborted) page.numberModelFailed = true; });
+      }
+    }
   }
 
   // 문제집 뒤에 붙은 정답과 풀이는 문제가 아님 (글자 레이어로 알 수 있으면 OCR 전에 뺌)
@@ -808,6 +904,11 @@ export async function analyzeDocument(src, opts) {
   await ocrPages(src, ocrList.filter((r) => !r.ocrPasses.length), { ...ocrOpts, passes: OCR_PASSES.slice(0, 1), finish: false });
   await ocrPages(src, ocrList, { ...ocrOpts, passes: OCR_PASSES.slice(1) });
   shareSplitHints(results);
+  if (opts.numberModel) {
+    if (numberPending) await waitNumberDetection(numberPending, signal);
+    abortIfNeeded(signal);
+    for (const r of results) r.numberCandidates = r.candidates.slice();
+  }
   if (answersFrom < 0) cutAnswers(); // 스캔본은 OCR 로 정답표를 알아본 뒤에
   onProgress?.({ phase: 'scan', done: pages.length, total: pages.length, message: '번호 정리 중' });
 
@@ -851,6 +952,7 @@ export async function analyzeDocument(src, opts) {
   const examSections = role === 'problem' && ['korean', 'math', 'english'].includes(opts.subject) ? (stabilizeExamPages(results, anchors, opts.subject) || stabilizeLegacyExamPages(results, anchors, opts.subject, opts.exam)) : null;
   // Judge EVERY final anchor identically after all recovery, without chain/group inputs.
   for (const r of results) anchors.set(r.index,filterNumberContexts(r,anchors.get(r.index)||[]));
+  if (opts.numberModel) applyNumberModel(results, anchors, opts.numberModel, numberRun);
   const layouts = new Map(results.map((r) => [r.index, r.layout]));
   const grids = new Map(results.map((r) => [r.index, r.grid]));
   const sourceMap = new Map(results.map((r) => [r.index, r.source]));
@@ -1073,7 +1175,7 @@ export function replacePageItems(items, pageIdx, newItems) {
  *  - 글자가 있어도 OCR 을 함께, 더 높은 해상도·넓은 띠·두 가지 방식으로 읽고
  *  - 앞 쪽 마지막 번호 ~ 뒤 쪽 첫 번호 사이에 들어갈 번호를 모양과 상관없이 가장 길게 이어지게 고름
  */
-export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true, role = 'problem', subject } = {}) {
+export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true, role = 'problem', subject, numberModel } = {}) {
   const saved = doc.pageInfo?.[idx];
   if (isExcludedPage(saved)) {
     // 아직 뺀 쪽의 보관 원본은 보호하고, 되돌린 쪽은 보통 쪽처럼 다시 찾습니다.
@@ -1082,6 +1184,10 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
   }
   const passages = subject === 'english' || subject === 'korean';
   const page = await analyzePage(src, idx, { ocrLang, deep, role, passages });
+  if (numberModel && !page.layout.blank) {
+    await detectPageNumbers(src, page, numberModel);
+    page.numberCandidates = page.candidates.slice();
+  }
   const sorted = sortItems((doc.items || []).filter((it) => !it.prefix));
   const prev = sorted.filter((it) => it.page < idx);
   const next = sorted.filter((it) => it.page > idx);
@@ -1110,6 +1216,13 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
   chain = filterNumberContexts(page,chain);
   if (passages) chain = excludeRangeNumbers(chain, page.ranges || []);
   const anchors = new Map([[idx, chain]]);
+  if (numberModel) {
+    // 한 쪽만으로는 정하지 않음: 문서 전체 분석에서 모델을 믿기로 한 경우에만, 그때 정한 못 보는 묶음 그대로
+    const savedModel = doc.numberModel;
+    applyNumberModel([page], anchors, numberModel, { minBoxes: 1, minAnchors: 1,
+      allowTrust: savedModel?.trusted === true && Array.isArray(savedModel.blindPrefixes), blindPrefixes: savedModel?.blindPrefixes || [] });
+    chain = anchors.get(idx);
+  }
   const newItems = computeItems([idx], anchors, new Map([[idx, page.layout]]), new Map([[idx, page.grid]]), {
     flow: doc.options?.flow || 'column',
     passages,

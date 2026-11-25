@@ -1,38 +1,86 @@
-// 설치 파일에 넣을 수식 인식 모델(Pix2Text MFR-1.5 를 문제집 수식으로 미세 조정한 모델, MIT)을 build/models 에 받아 둡니다.
+// 설치 파일에 넣을 모델 둘을 build/models 에 받아 둡니다.
+//  - 수식 인식(Pix2Text MFR-1.5 를 문제집 수식으로 미세 조정한 모델, MIT) → ohdap-mfr-1
+//  - 문항 번호 찾기(Ultralytics YOLO11n 을 미세 조정한 모델, AGPL-3.0) → ohdap-pnd-1
 // 저장소에는 올리지 않고(.gitignore), electron-builder 가 extraResources 로 resources/models 에 넣습니다.
 // (npm run dist · 배포 워크플로가 빌드 전에 실행. 이미 받아 둔 파일은 크기·sha256 이 맞으면 건너뜀)
-import { readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { readdirSync, rmSync, writeFileSync, createReadStream } from 'node:fs';
+import { mkdir, stat, writeFile, rename, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { installModel, modelStatus, MODEL_REPO, MODEL_REVISION, MODEL_DIR_NAME } = createRequire(import.meta.url)(join(root, 'src', 'main', 'mathocr.js'));
-const dir = join(root, 'build', 'models', MODEL_DIR_NAME);
+const { MODEL_DIR_NAME: NUMBER_DIR, MODEL_FILES: NUMBER_FILES } = createRequire(import.meta.url)(join(root, 'src', 'main', 'numberdet.js'));
 
-let shown = -10;
-await installModel({
-  dir,
-  onProgress: ({ file, percent }) => {
-    if (percent < shown + 10) return;
-    shown = percent;
-    console.log(`[fetch-model] ${percent}% (${file})`);
-  },
-});
-const st = modelStatus(dir);
-if (!st.installed) throw new Error(`[fetch-model] 모델 파일이 맞지 않습니다: ${dir}`);
-// build/models 는 통째로 설치 파일에 들어감 → 예전 모델 폴더(배포 캐시로 되살아난 것 등)는 지움
-for (const name of readdirSync(join(root, 'build', 'models'))) {
-  if (name !== MODEL_DIR_NAME) {
-    rmSync(join(root, 'build', 'models', name), { recursive: true, force: true });
-    console.log(`[fetch-model] 예전 모델 폴더를 지움: ${name}`);
+async function sha256(file) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
+// 파일 하나를 받아 크기·sha256 확인 뒤 저장 (이미 맞는 파일은 건너뜀). 시험에서 fetch 를 바꿔 끼울 수 있게 내보냄
+export async function fetchVerifiedFile({ dir, spec, url, fetch: fetchFn = globalThis.fetch }) {
+  await mkdir(dir, { recursive: true });
+  const dest = join(dir, spec.name), part = `${dest}.part`;
+  const existing = await stat(dest).catch(() => null);
+  if (existing?.size === spec.size && await sha256(dest) === spec.sha256) return;
+  try {
+    const response = await fetchFn(url, { redirect: 'follow' });
+    if (!response.ok) throw new Error(`Model HTTP ${response.status}`);
+    const chunks = [];
+    let length = 0;
+    for await (const chunk of response.body) {
+      length += chunk.length;
+      if (length > spec.size) throw new Error('Model size mismatch');
+      chunks.push(chunk);
+    }
+    const bytes = Buffer.concat(chunks);
+    if (length !== spec.size) throw new Error('Model size mismatch');
+    if (createHash('sha256').update(bytes).digest('hex') !== spec.sha256) throw new Error('Model sha256 mismatch');
+    await writeFile(part, bytes);
+    await rename(part, dest);
+  } catch (err) {
+    await rm(part, { force: true });
+    throw err;
   }
 }
 
-// 모델 저장소에는 라이선스 파일이 없어서(모델 카드에 MIT 로만 적힘) Pix2Text 의 MIT 라이선스를 함께 넣음
-writeFileSync(
-  join(dir, 'LICENSE.txt'),
-  `Fine-tuned from Pix2Text MFR-1.5 on math workbook formulas.
+// build/models 는 통째로 설치 파일에 들어감 → 예전 모델 폴더(배포 캐시로 되살아난 것 등)는 지움
+export function pruneModelFolders(modelsDir) {
+  for (const entry of readdirSync(modelsDir, { withFileTypes: true })) {
+    if (entry.isDirectory() && ![MODEL_DIR_NAME, NUMBER_DIR].includes(entry.name)) {
+      rmSync(join(modelsDir, entry.name), { recursive: true, force: true });
+    }
+  }
+}
+
+async function main() {
+  const dir = join(root, 'build', 'models', MODEL_DIR_NAME);
+
+  let shown = -10;
+  await installModel({
+    dir,
+    onProgress: ({ file, percent }) => {
+      if (percent < shown + 10) return;
+      shown = percent;
+      console.log(`[fetch-model] ${percent}% (${file})`);
+    },
+  });
+  const st = modelStatus(dir);
+  if (!st.installed) throw new Error(`[fetch-model] 모델 파일이 맞지 않습니다: ${dir}`);
+  const numberDir = join(root, 'build', 'models', NUMBER_DIR);
+  for (const spec of NUMBER_FILES) {
+    await fetchVerifiedFile({ dir: numberDir, spec, url: `https://github.com/hminkoo10/ohdapnote/releases/download/pnd-model-1/${spec.name}` });
+  }
+  writeFileSync(join(numberDir, 'LICENSE.txt'), 'Problem-number detector fine-tuned from Ultralytics YOLO11n (AGPL-3.0).\nDistributed under AGPL-3.0 with OhdapNote.\n');
+  pruneModelFolders(join(root, 'build', 'models'));
+
+  // 모델 저장소에는 라이선스 파일이 없어서(모델 카드에 MIT 로만 적힘) Pix2Text 의 MIT 라이선스를 함께 넣음
+  writeFileSync(
+    join(dir, 'LICENSE.txt'),
+    `Fine-tuned from Pix2Text MFR-1.5 on math workbook formulas.
 Pix2Text MFR-1.5 — https://huggingface.co/${MODEL_REPO} (revision ${MODEL_REVISION})
 Pix2Text — https://github.com/breezedeus/Pix2Text
 
@@ -58,5 +106,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 `,
-);
-console.log(`[fetch-model] 준비됨: ${dir} (${Math.round(st.bytes / 1e6)}MB)`);
+  );
+  console.log(`[fetch-model] 준비됨: ${dir} (${Math.round(st.bytes / 1e6)}MB)`);
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
