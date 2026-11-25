@@ -1,8 +1,8 @@
 'use strict';
 
-// 수식 인식 (AI 없이 내 컴퓨터에서) — Pix2Text 의 수식 인식 모델 MFR-1.5 (MIT) 를 onnxruntime-node 로 실행
+// 수식 인식 (AI 없이 내 컴퓨터에서) — Pix2Text MFR-1.5 를 문제집 수식으로 미세 조정한 모델 (MIT) 을 onnxruntime-node 로 실행
 // - 앱에서는 메인 프로세스가 아니라 utilityProcess(mathocr-worker.js) 안에서 돌립니다(계산하는 동안 창·IPC 가 멈추지 않게).
-// - 모델 파일은 처음 한 번 Hugging Face 에서 받아 <userData>/models/pix2text-mfr-1.5/ 에 둡니다(고정한 커밋, 크기·sha256 확인).
+// - 모델 파일은 처음 한 번 GitHub release 에서 받아 <userData>/models/ohdap-mfr-1/ 에 둡니다(고정한 파일, 크기·sha256 확인).
 // - 전처리·디코딩·후처리는 Python Pix2Text(LatexOCR + TrOCRProcessor) 와 같은 글자가 나오도록 그대로 옮겼습니다.
 //   · 그림: RGB 로 바꾼 뒤 Pillow BICUBIC 으로 384×384 (Pillow 의 정수 계산까지 똑같이), /255, (x-0.5)/0.5
 //   · 디코딩: 가장 높은 토큰을 고르는 greedy (디코더에 KV 캐시가 없어 매 단계 전체 길이를 다시 돌림)
@@ -32,14 +32,15 @@ const { once } = require('node:events');
 
 const MODEL_REPO = 'breezedeus/pix2text-mfr-1.5';
 const MODEL_REVISION = '1cef9f0bdcd6a4c63df7de1311fb0894593340cc'; // 2025-07-25 커밋 (main)
+const MODEL_DIR_NAME = 'ohdap-mfr-1';
 // 실행에 필요한 파일만. 나머지 설정 값(config.json 등)은 아래 상수로 옮겨 둠
 const MODEL_FILES = [
-  { name: 'encoder_model.onnx', size: 87510770, sha256: '080a3f660f08bc9ebcacdd96e34be6b6400f8c7e62d7cd0dd8251badc37f610b' },
-  { name: 'decoder_model.onnx', size: 32026253, sha256: '917deb98e91a0453c5f234f58a0f32f9fb037de8527c7eb4ed394daf9e692f2a' },
+  { name: 'encoder_model.onnx', size: 87499332, sha256: '369e3d7cf0f37df744a2675aa430e91234cbd0f802432bf692e05dcde54b3996' },
+  { name: 'decoder_model.onnx', size: 31989027, sha256: 'a212dfa4b8eafa1abfba88b5e3e6ab8ace3c7fe7201eb81a656fdf0b26af95cb' },
   { name: 'tokenizer.json', size: 113168, sha256: '4ffbeb2143e6a38324bb6111b7a8109530d38a076a8439aa5777535f0a32758a' },
 ];
 const MODEL_BYTES = MODEL_FILES.reduce((sum, f) => sum + f.size, 0);
-const fileUrl = (name) => `https://huggingface.co/${MODEL_REPO}/resolve/${MODEL_REVISION}/${name}`;
+const fileUrl = (name) => `https://github.com/hminkoo10/ohdapnote/releases/download/mfr-model-1/${name}`;
 
 // generation_config.json / config.json / preprocessor_config.json (위 커밋) 의 값
 const START_ID = 1; // decoder_start_token_id
@@ -629,6 +630,7 @@ function createMathOcr({ modelDir, threads } = {}) {
 module.exports = {
   MODEL_REPO,
   MODEL_REVISION,
+  MODEL_DIR_NAME,
   MODEL_FILES,
   modelStatus,
   installModel,

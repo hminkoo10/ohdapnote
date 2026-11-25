@@ -1,14 +1,14 @@
-// 설치 파일에 넣을 수식 인식 모델(Pix2Text MFR-1.5, MIT)을 build/models 에 받아 둡니다.
+// 설치 파일에 넣을 수식 인식 모델(Pix2Text MFR-1.5 를 문제집 수식으로 미세 조정한 모델, MIT)을 build/models 에 받아 둡니다.
 // 저장소에는 올리지 않고(.gitignore), electron-builder 가 extraResources 로 resources/models 에 넣습니다.
 // (npm run dist · 배포 워크플로가 빌드 전에 실행. 이미 받아 둔 파일은 크기·sha256 이 맞으면 건너뜀)
-import { writeFileSync } from 'node:fs';
+import { readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const { installModel, modelStatus, MODEL_REPO, MODEL_REVISION } = createRequire(import.meta.url)(join(root, 'src', 'main', 'mathocr.js'));
-const dir = join(root, 'build', 'models', 'pix2text-mfr-1.5');
+const { installModel, modelStatus, MODEL_REPO, MODEL_REVISION, MODEL_DIR_NAME } = createRequire(import.meta.url)(join(root, 'src', 'main', 'mathocr.js'));
+const dir = join(root, 'build', 'models', MODEL_DIR_NAME);
 
 let shown = -10;
 await installModel({
@@ -21,11 +21,19 @@ await installModel({
 });
 const st = modelStatus(dir);
 if (!st.installed) throw new Error(`[fetch-model] 모델 파일이 맞지 않습니다: ${dir}`);
+// build/models 는 통째로 설치 파일에 들어감 → 예전 모델 폴더(배포 캐시로 되살아난 것 등)는 지움
+for (const name of readdirSync(join(root, 'build', 'models'))) {
+  if (name !== MODEL_DIR_NAME) {
+    rmSync(join(root, 'build', 'models', name), { recursive: true, force: true });
+    console.log(`[fetch-model] 예전 모델 폴더를 지움: ${name}`);
+  }
+}
 
 // 모델 저장소에는 라이선스 파일이 없어서(모델 카드에 MIT 로만 적힘) Pix2Text 의 MIT 라이선스를 함께 넣음
 writeFileSync(
   join(dir, 'LICENSE.txt'),
-  `Pix2Text MFR-1.5 — https://huggingface.co/${MODEL_REPO} (revision ${MODEL_REVISION})
+  `Fine-tuned from Pix2Text MFR-1.5 on math workbook formulas.
+Pix2Text MFR-1.5 — https://huggingface.co/${MODEL_REPO} (revision ${MODEL_REVISION})
 Pix2Text — https://github.com/breezedeus/Pix2Text
 
 MIT License
