@@ -960,8 +960,8 @@ const aiRequests = new Map(); // requestId → AbortController
 
 // 수식 인식: 모델 폴더, 일꾼(utilityProcess — 처음 인식할 때 띄우고 2분 쉬면 끔), 진행 중인 설치·인식
 // 모델은 설치 파일에 들어 있음(resources/models). 없으면(개발 실행) 설정에서 받아 둔 userData/models 를 씀
-const mathocrBundledDir = () => path.join(process.resourcesPath, 'models', 'pix2text-mfr-1.5');
-const mathocrDownloadDir = () => path.join(app.getPath('userData'), 'models', 'pix2text-mfr-1.5');
+const mathocrBundledDir = () => path.join(process.resourcesPath, 'models', mathocr.MODEL_DIR_NAME);
+const mathocrDownloadDir = () => path.join(app.getPath('userData'), 'models', mathocr.MODEL_DIR_NAME);
 const mathocrDir = () => (mathocr.modelStatus(mathocrBundledDir()).installed ? mathocrBundledDir() : mathocrDownloadDir());
 const MATHOCR_IDLE_MS = 2 * 60 * 1000;
 let mathocrWorker = null; // { proc, pending: Map<일꾼 요청 id, resolve>, idle }

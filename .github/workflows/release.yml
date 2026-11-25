@@ -143,7 +143,8 @@ jobs:
         shell: bash
         run: |
           npx electron-builder --win dir --x64 --publish never
-          test -f dist/win-unpacked/resources/models/pix2text-mfr-1.5/encoder_model.onnx || { echo "::error::묶음에 수식 인식 모델이 없습니다"; exit 1; }
+          test -f dist/win-unpacked/resources/models/ohdap-mfr-1/encoder_model.onnx || { echo "::error::묶음에 수식 인식 모델이 없습니다"; exit 1; }
+          [ "$(ls dist/win-unpacked/resources/models | wc -l)" = 1 ] || { echo "::error::묶음에 모델 폴더가 여러 개 있습니다"; ls dist/win-unpacked/resources/models; exit 1; }
           node scripts/write-manifest.mjs
           v="$(node -p "require('./package.json').version")"
           (cd dist/win-unpacked && 7z a -tzip -mx=5 "../OhdapNote-$v-win-x64.zip" . > /dev/null)

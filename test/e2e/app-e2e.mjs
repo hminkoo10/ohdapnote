@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
+const { MODEL_DIR_NAME } = require(join(ROOT, 'src', 'main', 'mathocr.js'));
 const FIX = join(ROOT, 'test/fixtures/generated');
 const OUT = join(ROOT, 'test/e2e/out');
 mkdirSync(OUT, { recursive: true });
@@ -530,7 +531,7 @@ try {
   // 진짜 수식 인식 모델 (내 컴퓨터에 받아 둔 모델이 있을 때만: OHDAP_MFR_DIR=모델 폴더). 모델 파일은 저장소·CI 에 없음
   if (process.env.OHDAP_MFR_DIR) {
     step('스캔본 한글(HWPX): 진짜 수식 인식 모델로 OCR만 (utilityProcess · IPC 그대로)');
-    const modelDir = join(userData, 'models', 'pix2text-mfr-1.5');
+    const modelDir = join(userData, 'models', MODEL_DIR_NAME);
     mkdirSync(modelDir, { recursive: true });
     for (const f of ['encoder_model.onnx', 'decoder_model.onnx', 'tokenizer.json']) copyFileSync(join(process.env.OHDAP_MFR_DIR, f), join(modelDir, f));
     await app.evaluate(({ ipcMain }) => {

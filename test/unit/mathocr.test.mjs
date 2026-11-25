@@ -56,11 +56,13 @@ const RESIZE = [
   [1, 500, '297428a085ce2c9c766e0545b8d4b76b38646bc22988e2f1159b95e48a0dcd51', '41ed70bb7993a797d4adcd84c42c1a7d2323333a3b91bf01ae9bf45eca954e5a', [[0, -0.9843137264251709], [383, -0.9843137264251709], [50000, 0.21568632125854492], [147456, -0.5921568870544434], [300000, -0.4823529124259949], [442367, 0.45098042488098145]]],
 ];
 
-// [모양, 너비, 높이, pixel_values 의 sha256, Python LatexOCR 결과]
+// [모양, 너비, 높이, pixel_values 의 sha256, 고정한 모델(ohdap-mfr-1)의 결과]
+// 원래 Pix2Text MFR-1.5 는 \underline{{\quad}} · \times · \,+ 였음. 미세 조정한 모델은 기호 하나만 그린 그림에 약해서
+// 덧셈을 분수로 읽지만 확신도가 낮아 앱이 표시함(아래 시험). ONNX 와 PyTorch 가 같은 글자를 내는지는 학습 키트의 내보내기 확인에서 봄
 const SHAPES = [
-  ['bar', 64, 32, 'c0f95e2c85d7ad306e2b5bfa5474a26ca1ec64d689ea16251c8ced6a804e3a6b', r`\underline{{\quad}}`],
+  ['bar', 64, 32, 'c0f95e2c85d7ad306e2b5bfa5474a26ca1ec64d689ea16251c8ced6a804e3a6b', '-'],
   ['cross', 40, 40, '6e148f22f88f86bddd8a614b13c7a90f4ae81d7d8e8be043242c600efeebfc69', r`\times`],
-  ['plus', 48, 48, '656a8028155b333b5ecd6911a4db8304d3c0d63a0b887f598ae4ed5b45b0bcc2', r`\,+`],
+  ['plus', 48, 48, '656a8028155b333b5ecd6911a4db8304d3c0d63a0b887f598ae4ed5b45b0bcc2', r`\frac{4} {1 1}`],
 ];
 
 test('전처리: Pillow BICUBIC 384×384 + /255 + (x-0.5)/0.5 가 Python 과 비트까지 같음', () => {
@@ -148,19 +150,23 @@ test('토큰 → 글자: 특수 토큰 빼기, ByteLevel 바이트 → UTF-8', (
   assert.throws(() => mathocr.createTokenizer({ ...TINY, model: { type: 'WordPiece', vocab: {} } }));
 });
 
-test('모델 상태: 빈 폴더는 설치 안 됨, 받을 파일은 고정한 커밋의 세 개', () => {
+test('모델 상태: 빈 폴더는 설치 안 됨, 받을 파일은 release 의 세 개', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ohdap-mfr-'));
   try {
     assert.deepEqual(mathocr.modelStatus(dir), { installed: false, dir, bytes: 0 });
     assert.match(mathocr.MODEL_REVISION, /^[0-9a-f]{40}$/);
-    assert.deepEqual(mathocr.MODEL_FILES.map((f) => f.name), ['encoder_model.onnx', 'decoder_model.onnx', 'tokenizer.json']);
-    for (const f of mathocr.MODEL_FILES) assert.match(f.sha256, /^[0-9a-f]{64}$/);
+    assert.equal(mathocr.MODEL_DIR_NAME, 'ohdap-mfr-1');
+    assert.deepEqual(mathocr.MODEL_FILES, [
+      { name: 'encoder_model.onnx', size: 87499332, sha256: '369e3d7cf0f37df744a2675aa430e91234cbd0f802432bf692e05dcde54b3996' },
+      { name: 'decoder_model.onnx', size: 31989027, sha256: 'a212dfa4b8eafa1abfba88b5e3e6ab8ace3c7fe7201eb81a656fdf0b26af95cb' },
+      { name: 'tokenizer.json', size: 113168, sha256: '4ffbeb2143e6a38324bb6111b7a8109530d38a076a8439aa5777535f0a32758a' },
+    ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('모델 받기: 덜 받거나 HTTP 오류면 .part 를 지우고 실패, 고정한 커밋 주소로 받음', async () => {
+test('모델 받기: 덜 받거나 HTTP 오류면 .part 를 지우고 실패, release asset 주소로 받음', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ohdap-mfr-'));
   try {
     const urls = [];
@@ -169,7 +175,7 @@ test('모델 받기: 덜 받거나 HTTP 오류면 .part 를 지우고 실패, �
       return new Response(new Uint8Array(1000));
     };
     await assert.rejects(mathocr.installModel({ dir, fetch: short }), /끝까지/);
-    assert.equal(urls[0], `https://huggingface.co/breezedeus/pix2text-mfr-1.5/resolve/${mathocr.MODEL_REVISION}/encoder_model.onnx`);
+    assert.equal(urls[0], 'https://github.com/hminkoo10/ohdapnote/releases/download/mfr-model-1/encoder_model.onnx');
     assert.deepEqual(readdirSync(dir), []);
     await assert.rejects(mathocr.installModel({ dir, fetch: async () => new Response('no', { status: 404 }) }), /HTTP 404/);
     assert.deepEqual(readdirSync(dir), []);
@@ -226,19 +232,20 @@ test('토큰 → 글자: 실제 tokenizer.json (Python tokenizers 와 같음)', 
   assert.equal(tok.decode([1, 99, 100, 2]), '��');
 });
 
-test('인식: Python Pix2Text 와 같은 LaTeX + 확신도, 취소', withModel, async () => {
+test('인식: 고정한 모델의 LaTeX + 확신도, 취소', withModel, async () => {
   const ocr = mathocr.createMathOcr({ modelDir: MODEL_DIR });
   try {
     const images = SHAPES.map(([kind, w, h]) => ({ data: shape(kind, w, h), width: w, height: h }));
     const results = await ocr.recognize(images);
     assert.deepEqual(results.map((x) => x.latex), SHAPES.map((s) => s[4]));
+    assert.ok(results[2].conf.mean < 0.9, `잘못 읽은 덧셈은 확신도가 낮아야 함: ${JSON.stringify(results[2].conf)}`);
     for (const { ms, conf, truncated } of results) {
       assert.ok(ms >= 0);
       assert.ok(conf.n > 0 && conf.min > 0 && conf.min <= conf.mean && conf.mean <= 1, JSON.stringify(conf));
       assert.equal(truncated, false);
     }
-    // 토큰 수 한도: 끊기면 truncated
-    const [cut] = await ocr.recognize(images.slice(0, 1), { maxTokens: 2 });
+    // 토큰 수 한도: 끊기면 truncated (막대는 '-' 한 토큰으로 끝나므로 토큰이 많은 덧셈 그림으로)
+    const [cut] = await ocr.recognize(images.slice(2), { maxTokens: 2 });
     assert.equal(cut.truncated, true);
     assert.equal(cut.conf.n, 2);
     const ctrl = new AbortController();
