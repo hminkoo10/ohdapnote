@@ -76,15 +76,6 @@ function waitNumberDetection(task, signal) {
   });
 }
 
-function hasNumberCandidates(page) {
-  if (page.candidates.length) return true;
-  if (!page.ocrPasses.length) return false;
-  // 미리 읽은 OCR 결과가 있으면 사본으로 후보만 세어 봄 (원래 쪽은 건드리지 않고 OCR 도 기다리지 않음)
-  const probe = { ...page };
-  extractOcr(probe);
-  return probe.candidates.length > 0;
-}
-
 /**
  * 모델 결과를 믿을 만한 문서면 번호를 모델 상자대로 다시 정함 (못 믿으면 아무것도 바꾸지 않음)
  *  - 모델이 못 보는 말머리 묶음(예: 디자인이 다른 "예제")은 지금 고른 번호를 그대로 둠
@@ -869,8 +860,9 @@ export async function analyzeDocument(src, opts) {
       if (!numberRun.earlyStopped) {
         numberPending = detectPageNumbers(src, page, opts.numberModel, signal).then(() => {
           if (signal?.aborted) return;
-          if (page.numberModelRan) numberRun.pagesRun++;
-          if (page.numberModelRan && hasNumberCandidates(page)) {
+          if (!page.numberModelRan) return;
+          numberRun.pagesRun++;
+          if (numberRun.evidencePages < NUMBER_MODEL_PROBE_PAGES) {
             numberRun.evidencePages++;
             numberRun.probeBoxes += page.numberBoxes?.length || 0;
             if (numberRun.evidencePages === NUMBER_MODEL_PROBE_PAGES && numberRun.probeBoxes < NUMBER_MODEL_PROBE_BOXES) numberRun.earlyStopped = true;
