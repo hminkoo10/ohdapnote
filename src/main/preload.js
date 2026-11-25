@@ -108,6 +108,8 @@ contextBridge.exposeInMainWorld('ohdap', {
 
   // 수식 인식 (AI 없이 내 컴퓨터에서 — 모델을 한 번 받아 둠)
   mathocrStatus: () => ipcRenderer.invoke('mathocr:status'),
+  numbersStatus: () => ipcRenderer.invoke('numbers:status'),
+  numbersDetect: ({ image } = {}) => ipcRenderer.invoke('numbers:detect', { image }),
   mathocrInstall: () => ipcRenderer.invoke('mathocr:install'),
   mathocrCancelInstall: () => ipcRenderer.invoke('mathocr:cancelInstall'),
   mathocrRecognize: ({ images, requestId, maxTokens } = {}) => ipcRenderer.invoke('mathocr:recognize', { images, requestId, maxTokens }),

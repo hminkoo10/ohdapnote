@@ -23,6 +23,7 @@ const crypto = require('node:crypto');
 const log = require('electron-log/main');
 const ai = require('./ai');
 const mathocr = require('./mathocr');
+const numberdet = require('./numberdet');
 const cloud = require('./magoedu-cloud');
 const { createUpdateMonitor } = require('./update-restart');
 const { createPhotoImports } = require('./photo-import');
@@ -1002,6 +1003,44 @@ function stopMathocrWorker() {
   w.proc.kill(); // 남은 요청은 'exit' 에서 실패로 끝남
 }
 
+// Bundled only in production; local model override is development-only.
+const numberdetDir = () => !app.isPackaged && process.env.OHDAP_PND_DIR
+  ? process.env.OHDAP_PND_DIR : path.join(process.resourcesPath, 'models', numberdet.MODEL_DIR_NAME);
+let numberdetWorker = null;
+let numberdetSeq = 0;
+
+function startNumberdetWorker() {
+  if (numberdetWorker) return numberdetWorker;
+  const proc = utilityProcess.fork(path.join(__dirname, 'numberdet-worker.js'), [], { serviceName: 'OhdapNote numbers' });
+  const w = { proc, pending: new Map(), idle: null };
+  proc.on('message', (msg) => {
+    if (msg?.type !== 'done') return;
+    const resolve = w.pending.get(msg.id);
+    w.pending.delete(msg.id);
+    resolve?.(msg);
+    if (!w.pending.size) {
+      clearTimeout(w.idle);
+      w.idle = setTimeout(() => numberdetWorker === w && stopNumberdetWorker(), 2 * 60 * 1000);
+    }
+  });
+  proc.on('exit', () => {
+    if (numberdetWorker === w) numberdetWorker = null;
+    clearTimeout(w.idle);
+    for (const resolve of w.pending.values()) resolve({ ok: false, error: 'Number detector stopped' });
+    w.pending.clear();
+  });
+  numberdetWorker = w;
+  return w;
+}
+
+function stopNumberdetWorker() {
+  const w = numberdetWorker;
+  if (!w) return;
+  numberdetWorker = null;
+  clearTimeout(w.idle);
+  w.proc.kill();
+}
+
 function registerIpc() {
   const syncOn = (channel, fn) => ipcMain.on(channel, (event, ...args) => {
     try { return viewGuard(viewOnly, channel, fn)(event, ...args); }
@@ -1546,6 +1585,22 @@ function registerIpc() {
   handle('ai:codexStatus', async (_e, { path: exe } = {}) => ai.codexStatus(exe ?? (await effectiveSettings()).codexPath));
 
   // ---- 수식 인식 (선택 기능, 모델을 한 번 받아 두면 인터넷 없이) ----
+  handle('numbers:status', () => numberdet.modelStatus(numberdetDir()));
+  handle('numbers:detect', async (_e, { image } = {}) => {
+    if (!numberdet.modelStatus(numberdetDir()).installed) return { ok: false, error: 'Number model is not installed' };
+    try {
+      const w = startNumberdetWorker();
+      clearTimeout(w.idle);
+      const id = ++numberdetSeq;
+      return await new Promise((resolve) => {
+        w.pending.set(id, resolve);
+        try { w.proc.postMessage({ type: 'detect', id, modelDir: numberdetDir(), image }); }
+        catch (err) { w.pending.delete(id); throw err; }
+      });
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
   handle('mathocr:status', () => {
     const dir = mathocrDir();
     return { ...mathocr.modelStatus(dir), bundled: dir !== mathocrDownloadDir() };
@@ -1737,6 +1792,7 @@ if (isBatch) {
   app.on('will-quit', () => {
     ai.killAll(); // 돌고 있던 codex 도 같이 끔
     stopMathocrWorker();
+    stopNumberdetWorker();
     for (const w of watchers) w.close();
     watchers = [];
   });
