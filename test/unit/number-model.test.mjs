@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { readFileSync } from 'node:fs';
-import { supportsNumber, numberModelTrust, rescueNumberTokens, supportedNumberCandidates } from '../../src/renderer/js/number-model.js';
-import { extractCandidates } from '../../src/renderer/js/detect.js';
+import { supportsNumber, numberModelTrust, rescueNumberTokens, supportedNumberCandidates, mergeNumberModelAnchors } from '../../src/renderer/js/number-model.js';
+import { extractCandidates, computeItems } from '../../src/renderer/js/detect.js';
 
 const layout = { columns: [{ x0: 0.08, x1: 0.92 }], bodyTop: 0.04, bodyBottom: 0.96, spans: [] };
 const token = (str, x0, y0, w = 0.03) => ({ str, x0, x1: x0 + w, y0, y1: y0 + 0.02, font: 'digits', conf: 100 });
@@ -56,18 +56,31 @@ test('rescue: existing parsing preserves prefix, style, digits, padding and colu
   assert.equal(rescueNumberTokens({ layout, tokens: [glued] }, [box(glued)])[0].prefix, '유제');
 });
 
-test('trust: strong main coverage cannot erase an unsupported prefix group', () => {
+test('trust: a blind prefix is retained without rejecting the covered main group', () => {
   const p = page();
   p.numberBoxes = p.tokens.map(box);
   const prefix = extractCandidates([token('예제', 0.4, 0.1, 0.04), token('1', 0.45, 0.1)], layout).candidates[0];
-  const extras = Array.from({ length: 4 }, (_, i) => ({ ...prefix, y0: 0.1 + i * 0.1, y1: 0.12 + i * 0.1 }));
+  const extras = Array.from({ length: 20 }, (_, i) => ({ ...prefix, y0: 0.1 + i * 0.02, y1: 0.12 + i * 0.02 }));
   const main = tokens().slice(0, 4).map(t => ({ ...t, x0: 0.25, x1: 0.28 }));
   p.tokens.push(...main); p.candidates.push(...extractCandidates(main, layout).candidates); p.numberBoxes.push(...main.map(box));
   const anchors = new Map([[0, [...p.candidates, ...extras]]]);
   const trust = numberModelTrust([p], anchors);
-  assert.ok(trust.supportedRatio >= 0.7);
-  assert.deepEqual(trust.blindPrefixes, ['\uC608\uC81C']); assert.equal(trust.trusted, true);
+  assert.ok(trust.supportedRatio < 0.7);
+  assert.equal(trust.trusted, true);
+  assert.deepEqual(trust.blindPrefixes, ['예제']);
+  assert.equal(trust.coveredAnchors, 12);
+  assert.equal(trust.coveredSupportedRatio, 1);
   assert.equal(trust.groups.find(g => g.prefix === '예제').supported, 0);
+});
+
+test('trust: small prefix groups remain covered below the support ratio threshold', () => {
+  const p = page(); p.numberBoxes = p.tokens.map(box);
+  const small = p.candidates.slice(0, 3).map(c => ({ ...c, prefix: '유제', x0: 0.5, x1: 0.55 }));
+  const trust = numberModelTrust([p], new Map([[0, [...p.candidates, ...small]]]));
+  assert.equal(trust.trusted, true);
+  assert.deepEqual(trust.blindPrefixes, []);
+  assert.equal(trust.groups.find(g => g.prefix === '유제').ratio, 0);
+  assert.equal(trust.groups.find(g => g.prefix === '유제').covered, true);
 });
 
 test('supported candidates: digit box, not prefix centre; rescue, deduplication and reading order', () => {
@@ -83,11 +96,11 @@ const root = new URL('../../src/renderer/js/', import.meta.url);
 const hooks = registerHooks({ load(url, ctx, next) {
   if (url === new URL('ocr.js', root).href) return { format: 'module', shortCircuit: true, source: "export const OCR_WORKERS=1; export function recognizeWords(){throw Error('unexpected OCR')} export function recognizeLine(){throw Error('unexpected OCR')}" };
   if (url === new URL('docsource.js', root).href) return { format: 'module', shortCircuit: true, source: "export function createCanvas(){throw Error('unexpected canvas')}" };
-  if (url === new URL('analyze.js', root).href) return { format: 'module', shortCircuit: true, source: readFileSync(new URL(url), 'utf8').replace('  const canvas = await src.renderPage(index, ANALYSIS_WIDTH);', '  return structuredClone(src.synthetic);\n  const canvas = await src.renderPage(index, ANALYSIS_WIDTH);') };
+  if (url === new URL('analyze.js', root).href) return { format: 'module', shortCircuit: true, source: readFileSync(new URL(url), 'utf8').replace('  const canvas = await src.renderPage(index, ANALYSIS_WIDTH);', '  return structuredClone(src.syntheticPages?.[index] || src.synthetic);\n  const canvas = await src.renderPage(index, ANALYSIS_WIDTH);') };
   return next(url, ctx);
 } });
-let analyzeDocument, reanalyzeSinglePage;
-try { ({ analyzeDocument, reanalyzeSinglePage } = await import('../../src/renderer/js/analyze.js')); } finally { hooks.deregister(); }
+let analyzeDocument, reanalyzeSinglePage, applyNumberModel, buildCutters;
+try { ({ analyzeDocument, reanalyzeSinglePage, applyNumberModel, buildCutters } = await import('../../src/renderer/js/analyze.js')); } finally { hooks.deregister(); }
 function source(p) {
   return { synthetic: p, numPages: 1, pages: [{ w: 724, h: 1024 }], async renderPage() {
     return { width: 724, height: 1024, getContext: () => ({ getImageData: () => ({ width: 724, height: 1024, data: new Uint8Array(724 * 1024 * 4) }) }) };
@@ -121,4 +134,127 @@ test('pipeline: visual support restores group-rejected candidates and token resc
   const legacy = await reanalyzeSinglePage(source(p), doc, 0, { deep: false });
   const untrusted = await reanalyzeSinglePage(source(p), doc, 0, { deep: false, numberModel: { detect: async () => boxes } });
   assert.deepEqual(untrusted, legacy);
+});
+
+test('blind groups: mixed anchors deduplicate and preserve original objects and context boundaries', () => {
+  const p = page();
+  const c = { ...p.candidates[0], prefix: '예제', x0: 0.4, x1: 0.45, y0: 0.08, y1: 0.1 };
+  const blind = Array.from({ length: 4 }, (_, i) => ({ ...c, num: i + 1, y0: 0.08 + i * 0.1, y1: 0.1 + i * 0.1 }));
+  p.candidates.push(...blind);
+  p.numberBoxes = p.tokens.map(box);
+  const heading = { x0: 0.08, x1: 0.92, y0: 0.12, y1: 0.14 };
+  p.contextHeadings = [heading];
+  const today = [...p.candidates];
+  const merged = mergeNumberModelAnchors(p, [...today, blind[0]], ['예제']);
+  assert.equal(merged.filter(a => a === blind[0]).length, 1);
+  const layouts = new Map([[0, p.layout]]), grids = new Map([[0, p.grid]]);
+  const items = anchors => computeItems([0], anchors, layouts, grids, { cutters: buildCutters([p], anchors, null) });
+  const anchors = new Map([[0, today]]);
+  const before = items(anchors).filter(i => i.prefix === '예제');
+  let stats;
+  assert.equal(applyNumberModel([p], anchors, { onResult(s) { stats = s; } }), true);
+  assert.deepEqual(stats.blindPrefixes, ['예제']);
+  assert.strictEqual(p.contextHeadings[0], heading);
+  assert.ok(blind.every(c => anchors.get(0).includes(c)));
+  assert.deepEqual(items(anchors).filter(i => i.prefix === '예제'), before);
+  p.contextHeadings = [];
+  assert.notDeepEqual(items(anchors).filter(i => i.prefix === '예제'), before);
+});
+
+test('context boundaries: remove only those overlapping covered anchors when no blind group exists', () => {
+  const p = page(); p.numberBoxes = p.tokens.map(box);
+  const own = { ...p.tokens[0] }, unrelated = { x0: 0.3, x1: 0.8, y0: 0.9, y1: 0.92 };
+  p.contextHeadings = [own, unrelated];
+  applyNumberModel([p], new Map([[0, p.candidates]]), {});
+  assert.deepEqual(p.contextHeadings, [unrelated]);
+});
+
+test('single page: saved blind prefixes are reused even when locally supported', async () => {
+  const p = page();
+  p.candidates.forEach(c => { c.prefix = '예제'; });
+  const plain = await reanalyzeSinglePage(source(p), {}, 0, { deep: false });
+  const extra = token('73', 0.1, 0.89);
+  p.tokens.push(extra);
+  let stats;
+  const result = await reanalyzeSinglePage(source(p), { numberModelTrusted: true,
+    numberModel: { trusted: true, blindPrefixes: ['예제'] } }, 0, { deep: false,
+    numberModel: { detect: async () => [...p.tokens.slice(0, 8), extra].map(box), onResult(s) { stats = s; } } });
+  assert.deepEqual(stats.blindPrefixes, ['예제']);
+  // No covered final anchors on this page: its rules-only output is unchanged.
+  assert.equal(stats.trusted, false);
+  assert.deepEqual(result.items, plain.items);
+});
+
+test('cancellation: abort does not wait for a slow detection or schedule another one', async () => {
+  const ctrl = new AbortController();
+  let finish, started, calls = 0, notifications = 0;
+  const ready = new Promise(resolve => { started = resolve; });
+  const slow = new Promise(resolve => { finish = resolve; });
+  const src = source(page());
+  src.numPages = 2; src.pages.push(src.pages[0]);
+  const analysis = analyzeDocument(src, { pages: [0, 1], signal: ctrl.signal,
+    numberModel: { detect() { calls++; started(); return slow; }, onResult() { notifications++; } } });
+  const outcome = analysis.then(() => 'resolved', err => err.name);
+  await ready; ctrl.abort();
+  let timer;
+  const result = await Promise.race([outcome, new Promise(resolve => { timer = setTimeout(() => resolve('blocked'), 100); })]);
+  clearTimeout(timer);
+  finish([]);
+  await outcome;
+  await new Promise(setImmediate);
+  assert.equal(result, 'AbortError');
+  assert.equal(calls, 1);
+  assert.equal(notifications, 0);
+});
+
+test('cancellation: late model rejection is consumed after abort', async () => {
+  const ctrl = new AbortController();
+  let fail, started;
+  const ready = new Promise(resolve => { started = resolve; });
+  const analysis = analyzeDocument(source(page()), { pages: [0], signal: ctrl.signal, numberModel: {
+    detect() { started(); return new Promise((resolve, reject) => { fail = reject; }); },
+  } });
+  const rejected = assert.rejects(analysis, { name: 'AbortError' });
+  await ready; ctrl.abort(); await rejected;
+  fail(new Error('late inference failure'));
+  await new Promise(setImmediate);
+});
+
+test('probe: stop after 12 candidate pages below 8 boxes and preserve the entire rules-only result', async () => {
+  const src = source(page());
+  src.syntheticPages = Array.from({ length: 16 }, (_, index) => ({ ...page(), index }));
+  src.syntheticPages[0].candidates = [];
+  src.syntheticPages[1].layout.blank = true;
+  src.pages = src.syntheticPages.map(() => ({ w: 724, h: 1024 })); src.numPages = src.pages.length;
+  const pages = src.pages.map((_, i) => i);
+  const before = await analyzeDocument(src, { pages });
+  let calls = 0, stats;
+  const after = await analyzeDocument(src, { pages, numberModel: { async detect() { calls++; return []; }, onResult(s) { stats = s; } } });
+  assert.equal(calls, 13); // one nonblank non-candidate page + 12 candidate pages
+  assert.equal(stats.pagesRun, 13); assert.equal(stats.evidencePages, 12);
+  assert.equal(stats.earlyStopped, true); assert.equal(stats.trusted, false);
+  assert.equal(stats.failed, false);
+  assert.deepEqual(after, before);
+});
+
+test('probe: sufficient visual evidence keeps detection enabled beyond 12 candidate pages', async () => {
+  const src = source(page());
+  src.syntheticPages = Array.from({ length: 14 }, (_, index) => ({ ...page(), index }));
+  src.pages = src.syntheticPages.map(() => ({ w: 724, h: 1024 })); src.numPages = src.pages.length;
+  let calls = 0, stats;
+  await analyzeDocument(src, { pages: src.pages.map((_, i) => i), numberModel: {
+    async detect() { calls++; return tokens().map(box); }, onResult(s) { stats = s; } } });
+  assert.equal(calls, 14); assert.equal(stats.pagesRun, 14); assert.equal(stats.earlyStopped, false);
+});
+
+test('probe: already available OCR candidates count without mutating the rules-only page', async () => {
+  const src = source(page());
+  src.syntheticPages = Array.from({ length: 14 }, (_, index) => ({ ...page(), index, source: 'ocr', candidates: [], ocrPasses: [tokens()] }));
+  src.pages = src.syntheticPages.map(() => ({ w: 724, h: 1024 })); src.numPages = src.pages.length;
+  const pages = src.pages.map((_, i) => i);
+  const before = await analyzeDocument(src, { pages });
+  let calls = 0, stats;
+  const after = await analyzeDocument(src, { pages, numberModel: { async detect() { calls++; return []; }, onResult(s) { stats = s; } } });
+  assert.equal(calls, 12); assert.equal(stats.evidencePages, 12); assert.equal(stats.earlyStopped, true);
+  assert.deepEqual(after, before);
 });

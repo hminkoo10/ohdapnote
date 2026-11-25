@@ -121,6 +121,26 @@ test('데이터 보존 회귀: profile·학생·노트 수정은 새 필드를 �
   assert.deepEqual(savedNote.exportOptions, note.exportOptions);
 });
 
+test('number model trust and blind prefixes survive validation, normalization and IPC save/load', async () => {
+  const { normalizeDoc } = await import('../../src/renderer/js/store.js');
+  const m = loadMain(); m.registerIpc();
+  const state = { trusted: true, blindPrefixes: ['', '예제'] };
+  const item = { id: 'old-id', page: 0, col: 0, num: 3, number: '03', rects: [{ page: 0, x: 0.1, y: 0.1, w: 0.3, h: 0.4 }] };
+  const book = { id: 'book-1234', kind: 'book', docs: { problem: { files: [], items: [item], numberModelTrusted: true, numberModel: state } } };
+  const file = path.join(m.dir, 'shared/books/book-1234/book.json');
+  writeJson(file, book);
+  const loaded = await m.handlers.get('books:get')(null, book.id);
+  assert.deepEqual(loaded.docs.problem.numberModel, state);
+  assert.deepEqual(sanitizeBook(loaded).docs.problem.numberModel, state);
+  normalizeDoc(loaded, 'problem');
+  assert.notEqual(loaded.docs.problem.items[0].id, 'old-id');
+  await m.handlers.get('books:save')(null, loaded);
+  const again = await m.handlers.get('books:get')(null, book.id);
+  assert.deepEqual(again.docs.problem.numberModel, state);
+  assert.equal(again.docs.problem.numberModelTrusted, true);
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).docs.problem.numberModel, state);
+});
+
 test('데이터 보존 회귀: renames 새 필드 보존, 잘못된 카운터는 사용 시 거부', async () => {
   const m = loadMain();
   m.registerIpc();
