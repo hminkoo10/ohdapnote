@@ -1,5 +1,10 @@
 import { buildLines, extractCandidates, parseNumberWord, PREFIXES, byReadingOrder, columnOf, zoneOf } from './detect.js';
 
+// Probe visual coverage, not number continuity: after 12 nonblank candidate
+// pages, fewer than 8 boxes means this design is unknown. Skip the remainder.
+export const NUMBER_MODEL_PROBE_PAGES = 12;
+export const NUMBER_MODEL_PROBE_BOXES = 8;
+
 export function boxIou(a, b) {
   const overlap = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
   const union = (a.x1 - a.x0) * (a.y1 - a.y0) + (b.x1 - b.x0) * (b.y1 - b.y0) - overlap;
@@ -71,11 +76,12 @@ export function rescueNumberTokens(page, boxes = page.numberBoxes || []) {
 }
 
 /** One candidate per visual box. No sequence, expected-count or cross-document evidence. */
-export function supportedNumberCandidates(page) {
+export function supportedNumberCandidates(page, blindPrefixes = []) {
   const boxes = page.numberBoxes || [];
   const { numbers } = tokenNumbers(page.hiddenText ? [] : page.tokens);
-  const candidates = page.numberCandidates || page.candidates || [];
-  const rescues = rescueNumberTokens(page, boxes);
+  const blind = new Set(blindPrefixes);
+  const candidates = (page.numberCandidates || page.candidates || []).filter(c => !blind.has(c.prefix || ''));
+  const rescues = rescueNumberTokens(page, boxes).filter(c => !blind.has(c.prefix || ''));
   const selected = [];
   for (const box of boxes) {
     const matches = candidates.filter(c => supportsNumber(candidateDigit(c, numbers), box));
@@ -88,13 +94,24 @@ export function supportedNumberCandidates(page) {
   return selected.sort(byReadingOrder);
 }
 
-export function numberModelTrust(pages, anchors, { minBoxes = 8, minAnchors = 4 } = {}) {
+export function mergeNumberModelAnchors(page, today, blindPrefixes) {
+  const blind = new Set(blindPrefixes);
+  const { numbers } = tokenNumbers(page.hiddenText ? [] : page.tokens);
+  const merged = [];
+  // Preserve blind-group objects first; a visual duplicate must not replace one.
+  for (const c of [...today.filter(c => blind.has(c.prefix || '')), ...supportedNumberCandidates(page, blindPrefixes)]) {
+    if (!merged.some(d => c === d || boxIou(candidateDigit(c, numbers), candidateDigit(d, numbers)) >= 0.7)) merged.push(c);
+  }
+  return merged.sort(byReadingOrder);
+}
+
+export function numberModelTrust(pages, anchors, { minBoxes = NUMBER_MODEL_PROBE_BOXES, minAnchors = 4, blindPrefixes: savedBlind, earlyStopped = false, pagesRun, evidencePages = 0, probeBoxes = 0 } = {}) {
   let boxes = 0, explained = 0, finalAnchors = 0, supported = 0, failed = false;
   const perPage = [];
   const prefixGroups = new Map();
   for (const page of pages) {
     if (page.layout.blank) continue;
-    if (!Array.isArray(page.numberBoxes) || page.numberModelFailed) failed = true;
+    if ((!Array.isArray(page.numberBoxes) && !earlyStopped) || page.numberModelFailed) failed = true;
     const modelBoxes = page.numberBoxes || [];
     const { numbers } = tokenNumbers(page.hiddenText ? [] : page.tokens);
     const candidates = page.numberCandidates || page.candidates || [];
@@ -110,16 +127,20 @@ export function numberModelTrust(pages, anchors, { minBoxes = 8, minAnchors = 4 
     }
     boxes += modelBoxes.length; explained += explain; finalAnchors += chain.length; supported += support;
     perPage.push({ page: page.index, boxes: modelBoxes.length, explained: explain, anchors: chain.length, supported: support,
-      ms: page.numberModelMs || 0, renderMs: page.numberRenderMs || 0, detectMs: page.numberDetectMs || 0 });
+      ran: !!page.numberModelRan, ms: page.numberModelMs || 0, renderMs: page.numberRenderMs || 0, detectMs: page.numberDetectMs || 0 });
   }
   const explainedRatio = boxes ? explained / boxes : 0;
   const supportedRatio = finalAnchors ? supported / finalAnchors : 0;
-  // A well-covered main style must not hide a systematic blind spot in another
-  // existing prefix. This is visual coverage, never number order or continuity.
-  const groups = [...prefixGroups.values()];
-  const prefixesCovered = groups.every(g => g.anchors < minAnchors || g.supported / g.anchors >= 0.7);
-  return { trusted: !failed && boxes >= minBoxes && finalAnchors >= minAnchors && explainedRatio >= 0.9 && supportedRatio >= 0.7 && prefixesCovered,
-    boxes, explained, finalAnchors, supported, explainedRatio, supportedRatio, prefixesCovered, groups, failed, perPage };
+  const saved = savedBlind === undefined ? null : new Set(savedBlind);
+  const groups = [...prefixGroups.values()].map(g => ({ ...g, ratio: g.supported / g.anchors,
+    covered: saved ? !saved.has(g.prefix) : g.anchors < minAnchors || g.supported / g.anchors >= 0.7 }));
+  const blindPrefixes = saved ? [...saved] : groups.filter(g => !g.covered).map(g => g.prefix);
+  const coveredAnchors = groups.filter(g => g.covered).reduce((n, g) => n + g.anchors, 0);
+  const coveredSupported = groups.filter(g => g.covered).reduce((n, g) => n + g.supported, 0);
+  const coveredSupportedRatio = coveredAnchors ? coveredSupported / coveredAnchors : 0;
+  return { trusted: !failed && !earlyStopped && boxes >= minBoxes && explainedRatio >= 0.9 && coveredAnchors >= minAnchors,
+    boxes, explained, finalAnchors, supported, explainedRatio, supportedRatio, coveredAnchors, coveredSupported, coveredSupportedRatio,
+    blindPrefixes, groups, failed, earlyStopped, pagesRun: pagesRun ?? perPage.filter(p => p.ran).length, evidencePages, probeBoxes, perPage };
 }
 
 // A failed/unavailable optional detector leaves the rules-only path intact.

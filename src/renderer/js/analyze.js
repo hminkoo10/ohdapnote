@@ -1,5 +1,5 @@
 import { numberContextGrid, filterNumberContexts } from './number-context.js';
-import { numberModelTrust, supportedNumberCandidates } from './number-model.js';
+import { numberModelTrust, mergeNumberModelAnchors, NUMBER_MODEL_PROBE_PAGES, NUMBER_MODEL_PROBE_BOXES } from './number-model.js';
 import { classifyPageRole, classifyAnswerTableShape } from './pagerole.js';
 import { residualBoundaries, rangesForItems } from './region-boundaries.js';
 import { trailingNonQuestionPages, applyPageExclusions, isExcludedPage } from './page-exclusions.js';
@@ -39,7 +39,7 @@ import { stabilizeExamPages, stabilizeLegacyExamPages } from './exam-sections.js
 const ANALYSIS_WIDTH = 960; // 레이아웃 분석용 렌더링 폭(px)
 
 // A fresh render, long side 1024. Never upscale the analysis canvas.
-async function detectPageNumbers(src, page, numberModel) {
+async function detectPageNumbers(src, page, numberModel, signal) {
   const start = performance.now();
   let canvas;
   try {
@@ -48,21 +48,45 @@ async function detectPageNumbers(src, page, numberModel) {
     const image = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);
     page.numberRenderMs = performance.now() - start;
     canvas.width = canvas.height = 0;
+    if (signal?.aborted) return;
     const t = performance.now();
+    page.numberModelRan = true;
     const boxes = await numberModel.detect({ data: image.data, width: image.width, height: image.height });
+    if (signal?.aborted) return;
     if (!Array.isArray(boxes) || boxes.some(b => ![b.x0, b.y0, b.x1, b.y1, b.score].every(Number.isFinite) ||
       b.x0 < 0 || b.y0 < 0 || b.x1 > 1 || b.y1 > 1 || b.x1 <= b.x0 || b.y1 <= b.y0)) throw new Error('Invalid number boxes');
     page.numberBoxes = boxes;
     page.numberDetectMs = performance.now() - t;
   } catch {
-    page.numberModelFailed = true;
+    if (!signal?.aborted) page.numberModelFailed = true;
   } finally {
     if (canvas) canvas.width = canvas.height = 0;
-    page.numberModelMs = performance.now() - start;
+    if (!signal?.aborted) page.numberModelMs = performance.now() - start;
   }
 }
 
-function applyNumberModel(results, anchors, numberModel, { allowTrust = true, ...options } = {}) {
+// Abort only the wait. Native inference may finish later; its result is ignored.
+function waitNumberDetection(task, signal) {
+  if (!signal) return task;
+  abortIfNeeded(signal);
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new DOMException('분석을 취소했습니다.', 'AbortError'));
+    signal.addEventListener('abort', abort, { once: true });
+    task.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort)).catch(() => {});
+  });
+}
+
+function hasNumberCandidates(page) {
+  if (page.candidates.length) return true;
+  if (!page.ocrPasses.length) return false;
+  // Early OCR may be ready before its normal application phase. Probe the same
+  // extractor on a copy; never change rules-only candidates/layout or wait for OCR.
+  const probe = { ...page };
+  extractOcr(probe);
+  return probe.candidates.length > 0;
+}
+
+export function applyNumberModel(results, anchors, numberModel, { allowTrust = true, ...options } = {}) {
   // Include candidates recovered by the existing OCR retry/crop paths too.
   for (const page of results) page.numberCandidates = [...new Set([
     ...(page.numberCandidates || []), ...(page.candidates || []), ...(anchors.get(page.index) || []),
@@ -71,15 +95,20 @@ function applyNumberModel(results, anchors, numberModel, { allowTrust = true, ..
   trust.trusted &&= allowTrust;
   numberModel.onResult?.(trust);
   if (!trust.trusted) {
-    for (const page of results) for (const key of ['numberBoxes', 'numberCandidates', 'numberModelFailed', 'numberModelMs', 'numberRenderMs', 'numberDetectMs']) delete page[key];
+    for (const page of results) for (const key of ['numberBoxes', 'numberCandidates', 'numberModelFailed', 'numberModelRan', 'numberModelMs', 'numberRenderMs', 'numberDetectMs']) delete page[key];
     return false;
   }
   for (const page of results) {
-    const supported = supportedNumberCandidates(page);
+    const supported = mergeNumberModelAnchors(page, anchors.get(page.index) || [], trust.blindPrefixes);
     anchors.set(page.index, supported);
     page.candidates = supported;
-    // A visual number must not also become a boundary rejected by the old veto.
-    page.contextHeadings = [];
+    // A heading can also delimit a blind item, including a continuation from
+    // another page. Preserve every context boundary whenever a blind group exists.
+    // Otherwise remove only boundaries overlapping a restored visual anchor.
+    if (!trust.blindPrefixes.length && supported.length && page.contextHeadings?.length) {
+      page.contextHeadings = page.contextHeadings.filter(h => !supported.some(c =>
+        c.x0 < h.x1 && c.x1 > h.x0 && c.y0 < h.y1 && c.y1 > h.y0));
+    }
   }
   return true;
 }
@@ -817,8 +846,8 @@ export async function analyzeDocument(src, opts) {
   let { pages } = opts;
   let results = [];
   let splitHint = null; // 번호 위치로 추정한 단 위치(같은 책 다음 쪽에도 적용)
-  const numberJobs = [];
   let numberPending;
+  const numberRun = { pagesRun: 0, evidencePages: 0, probeBoxes: 0, earlyStopped: false };
 
   // 1) 쪽마다 레이아웃·글자 레이어 (빠름). 스캔한 쪽은 읽는 대로 쪽 전체 OCR 을 시작
   const count = { done: 0, total: 0 }; // OCR 진행 (쪽 × 방식)
@@ -831,11 +860,21 @@ export async function analyzeDocument(src, opts) {
     if (page.layout.inferred) splitHint = page.layout.inferred;
     results.push(page);
     if (page.needsOcr) early.push(page);
-    if (opts.numberModel && !page.layout.blank) {
+    if (opts.numberModel && !page.layout.blank && !numberRun.earlyStopped) {
       // Bounded to one inference: read the next page while this one runs.
-      if (numberPending) await numberPending;
-      numberPending = detectPageNumbers(src, page, opts.numberModel);
-      numberJobs.push(numberPending);
+      if (numberPending) await waitNumberDetection(numberPending, signal);
+      abortIfNeeded(signal);
+      if (!numberRun.earlyStopped) {
+        numberPending = detectPageNumbers(src, page, opts.numberModel, signal).then(() => {
+          if (signal?.aborted) return;
+          if (page.numberModelRan) numberRun.pagesRun++;
+          if (page.numberModelRan && hasNumberCandidates(page)) {
+            numberRun.evidencePages++;
+            numberRun.probeBoxes += page.numberBoxes?.length || 0;
+            if (numberRun.evidencePages === NUMBER_MODEL_PROBE_PAGES && numberRun.probeBoxes < NUMBER_MODEL_PROBE_BOXES) numberRun.earlyStopped = true;
+          }
+        }).catch(() => { if (!signal?.aborted) page.numberModelFailed = true; });
+      }
     }
   }
 
@@ -864,7 +903,8 @@ export async function analyzeDocument(src, opts) {
   await ocrPages(src, ocrList, { ...ocrOpts, passes: OCR_PASSES.slice(1) });
   shareSplitHints(results);
   if (opts.numberModel) {
-    await Promise.all(numberJobs);
+    if (numberPending) await waitNumberDetection(numberPending, signal);
+    abortIfNeeded(signal);
     for (const r of results) r.numberCandidates = r.candidates.slice();
   }
   if (answersFrom < 0) cutAnswers(); // 스캔본은 OCR 로 정답표를 알아본 뒤에
@@ -910,7 +950,7 @@ export async function analyzeDocument(src, opts) {
   const examSections = role === 'problem' && ['korean', 'math', 'english'].includes(opts.subject) ? (stabilizeExamPages(results, anchors, opts.subject) || stabilizeLegacyExamPages(results, anchors, opts.subject, opts.exam)) : null;
   // Judge EVERY final anchor identically after all recovery, without chain/group inputs.
   for (const r of results) anchors.set(r.index,filterNumberContexts(r,anchors.get(r.index)||[]));
-  if (opts.numberModel) applyNumberModel(results, anchors, opts.numberModel);
+  if (opts.numberModel) applyNumberModel(results, anchors, opts.numberModel, numberRun);
   const layouts = new Map(results.map((r) => [r.index, r.layout]));
   const grids = new Map(results.map((r) => [r.index, r.grid]));
   const sourceMap = new Map(results.map((r) => [r.index, r.source]));
@@ -1176,7 +1216,9 @@ export async function reanalyzeSinglePage(src, doc, idx, { ocrLang, deep = true,
   const anchors = new Map([[idx, chain]]);
   if (numberModel) {
     // A single page cannot upgrade an untrusted/legacy document on its own.
-    applyNumberModel([page], anchors, numberModel, { minBoxes: 1, minAnchors: 1, allowTrust: doc.numberModelTrusted === true });
+    const savedModel = doc.numberModel;
+    applyNumberModel([page], anchors, numberModel, { minBoxes: 1, minAnchors: 1,
+      allowTrust: savedModel?.trusted === true && Array.isArray(savedModel.blindPrefixes), blindPrefixes: savedModel?.blindPrefixes || [] });
     chain = anchors.get(idx);
   }
   const newItems = computeItems([idx], anchors, new Map([[idx, page.layout]]), new Map([[idx, page.grid]]), {

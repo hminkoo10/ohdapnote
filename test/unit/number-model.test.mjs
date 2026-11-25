@@ -66,7 +66,7 @@ test('trust: strong main coverage cannot erase an unsupported prefix group', () 
   const anchors = new Map([[0, [...p.candidates, ...extras]]]);
   const trust = numberModelTrust([p], anchors);
   assert.ok(trust.supportedRatio >= 0.7);
-  assert.equal(trust.prefixesCovered, false); assert.equal(trust.trusted, false);
+  assert.deepEqual(trust.blindPrefixes, ['\uC608\uC81C']); assert.equal(trust.trusted, true);
   assert.equal(trust.groups.find(g => g.prefix === '예제').supported, 0);
 });
 
@@ -115,7 +115,7 @@ test('pipeline: visual support restores group-rejected candidates and token resc
   const result = await analyzeDocument(source(p), { pages: [0], numberModel: { detect: async () => boxes, onResult: s => { stats = s; } } });
   assert.equal(stats.trusted, true);
   assert.deepEqual(result.items.map(i => i.num), [1, 2, 3, 4, 5, 42, 6, 7, 8, 73]);
-  const again = await reanalyzeSinglePage(source(p), { ...result, numberModelTrusted: true }, 0, { deep: false, numberModel: { detect: async () => boxes } });
+  const again = await reanalyzeSinglePage(source(p), { ...result, numberModel: { trusted: true, blindPrefixes: [] } }, 0, { deep: false, numberModel: { detect: async () => boxes } });
   assert.deepEqual(again.items.map(i => i.num), result.items.map(i => i.num));
   const doc = { ...result, numberModelTrusted: false };
   const legacy = await reanalyzeSinglePage(source(p), doc, 0, { deep: false });

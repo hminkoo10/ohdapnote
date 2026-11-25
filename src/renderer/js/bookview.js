@@ -658,7 +658,10 @@ async function analyzeRole(role, { only = null } = {}) {
         updateProgress();
       },
     });
-    if (numberModel) doc.numberModelTrusted = !!numberModel.trust?.trusted;
+    if (numberModel) {
+      doc.numberModelTrusted = !!numberModel.trust?.trusted;
+      doc.numberModel = { trusted: doc.numberModelTrusted, blindPrefixes: numberModel.trust?.blindPrefixes || [] };
+    }
     if (only) {
       // 새 쪽 것만 더함 (번호 모양·쪽 번호 맞춤·직접 고친 표시는 처음 분석한 대로)
       doc.items = [...doc.items.filter((it) => !only.includes(it.page)), ...res.items.filter(it => only.includes(it.page))];
