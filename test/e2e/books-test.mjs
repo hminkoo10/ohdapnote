@@ -37,8 +37,9 @@ for (const [name, c] of Object.entries(CASES)) {
       const ps = await open(probUrl);
       const as = await open(ansUrl);
       const t0 = performance.now();
-      const pr = await analyzeDocument(ps, { pages: parsePageRange('', ps.numPages), role: 'problem', flow: 'column' });
-      const ar = await analyzeDocument(as, { pages: parsePageRange('', as.numPages), role: 'answer', flow: 'continue' });
+      const pm = await window.harness.numberModel(), am = await window.harness.numberModel();
+      const pr = await analyzeDocument(ps, { pages: parsePageRange('', ps.numPages), role: 'problem', flow: 'column', numberModel: pm });
+      const ar = await analyzeDocument(as, { pages: parsePageRange('', as.numPages), role: 'answer', flow: 'continue', numberModel: am });
       const ms = performance.now() - t0;
       // 해설 끝 표식 위치(디지털 원본에서)
       const ms2 = await open(markerUrl);
@@ -53,7 +54,8 @@ for (const [name, c] of Object.entries(CASES)) {
       const A = sortItems(ar.items);
       const m = matchItems(P, A);
       const strip = (it) => ({ id: it.id, page: it.page, number: it.number, prefix: it.prefix || '', rects: it.rects, stemLabel: it.stemLabel || '' });
-      return { ms, P: P.map(strip), A: A.map(strip), match: Object.fromEntries(m), markers, ansFlags: ar.pageInfo, probFlags: pr.pageInfo };
+      return { ms, P: P.map(strip), A: A.map(strip), match: Object.fromEntries(m), markers, ansFlags: ar.pageInfo, probFlags: pr.pageInfo,
+        ...(pm || am ? { numberModel: [pm?.stats, am?.stats] } : {}) };
     },
     [base + c.prob, base + c.ans, base + (c.markers || c.ans)],
   );
