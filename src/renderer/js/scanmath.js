@@ -577,16 +577,16 @@ export function circledMarkers(comps, h, inner = new Map(), isRing = () => true)
 // ---------------------------------------------------------------------------
 // 줄 안: 글 / 수식
 // ---------------------------------------------------------------------------
-// Independently ablated, scan-only region rules. Boxes use cropFormula's {box, comps: id[]} contract.
-export const SCAN_REGION_RULES = { furniture: true, number: true, markers: true, points: true, answers: true, hangul: true, fragments: true, leaders: true, leaderLabels: true, bodyHeight: true, inlineRoots: true, prose: true, mathColor: true, equalityTails: true, edgeMargins: true };
+// 스캔 전용 수식 자리 규칙 (하나씩 끄고 켜며 효과를 잼). 상자는 cropFormula 와 같은 {box, comps: 덩어리 id[]} 꼴
+export const SCAN_REGION_RULES = { furniture: true, markers: true, points: true, answers: true, hangul: true, fragments: true, leaders: true, leaderLabels: true, bodyHeight: true, inlineRoots: true, mathColor: true, equalityTails: true, edgeMargins: true };
 
-/** Two aligned horizontal bars immediately before an OCR unit or a crop edge. */
+/** OCR 글자나 상자 끝 바로 앞에 가로줄 두 개가 나란히 있음 (등호) */
 function equalityBefore(comps, h, edge, y0, y1) {
   const bars = comps.filter(c => bh(c)<0.17*h && bw(c)>=0.25*h && bw(c)<=1.2*h && c.x1<=edge+0.05*h && edge-c.x1<0.5*h && cy(c)>=y0-0.2*h && cy(c)<=y1+0.2*h);
   return bars.some((a,i) => bars.slice(i+1).some(b => Math.abs(cy(a)-cy(b))>=0.1*h && Math.abs(cy(a)-cy(b))<=0.6*h && Math.min(a.x1,b.x1)-Math.max(a.x0,b.x0)>=0.75*Math.min(bw(a),bw(b))));
 }
 
-/** A narrow two-syllable OCR word made of a base and a raised script after '=' is math, not prose. */
+/** '=' 뒤의 좁은 두 글자 OCR 낱말이 밑글자 + 윗첨자 모양이면 글이 아니라 수식 */
 export function retainProseAtEquality(texts, comps, h) {
   return texts.filter(t => {
     if(t.kind!=='hangul' || !(t.n>=2) || bw(t)>=0.6*h*t.n || !equalityBefore(comps,h,t.x0,t.y0,t.y1))return true;
@@ -595,7 +595,7 @@ export function retainProseAtEquality(texts, comps, h) {
   });
 }
 
-/** Restore a colored terminal glyph only when the existing crop ends with an equality sign. */
+/** 상자가 등호로 끝날 때만 바로 뒤의 색 글자를 상자에 되돌려 넣음 */
 export function restoreEqualityRegions(boxes, texts, comps, h) {
   return boxes.map(f => {
     const own = comps.filter(c => f.comps.includes(c.id));
@@ -605,7 +605,7 @@ export function restoreEqualityRegions(boxes, texts, comps, h) {
   });
 }
 
-/** Restore mild color fringes only in narrow multi-digit fractions. */
+/** 좁은 분수(가로선 위아래에 숫자 둘 이상) 안의 옅은 색 잉크만 수식으로 되돌림 */
 export function restoreMathInkRegions(boxes, texts, comps, h) {
   return boxes.map(f => {
     const ids = new Set(f.comps);
@@ -624,7 +624,7 @@ export function restoreMathInkRegions(boxes, texts, comps, h) {
   });
 }
 
-/** Do not let a small colored footer dominate the body font estimate. */
+/** 작은 색 꼬리말 글자가 본문 글자 높이 어림을 좌우하지 않게 함 */
 export function bodyTextHeight(passes, comps, fallback) {
   let count = 0;
   const filtered = passes.map(p => ({...p, words:(p.words || []).map(w => ({...w, symbols:(w.symbols || []).filter(s => {
@@ -640,7 +640,7 @@ export function bodyTextHeight(passes, comps, fallback) {
   return clean >= 1.2*original ? clean : original;
 }
 
-/** A radical's top bar and low left hook are not a diagram when prose follows inline. */
+/** 바로 뒤에 글이 이어지면 근호(윗줄 + 왼쪽 아래 갈고리)는 그림이 아님 */
 export function retainFigureRegions(boxes, texts, comps, h, pixelOf) {
   return boxes.filter(f => {
     if (bh(f.box)>4.5*h || bw(f.box)<2*h) return true;
@@ -662,16 +662,7 @@ export function retainFigureRegions(boxes, texts, comps, h, pixelOf) {
   });
 }
 
-/** Reject multi-line prose/table blobs, not ordinary equations or a single uncertain syllable. */
-export function excludeProseRegions(boxes, texts, comps, h) {
-  return boxes.filter(f => {
-    if(bh(f.box)<1.5*h || bw(f.box)<5*h) return true;
-    const own = texts.filter(t => t.kind==='hangul' && !t.check && t.conf>=90 && overlapArea(t,f.box)>=0.8*bw(t)*bh(t));
-    return own.length<3 || own.reduce((n,t)=>n+(t.n || 1),0)<6;
-  });
-}
-
-/** Regular horizontal leaders, not decimal points, punctuation or dotted letters. */
+/** 같은 높이에 고르게 늘어선 점선 "……" (소수점·문장 부호·점 있는 글자는 아님) */
 export function dotLeaderSymbols(comps, h) {
   const dots = comps.filter(c => (!c.kind || c.kind === 'noise') && bw(c) >= 2 && bh(c) >= 2 && Math.max(bw(c), bh(c)) <= 0.23 * h && bw(c) / bh(c) >= 0.4 && bw(c) / bh(c) <= 2.2 && c.chroma < T.colorChroma).sort((a,b) => cy(a)-cy(b) || a.x0-b.x0);
   const rows = [];
@@ -703,7 +694,7 @@ export function dotLeaderSymbols(comps, h) {
   return out;
 }
 
-/** Recognize only the unambiguous corner strokes of circled giyeok/nieun after a leader. */
+/** 점선 바로 뒤의 ㉠·㉡ 만, 안쪽 꺾인 획 모양이 분명할 때 알아봄 */
 export function leaderLabelSymbols(leaders, comps, h, pixelAt) {
   const out = [];
   for (const leader of leaders) {
@@ -733,12 +724,12 @@ export function leaderLabelSymbols(leaders, comps, h, pixelAt) {
   return out;
 }
 
-/** Same box-list contract for connected-component and model-produced regions. */
+/** 점선과 그 뒤 표지를 수식 상자에서 뺌 (덩어리 상자든 모델 상자든 같은 꼴) */
 export function excludeLeaderRegions(boxes, texts, comps, h) {
   return excludeTextRegions(boxes, texts.filter(t => t.kind === 'leader' || t.kind === 'leaderMarker'), comps, h);
 }
 
-/** Remove whole labelled components; never split on punctuation or operators. */
+/** 글로 잡힌 덩어리를 통째로 뺌. 문장 부호·연산자에서는 자르지 않음 */
 export function excludeTextRegions(boxes, texts, comps, h) {
   return boxes.flatMap(f => {
     const own = comps.filter(c => f.comps.includes(c.id));
@@ -755,13 +746,13 @@ export function excludeTextRegions(boxes, texts, comps, h) {
   });
 }
 
-/** Trim only confidently read Hangul at box edges, retaining interior lists/ratios/inequalities. */
+/** 상자 가장자리의 확신 높은 한글만 잘라 냄 (안쪽의 쉼표 목록·비·부등식은 그대로) */
 export function trimHangulRegions(boxes, texts, comps, h) {
   return boxes.flatMap(f => {
     let box = { ...f.box };
     for (const t of texts) {
       if (t.kind !== 'hangul' || t.check || t.conf < 95 || !meets(box, t)) continue;
-      // Small scripts under an OCR Hangul box still belong to the formula.
+      // OCR 한글 상자 밑에 깔린 작은 첨자는 수식에 남김
       if (!comps.some(c => f.comps.includes(c.id) && meets(c,t) && bh(c) >= 0.7*h && overlapArea(c,t) >= 0.6*bw(c)*bh(c))) continue;
       if (t.x0 <= box.x0 && t.x1 < box.x1) box.x0 = Math.max(box.x0, t.x1);
       else if (t.x1 >= box.x1 && t.x0 > box.x0) box.x1 = Math.min(box.x1, t.x0);
@@ -771,7 +762,7 @@ export function trimHangulRegions(boxes, texts, comps, h) {
   });
 }
 
-/** Attach nearby script ink and merge adjacent boxes only when no text intervenes. */
+/** 가까운 첨자 잉크를 붙이고, 사이에 글이 없을 때만 이웃 상자를 합침 */
 export function joinFormulaRegions(boxes, texts, comps, h) {
   const out = [];
   for (const f of [...boxes].sort((a,b) => a.box.x0-b.box.x0)) {
@@ -794,7 +785,7 @@ export function joinFormulaRegions(boxes, texts, comps, h) {
   return out;
 }
 
-/** OCR-backed text labels: no inferred replacement for an unreadable marker. */
+/** OCR 이 읽은 표지(①·㉠·(가)·<보기>·[n점]·정답)만 글로 둠. 못 읽은 표지를 짐작해 채우지 않음 */
 function scanLabels(words, h, texts) {
   const out = [];
   const candidates = [...words];
@@ -814,9 +805,9 @@ function scanLabels(words, h, texts) {
     const points = SCAN_REGION_RULES.points && /^\[\d{1,2}점\]$/.test(s);
     const answer = SCAN_REGION_RULES.answers && /^(?:\[?(?:정답|풀이|해설|답)\]?)$/.test(s);
     if (!marker && !points && !answer) continue;
-    // Avoid changing a formula crop when its prose boundary is unreadable.
+    // 앞 글을 못 읽었으면 수식 상자를 건드리지 않음
     if (points && !texts.some(t => t.kind === 'hangul' && !t.check && t.conf >= 85 && t.x1 <= w.x0+0.1*h && w.x0-t.x1 < 0.8*h && Math.abs(cy(t)-cy(w)) < 0.5*h)) continue;
-    // A bare single-syllable answer word often has a box spanning the answer itself.
+    // "답" 한 글자는 답 내용까지 덮는 상자로 잡히곤 해서 뺌
     if (answer && s === '\uB2F5') continue;
     if (bw(w) > Math.max(2,s.length)*1.2*h) continue;
     if (!out.some(t => meets(t,w))) out.push({ ...w, str:s, kind:'marker', check:false });
@@ -824,7 +815,7 @@ function scanLabels(words, h, texts) {
   return out;
 }
 
-/** Isolated short numeric edge line, separated by substantial blank space. */
+/** 맨 위·맨 아래에 넓은 빈칸으로 떨어진 짧은 숫자 줄(쪽 번호)과 잘린 귀퉁이 */
 export function removePageRegions(boxes, texts, comps, h, bands, words, W = Infinity, H = Infinity, edgeMargins = false) {
   const remove = [];
   for (const [i,b] of bands.entries()) {
@@ -844,19 +835,6 @@ export function removePageRegions(boxes, texts, comps, h, bands, words, W = Infi
   return excludeTextRegions(boxes,remove,comps,h);
 }
 
-/** First isolated digit-sized cluster; OCR spelling need not equal the requested number. */
-export function removeNumberRegions(boxes, texts, comps, h, number, W) {
-  const digits = String(number).replace(/\D/g,'');
-  if (!digits || !boxes.length) return boxes;
-  const cs = comps.filter(c => !c.kind).sort((a,b)=>a.x0-b.x0);
-  const firstText = texts.filter(t => t.kind==='hangul').sort((a,b)=>a.x0-b.x0)[0];
-  if (!cs.length || !firstText) return boxes;
-  const left = cs.filter(c => c.x1 < firstText.x0-0.5*h);
-  if (!left.length) return boxes;
-  const box = left.reduce(union);
-  if (box.x0>0.12*W || firstText.x0-box.x1>3*h || bh(box)<0.65*h || bh(box)>1.5*h || bw(box)>digits.length*0.9*h || bw(box)<digits.length*0.15*h) return boxes;
-  return excludeTextRegions(boxes,[box],comps,h);
-}
 
 
 /**
@@ -936,7 +914,6 @@ export function splitLine(comps, texts, h) {
   // 글 글자는 사이에 수식이 없으면 이어 붙임 (틈이 넓으면 띄어쓰기)
   let regions = excludeLeaderRegions(tokens, texts, comps, h);
   regions = excludeTextRegions(regions, texts.filter(t => t.kind === 'marker'), comps, h);
-  if (SCAN_REGION_RULES.prose) regions = excludeProseRegions(regions, texts, comps, h);
   if (SCAN_REGION_RULES.hangul) regions = trimHangulRegions(regions, texts, comps, h);
   if (SCAN_REGION_RULES.fragments) regions = joinFormulaRegions(regions, texts, comps, h);
   const pieces = [...regions, ...[...texts, ...extraText].map((s) => ({ t: 'sym', s }))].sort((a, b) => (a.t === 'math' ? a.box.x0 : a.s.x0) - (b.t === 'math' ? b.box.x0 : b.s.x0));
@@ -1040,22 +1017,15 @@ export function planScan(img, passes, { number = '', segments = [] } = {}) {
   });
   // 작은 글씨 줄(쪽 머리말 "정답 및 풀이 84쪽" 같은 것)은 문항 내용이 아님
   const componentBoxes = live().map(c => ({box:c, comps:[c.id]}));
+  // 비본문을 지워도 원래 줄의 짧고 긴 정도(문단 경계)는 바꾸지 않음.
+  const paragraphRight = [];
+  for (const {box} of componentBoxes) {
+    const seg = segOf(cy(box));
+    paragraphRight[seg] = Math.max(paragraphRight[seg] || 0, box.x1);
+  }
   if (SCAN_REGION_RULES.furniture) {
     const kept = new Set(removePageRegions(componentBoxes, texts, comps, h, bands, words, W, H, SCAN_REGION_RULES.edgeMargins).flatMap(f => f.comps));
     for (const c of live()) if (!kept.has(c.id)) c.kind = 'page';
-  }
-  if (SCAN_REGION_RULES.number) {
-    for (const sg of segs) {
-      if (sg.stem) continue;
-      const first = bands.find(b => cy(b) >= sg.y && cy(b) < sg.y+sg.h);
-      if (!first) continue;
-      if (comps.some(c => c.kind === 'number' && cy(c)>=first.y0 && cy(c)<first.y1)) continue;
-      const cs = live().filter(c => cy(c)>=first.y0 && cy(c)<first.y1);
-      const fs = cs.map(c => ({box:c, comps:[c.id]}));
-      const ts = texts.filter(t => cy(t)>=first.y0 && cy(t)<first.y1);
-      const kept = new Set(removeNumberRegions(fs, ts, cs, h, number, W).flatMap(f => f.comps));
-      for (const c of cs) if (!kept.has(c.id)) c.kind = 'number';
-    }
   }
   for (const b of bands) {
     const hs = words.filter((w) => w.conf >= 85).flatMap((w) => w.symbols || []).filter((s) => HANGUL.test(s.str) && s.conf >= 90 && cy(s) >= b.y0 && cy(s) < b.y1).map(bh);
@@ -1124,6 +1094,7 @@ export function planScan(img, passes, { number = '', segments = [] } = {}) {
     lines,
     formulas,
     textConf,
+    paragraphRight,
     hangul: texts.filter((s) => s.kind === 'hangul').length,
   };
 }
@@ -1231,7 +1202,7 @@ export function assembleBlocks(plan, latexOf, results = []) {
 
   // 줄 오른쪽 끝: 오른쪽에 그림이 있으면 그림 앞까지, 아니면 영역의 가장 긴 줄
   const maxRight = new Map();
-  for (const l of plan.lines) maxRight.set(l.seg, Math.max(maxRight.get(l.seg) || 0, l.x1));
+  for (const l of plan.lines) maxRight.set(l.seg, Math.max(maxRight.get(l.seg) || 0, l.x1, plan.paragraphRight?.[l.seg] || 0));
   const availRight = (l) => {
     const fig = plan.figures.find((f) => f.box.y0 < l.y1 && f.box.y1 > l.y0 && f.box.x0 >= l.x1 - h);
     return fig ? fig.box.x0 : maxRight.get(l.seg);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { T, toInk, components, lineBands, findFigures, circledMarkers, splitLine, textSymbols, planScan, cropFormula, trimLatex, assembleBlocks, judgeScan, excludeTextRegions, trimHangulRegions, joinFormulaRegions, removePageRegions, removeNumberRegions, dotLeaderSymbols, leaderLabelSymbols, excludeLeaderRegions, textHeight, bodyTextHeight, retainFigureRegions, excludeProseRegions, restoreMathInkRegions, retainProseAtEquality, restoreEqualityRegions } from '../../src/renderer/js/scanmath.js';
+import { T, toInk, components, lineBands, findFigures, circledMarkers, splitLine, textSymbols, planScan, cropFormula, trimLatex, assembleBlocks, judgeScan, excludeTextRegions, trimHangulRegions, joinFormulaRegions, removePageRegions, dotLeaderSymbols, leaderLabelSymbols, excludeLeaderRegions, textHeight, bodyTextHeight, retainFigureRegions, restoreMathInkRegions, retainProseAtEquality, restoreEqualityRegions } from '../../src/renderer/js/scanmath.js';
 
 const H20 = 20; // 시험에서 쓰는 본문 한글 높이
 
@@ -344,14 +344,14 @@ test('judgeScan: 확신도 낮음 · 찌꺼기 · 한글 OCR 확신도 → 까�
   assert.deepEqual(judgeScan(plan(0, { textConf: T.textConf - 1 }), [], []), ['한글 OCR 확신도 낮음']);
 });
 
-// Region-rule regressions: independent box contracts, no document-specific fixtures.
-test('region labels: remove marker ink, retain following formula', () => {
+// 수식 자리 규칙: 상자 목록 꼴로 하나씩 시험 (특정 문서에 맞춘 자료 없음)
+test('수식 자리 표지: 표지 잉크는 빼고 뒤의 수식은 남김', () => {
   const cs = [comp(0,0,18,20),comp(30,0,45,20)];
   const fs = [{box:{x0:0,y0:0,x1:45,y1:20},comps:cs.map(c=>c.id)}];
   assert.deepEqual(excludeTextRegions(fs,[{x0:0,y0:0,x1:20,y1:20}],cs,20)[0].comps,[cs[1].id]);
   assert.deepEqual(excludeTextRegions(fs,[],cs,20),fs);
 });
-test('region Hangul: clip edge, never punctuation, ratio or interior text', () => {
+test('수식 자리 한글: 가장자리만 자르고 문장 부호·비·안쪽 글에서는 안 자름', () => {
   const cs = [comp(0,0,20,20),comp(20,0,40,20)];
   const fs = [{box:{x0:0,y0:0,x1:40,y1:20},comps:cs.map(c=>c.id)}];
   const t = {x0:20,y0:0,x1:40,y1:20,kind:'hangul',conf:99};
@@ -359,7 +359,7 @@ test('region Hangul: clip edge, never punctuation, ratio or interior text', () =
   assert.deepEqual(trimHangulRegions(fs,[{...t,kind:'punct'}],cs,20),fs);
   assert.deepEqual(trimHangulRegions(fs,[{...t,conf:70}],cs,20),fs);
 });
-test('region fragments: restore script height, merge without intervening text', () => {
+test('수식 자리 조각: 첨자를 되붙이고, 사이에 글이 없을 때만 합침', () => {
   const cs=[comp(0,20,20,40),comp(18,10,25,18),comp(28,20,45,40)];
   const fs=[{box:cs[0],comps:[cs[0].id]},{box:cs[2],comps:[cs[2].id]}];
   const joined=joinFormulaRegions(fs,[],cs,20);
@@ -367,7 +367,7 @@ test('region fragments: restore script height, merge without intervening text', 
   assert.ok(joined[0].comps.includes(cs[1].id));
   assert.equal(joinFormulaRegions(fs,[{x0:21,y0:20,x1:27,y1:40}],cs,20).length,2);
 });
-test('region furniture: only isolated numeric edge lines', () => {
+test('쪽 번호: 떨어진 맨 위·맨 아래 숫자 줄만 뺌', () => {
   const cs=[comp(0,0,80,20),comp(30,140,40,155)];
   const fs=cs.map(c=>({box:c,comps:[c.id]}));
   const bands=[{y0:0,y1:20},{y0:140,y1:155}];
@@ -376,14 +376,7 @@ test('region furniture: only isolated numeric edge lines', () => {
   assert.equal(removePageRegions(fs,[],cs,30,bands,ws).length,2);
   assert.equal(removePageRegions(fs,[],cs,20,bands,[{...ws[0],str:'x'}]).length,2);
 });
-test('region number: isolated leading cluster, not stem text or wide formula', () => {
-  const cs=[comp(0,0,12,20),comp(45,0,65,20)];
-  const fs=cs.map(c=>({box:c,comps:[c.id]}));
-  const ts=[{x0:45,y0:0,x1:65,y1:20,kind:'hangul'}];
-  assert.equal(removeNumberRegions(fs,ts,cs,20,'5',500).length,1);
-  assert.equal(removeNumberRegions(fs,ts,cs,20,'',500).length,2);
-});
-test('region OCR labels: split points, inline circled marker and answer badge stay text', () => {
+test('OCR 표지: [n점]·본문 속 동그라미 표지·정답 표시는 글로 남김', () => {
   for (const type of ['points','marker','answer']) {
     const {img,fill,ring}=paper(220,70);
     fill(80,10,99,30);fill(101,10,120,30);fill(122,10,141,30);
@@ -396,7 +389,7 @@ test('region OCR labels: split points, inline circled marker and answer badge st
       ring(10,7,58,33); fill(15,10,32,30);fill(35,10,52,30);
       ws.push(word('\ud480\uc774',10,7,58,33));
     } else {
-      // Marker inside prose, not a choice-row prefix.
+      // 보기 줄 맨 앞이 아니라 글 속에 있는 표지
       fill(10,10,28,30);ws.push(word('\uac00',10,10,28,30));
       ring(40,10,60,30);fill(48,15,52,25);
       ws.push(word('\u2460',40,10,60,30));
@@ -407,7 +400,7 @@ test('region OCR labels: split points, inline circled marker and answer badge st
   }
 });
 
-test('region furniture: clipped isolated corner, not ordinary formula or prose', () => {
+test('쪽 귀퉁이: 잘린 귀퉁이 덩어리만 뺌 (보통 수식·글은 아님)', () => {
  const cs=[comp(0,0,80,20),comp(180,160,200,200)];
  const fs=cs.map(c=>({box:c,comps:[c.id]}));
  const bs=[{y0:0,y1:20},{y0:160,y1:200}];
@@ -416,20 +409,20 @@ test('region furniture: clipped isolated corner, not ordinary formula or prose',
  assert.equal(removePageRegions(fs,[],cs,20,bs,[],220,220).length,2);
 });
 
-test('region fragments: do not absorb displaced Hangul strokes', () => {
+test('수식 자리 조각: 밀려난 한글 획은 붙이지 않음', () => {
  const stroke=comp(18,20,20,30), formula=comp(22,20,40,40);
  const fs=[{box:formula,comps:[formula.id]}];
  const ts=[{x0:0,y0:20,x1:17,y1:40,kind:'hangul',conf:99}];
  assert.deepEqual(joinFormulaRegions(fs,ts,[stroke,formula],20)[0].comps,[formula.id]);
 });
-test('region punctuation: lists, ratios and inequalities remain one formula', () => {
+test('문장 부호: 쉼표 목록·비·부등식은 수식 하나로 남김', () => {
  for(const str of ['A(-3),B(-4)','1:2','1/2<a<1']) {
   const cs=[...str].map((_,i)=>comp(i*12,10,i*12+8,30));
   assert.equal(splitLine(cs,[],20).tokens.filter(t=>t.t==='math').length,1,str);
  }
 });
 
-test('region labels: split a model box around interior protected marker', () => {
+test('수식 자리 표지: 모델 상자도 안쪽 표지 둘레에서 나눔', () => {
  const cs=[comp(0,0,12,20),comp(20,0,38,20),comp(44,0,58,20)];
  const fs=[{box:{x0:0,y0:0,x1:58,y1:20},comps:cs.map(c=>c.id)}];
  const ts=[{x0:20,y0:0,x1:40,y1:20}];
@@ -437,7 +430,7 @@ test('region labels: split a model box around interior protected marker', () => 
  assert.deepEqual(out.map(f=>f.comps),[[cs[0].id],[cs[2].id]]);
 });
 
-test('leaders: at least five regular dots, not four dots or intervening letters', () => {
+test('점선: 고른 점 다섯 개 이상만 (점 넷이나 사이에 글자가 끼면 아님)', () => {
  const cs=Array.from({length:6},(_,i)=>comp(i*8,20,i*8+3,23));
  assert.equal(dotLeaderSymbols(cs,20).length,1);
  assert.equal(dotLeaderSymbols(cs.slice(0,4),20).length,0);
@@ -445,7 +438,7 @@ test('leaders: at least five regular dots, not four dots or intervening letters'
  const uneven=[0,8,16,40,48,68].map(x=>comp(x,20,x+3,23));
  assert.equal(dotLeaderSymbols(uneven,20).length,0);
 });
-test('leaders: synthetic math bypasses MFR and preserves its position', () => {
+test('점선: 수식 인식기를 거치지 않고 제자리에 점선 수식으로 들어감', () => {
  const {img,fill}=paper(220,60);
  for(let x=10;x<=50;x+=8)fill(x,16,x+3,19);
  fill(100,10,118,30);fill(121,10,139,30);fill(142,10,160,30);
@@ -453,7 +446,7 @@ test('leaders: synthetic math bypasses MFR and preserves its position', () => {
  assert.equal(plan.formulas.length,0);
  assert.ok(assembleBlocks(plan,()=>{throw new Error('leader must not call MFR')})[0].text.includes('cdots'));
 });
-test('leaders: circled corner-stroke labels, not a circle containing a bar', () => {
+test('점선 뒤 표지: ㉠·㉡ 꺾인 획만 (막대가 든 동그라미는 아님)', () => {
  for(const kind of ['giyeok','nieun','bar']) {
   const {img,fill,ring}=paper(90,45);ring(40,10,60,30);
   if(kind==='giyeok'){fill(45,15,54,17);fill(52,15,54,24);}
@@ -465,13 +458,13 @@ test('leaders: circled corner-stroke labels, not a circle containing a bar', () 
   if(out.length)assert.equal(out[0].str,String.fromCodePoint(kind==='giyeok'?0x3260:0x3261));
  }
 });
-test('leaders: model region is split around a protected leader', () => {
+test('점선: 모델 상자도 점선 둘레에서 나눔', () => {
  const cs=[comp(0,0,12,20),comp(20,8,60,12),comp(70,0,90,20)];
  const out=excludeLeaderRegions([{box:{x0:0,y0:0,x1:90,y1:20},comps:cs.map(c=>c.id)}],[{...cs[1],kind:'leader'}],cs,20);
  assert.deepEqual(out.map(f=>f.comps),[[cs[0].id],[cs[2].id]]);
 });
 
-test('body height: small colored footer cannot outweigh larger black body text', () => {
+test('본문 글자 높이: 작은 색 꼬리말이 큰 검은 본문을 이기지 못함', () => {
  const body=word("\uac00\ub098\ub2e4",0,0,60,20),footer=word("\ub77c\ub9c8\ubc14\uc0ac\uc544\uc790\ucc28\uce74",0,60,80,72);
  const cs=[...body.symbols.map(s=>comp(s.x0,s.y0,s.x1,s.y1)),...footer.symbols.map(s=>({...comp(s.x0,s.y0,s.x1,s.y1),chroma:80}))];
  assert.equal(textHeight([{words:[body,footer]}]),12);
@@ -480,7 +473,7 @@ test('body height: small colored footer cannot outweigh larger black body text',
  const almost=word("\uac00\ub098\ub2e4",0,0,60,13);
  assert.equal(bodyTextHeight([{words:[almost,footer]}],cs,40),12);
 });
-test('inline root: top bar and low hook with following prose, not a diagram frame', () => {
+test('글 속 근호: 윗줄과 아래 갈고리 뒤에 글이 이어지면 그림이 아님', () => {
  for(const root of [true,false]) {
   const {img,fill,ring}=paper(180,100);
   if(root){fill(20,10,100,12);fill(20,10,22,70);fill(2,45,22,47);}else ring(2,10,100,70);
@@ -491,14 +484,7 @@ test('inline root: top bar and low hook with following prose, not a diagram fram
   assert.equal(retainFigureRegions(figs,[],comps,20,()=>true).length,1);
  }
 });
-test('prose blobs: require several confident words and multiple lines', () => {
- const f={box:{x0:0,y0:0,x1:200,y1:60},comps:[]};
- const ts=[10,70,130].map(x=>({x0:x,y0:10,x1:x+30,y1:30,kind:'hangul',n:2,conf:95}));
- assert.equal(excludeProseRegions([f],ts,[],20).length,0);
- assert.equal(excludeProseRegions([f],ts.map(t=>({...t,check:true})),[],20).length,1);
- assert.equal(excludeProseRegions([{...f,box:{...f.box,y1:20}}],ts,[],20).length,1);
-});
-test('math ink: only multi-digit fractions, not headings or uncertain prose', () => {
+test('수식 잉크: 위아래 숫자가 둘 이상인 분수만 (제목·확신 낮은 글은 아님)', () => {
  const cs=[comp(0,0,9,14),{...comp(12,0,21,14),kind:'color',chroma:30},comp(24,0,33,14),comp(0,18,35,20),comp(0,25,9,39),comp(12,25,21,39),comp(24,25,33,39),{...comp(50,0,60,20),kind:'color',chroma:30}];
  const fs=[{box:{x0:0,y0:0,x1:35,y1:39},comps:cs.filter(c=>!c.kind).map(c=>c.id)}];
  assert.ok(restoreMathInkRegions(fs,[],cs,20)[0].comps.includes(cs[1].id));
@@ -507,7 +493,7 @@ test('math ink: only multi-digit fractions, not headings or uncertain prose', ()
  assert.deepEqual(restoreMathInkRegions([{...fs[0],box:{...fs[0].box,y1:20}}],[],cs,20)[0].comps,fs[0].comps);
 });
 
-test('equality tail: base plus raised script is not a narrow OCR Hangul word', () => {
+test('등호 뒤: 밑글자 + 윗첨자는 좁은 OCR 한글 낱말이 아님', () => {
  const bars=[comp(30,20,45,22),comp(30,26,45,28)];
  const cs=[...bars,comp(50,17,60,30),comp(61,10,66,17)];
  const t={x0:50,y0:10,x1:70,y1:30,kind:'hangul',n:2,conf:90};
@@ -516,14 +502,14 @@ test('equality tail: base plus raised script is not a narrow OCR Hangul word', (
  assert.equal(retainProseAtEquality([t],cs.slice(2),20).length,1);
  assert.equal(retainProseAtEquality([{...t,x1:90}],cs,20).length,1);
 });
-test('equality tail: restore only a nearby colored terminal glyph after two equal bars', () => {
+test('등호 뒤: 등호 바로 뒤의 색 글자 하나만 되돌림', () => {
  const cs=[comp(0,10,15,30),comp(30,20,45,22),comp(30,26,45,28),{...comp(50,13,60,28),kind:'color',chroma:30}];
  const f={box:{x0:0,y0:10,x1:45,y1:30},comps:cs.slice(0,3).map(c=>c.id)};
  assert.equal(restoreEqualityRegions([f],[],cs,20)[0].box.x1,60);
  assert.deepEqual(restoreEqualityRegions([f],[cs[3]],cs,20),[f]);
  assert.deepEqual(restoreEqualityRegions([{...f,comps:cs.slice(0,2).map(c=>c.id)}],[],cs,20)[0].box,f.box);
 });
-test('detached corner: near-bottom left footer, not a normal short answer line', () => {
+test('떨어진 귀퉁이: 왼쪽 아래 꼬리말만 (보통 짧은 답 줄은 아님)', () => {
  const cs=[comp(10,0,100,20),comp(0,160,20,190)];
  const fs=cs.map(c=>({box:c,comps:[c.id]}));
  const bands=[{y0:0,y1:20},{y0:160,y1:190}];
@@ -532,4 +518,25 @@ test('detached corner: near-bottom left footer, not a normal short answer line',
  const right=[cs[0],{...cs[1],x0:180,x1:200}];
  assert.equal(removePageRegions(right.map(c=>({box:c,comps:[c.id]})),[],right,20,bands,[],200,200,true).length,2);
  assert.equal(removePageRegions(fs,[],cs,20,[{y0:80,y1:100},bands[1]],[],200,200,true).length,2);
+});
+
+test('문항 번호 추정: OCR로 확인하지 못한 본문 첫 숫자는 지우지 않음', () => {
+  const {img,fill}=paper(240,60);
+  fill(5,10,14,30);fill(17,10,26,30);fill(29,10,38,30);
+  fill(60,10,78,30);fill(81,10,99,30);fill(102,10,120,30);
+  const plan=planScan(img,[{words:[word('가나다',60,10,120,30)]}],{number:'123'});
+  assert.equal(plan.formulas[0].box.x0,5);
+  assert.equal(plan.formulas[0].comps.length,3);
+});
+
+test('글 덩어리 추정: 한글이 겹친 높은 수식도 통째로 지우지 않음', () => {
+  const cs=[comp(0,0,60,60),comp(70,0,130,60),comp(140,0,200,60)];
+  const ts=[10,80,150].map(x=>({str:'가나',x0:x,y0:10,x1:x+30,y1:30,kind:'hangul',n:2,conf:90}));
+  assert.equal(splitLine(cs,ts,20).tokens.filter(t=>t.t==='math').length,1);
+});
+
+test('비본문 제거: 쪽 귀퉁이를 지워도 기존 짧은 줄 뒤 문단 경계는 유지', () => {
+  const plan=handPlan([[10,[tx('문제 문장',10,500)]],[70,[mt(0,10,530)]]]);
+  plan.paragraphRight=[600];
+  assert.deepEqual(assembleBlocks(plan,()=> 'x=1').map(b=>b.text),['문제 문장','$x=1$']);
 });
