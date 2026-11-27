@@ -381,7 +381,10 @@ export function decodeGlyph(c, fam, style = '') {
       return { k: 'brace', lo: bounds[c][0], hi: bounds[c][1] };
     }
     if ('{([})]'.includes(c)) return { k: '{(['.includes(c) ? 'open' : 'close', v: c === '{' || c === '}' ? `\\${c}` : c };
-    if (/^[A-Za-z0-9=+(),.:<>|'\[\]\-]$/.test(c)) return { k: 'm', v: c, letter: /[A-Za-z]/.test(c), upright: !italic };
+    if (/^[A-Za-z0-9=+!(),.:<>|'\[\]\-]$/.test(c)) return { k: 'm', v: c, letter: /[A-Za-z]/.test(c), upright: !italic };
+    if (c === '%') return { k: 'm', v: '\\%' };
+    if (c === '\u03b3') return { k: 'm', v: '\\gamma' };
+    if (c === '\u22ef') return { k: 'm', v: '\\cdots' };
     if (c === '′' || c === '″') return { k: 'm', v: c === '′' ? "'" : "''" };
     const symbols = { '∠': '\\angle', '−': '-', '×': '\\times', '÷': '\\div', '≤': '\\le', '≥': '\\ge', '≠': '\\ne', '∞': '\\infty', '→': '\\to', 'α': '\\alpha', 'β': '\\beta', 'θ': '\\theta', 'π': '\\pi', '∑': '\\sum', '∏': '\\prod', '∩': '\\cap', '∪': '\\cup', '∈': '\\in', '⊂': '\\subset', '∅': '\\emptyset' };
     if (symbols[c]) return { k: 'm', v: symbols[c] };
@@ -389,6 +392,7 @@ export function decodeGlyph(c, fam, style = '') {
     return null;
   }
   if (!fam.startsWith('EH')) {
+    if (TEXT_FIX[c]) return { k: 'text', v: TEXT_FIX[c] };
     if (isPrivateChar(c)) return null;
     return { k: 'text', v: TEXT_FIX[c] ?? c };
   }
@@ -429,6 +433,9 @@ export function decodeGlyph(c, fam, style = '') {
       return null;
     case 'EHboNB':
       if (c === "'") return { k: 'skip' };
+      // Two visible fraction contexts: zero-width ! supplies numerator 1,
+      // U+008C has the same denominator a outline (not a spacing control).
+      if (c === '\u008c') return { k: 'fr', part: 'den', v: 'a' };
       return fracPiece(c);
     case 'EHboNA':
       if (NA_RADICAL[c]) return { k: 'rad', len: NA_RADICAL[c][0], lo: NA_RADICAL[c][1], hi: NA_RADICAL[c][2] };
@@ -768,7 +775,7 @@ function radicalSpans(boxes) {
 }
 
 /** 루트·분수선 → 루트·분수 덩어리. 안쪽(짧은 것)부터 */
-function structures(boxes, lines, s) {
+function structures(boxes, lines, s, figures = []) {
   // 한컴 윗선은 폭 1/2em 글리프를 가로로 늘린 것. 실제 ink 높이는 598~639/1024em.
   const bars = boxes.filter((b) => b.tok.k === 'hbar');
   boxes = boxes.filter((b) => b.tok.k !== 'hbar');
@@ -787,12 +794,25 @@ function structures(boxes, lines, s) {
   boxes = boxes.filter((b) => b.tok.k !== 'radx');
   for (const l of lines) if (l.x1 - l.x0 >= 2.5) items.push({ line: l, w: l.x1 - l.x0 });
   items.sort((a, b) => a.w - b.w);
-  for (const it of items) boxes = it.rad ? makeSqrt(boxes, it, s) : makeFrac(boxes, it.line, s);
+  for (const it of items) boxes = it.rad ? makeSqrt(boxes, it, s) : makeFrac(boxes, it.line, s, figures);
   return boxes;
 }
 
-function makeFrac(boxes, l, s) {
+function makeFrac(boxes, l, s, figures) {
   const span = (b) => real(b) && midX(b) >= l.x0 - 0.5 && midX(b) <= l.x1 + 0.5;
+  // Single-letter accents sit almost a full em above their baseline. Do not
+  // mistake the previous prose row for a numerator.
+  if (l.hancom) {
+    const letters = boxes.filter((b) => span(b) && b.tok.k === 'm' &&
+      /^(?:[A-Za-z]|\\[a-z]+)$/.test(b.tok.v) &&
+      b.base - l.y > 0.75 * b.size && b.base - l.y < 1.05 * b.size &&
+      Math.abs(b.x0 - l.x0) < 0.15 * b.size && Math.abs(b.x1 - l.x1) < 0.2 * b.size);
+    if (letters.length === 1 && !boxes.some((b) => span(b) && b.tok.k !== 'text' &&
+      b.base < l.y && b.base >= l.y - 0.75 * b.size)) {
+      const b = letters[0];
+      return boxes.map((a) => a === b ? { ...b, tok: { k: 'm', v: `\\overline{${b.tok.v}}` }, comp: true } : a);
+    }
+  }
   const pick = (seed, side) => {
     const grp = boxes.filter((b) => span(b) && seed(b));
     if (!grp.length) return grp;
@@ -810,8 +830,25 @@ function makeFrac(boxes, l, s) {
     }
     return grp;
   };
-  const num = l.hancom ? boxes.filter((b) => span(b) && b.base < l.y && b.base > l.y - 1.5 * s) : pick((b) => b.bottom <= l.y + 0.25 * s && b.bottom >= l.y - 0.6 * s, (b) => b.bottom <= l.y + 0.25 * s);
-  const den = l.hancom ? boxes.filter((b) => span(b) && b.base > l.y && b.base < l.y + 1.5 * s) : pick((b) => b.top >= l.y - 0.25 * s && b.top <= l.y + 0.6 * s, (b) => b.top >= l.y - 0.25 * s);
+  let num = l.hancom ? boxes.filter((b) => span(b) && b.base < l.y && b.base > l.y - 1.5 * s) : pick((b) => b.bottom <= l.y + 0.25 * s && b.bottom >= l.y - 0.6 * s, (b) => b.bottom <= l.y + 0.25 * s);
+  let den = l.hancom ? boxes.filter((b) => span(b) && b.base > l.y && b.base < l.y + 1.5 * s) : pick((b) => b.top >= l.y - 0.25 * s && b.top <= l.y + 0.6 * s, (b) => b.top >= l.y - 0.25 * s);
+  // Glyph fractions have baseline-sized boxes, not tight ink bounds. Only
+  // extend the seed distance only with an assembled fraction as evidence.
+  if (!l.hancom && (!num.length || !den.length)) {
+    const upper = pick((b) => b.tok.k !== 'text' && b.bottom <= l.y && b.bottom >= l.y - 0.9 * s, (b) => b.tok.k !== 'text' && b.bottom <= l.y);
+    const lower = pick((b) => b.tok.k !== 'text' && b.top >= l.y && b.top <= l.y + 0.9 * s, (b) => b.tok.k !== 'text' && b.top >= l.y);
+    const nested = (a) => a.some((b) => b.comp && b.tok.v?.includes('\\frac{'));
+    const nestedSides = nested(upper) || nested(lower);
+    const safe = [...upper, ...lower].every((b) => !/[=<>]/.test(b.tok.v || ''));
+    if (upper.length && lower.length && nestedSides && safe) { num = upper; den = lower; }
+    else if (upper.length && lower.length && (nested(upper) || nested(lower))) {
+      // Uncertain stacked expression: preserve just this formula, not the item.
+      const members = [...upper, ...lower];
+      const box = around(members);
+      figures.push({ x0: Math.min(l.x0, box.x0), x1: Math.max(l.x1, box.x1), y0: box.top, y1: box.bottom });
+      return boxes.filter((b) => !members.includes(b));
+    }
+  }
   if (l.hancom && !num.length && den.length) {
     const ref = mainLine(den);
     if (den.some((b) => b.tok.k === 'text') || l.y > ref.base - 0.45 * ref.size || l.y < ref.base - 1.2 * ref.size) fail('윗줄 범위 미확인');
@@ -1119,6 +1156,17 @@ function findFigures(shapes, lines, boxes, R, s) {
   }
   const figs = [];
   for (const f of groups.filter((g) => (g.curve || g.segs >= 3 || g.n >= 3) && g.x1 - g.x0 >= 2.5 * s && g.y1 - g.y0 >= 2.5 * s)) {
+    // Some writers draw a condition frame as separate, duplicated sides.
+    // Only a plain enclosure (no internal strokes) with condition labels is prose.
+    const content = boxes.filter((b) => midX(b) > f.x0 && midX(b) < f.x1 && midY(b) > f.y0 && midY(b) < f.y1);
+    const conditionText = content.sort((a, b) => a.base - b.base || a.x0 - b.x0).map((b) => b.tok.v || '').join('').replace(/\s/g, '');
+    const border = (sh) => (Math.abs(sh.x0 - f.x0) < 1 && Math.abs(sh.x1 - f.x0) < 1) || (Math.abs(sh.x0 - f.x1) < 1 && Math.abs(sh.x1 - f.x1) < 1);
+    const internal = shapes.filter((sh) => sh.x0 >= f.x0 - 1 && sh.x1 <= f.x1 + 1 && sh.y0 >= f.y0 - 1 && sh.y1 <= f.y1 + 1);
+    const horizontal = lines.filter((l) => l.x0 >= f.x0 - 1 && l.x1 <= f.x1 + 1 && l.y >= f.y0 - 1 && l.y <= f.y1 + 1);
+    if (!f.curve && conditionText.includes('(가)') && conditionText.includes('(나)') && internal.length && internal.every(border) && horizontal.some((l) => Math.abs(l.y - f.y0) < 1) && horizontal.some((l) => Math.abs(l.y - f.y1) < 1)) {
+      for (const l of horizontal) if (Math.abs(l.y - f.y0) < 1 || Math.abs(l.y - f.y1) < 1) l.used = true;
+      continue;
+    }
     // 영역 맨 위의 얇고 넓은 띠("예제 ① 함수의 연속" 머리 장식): 그 안 글자와 함께 버림
     if (f.x1 - f.x0 > 0.7 * W && f.y1 - f.y0 < 5 * s && f.y0 < R.y0 + 2 * s) {
       figs.push({ ...f, deco: true });
@@ -1230,11 +1278,18 @@ function regionBlocks(layer, rect, place) {
   const R = { x0: rect.x * layer.w, y0: rect.y * layer.h, x1: (rect.x + rect.w) * layer.w, y1: (rect.y + rect.h) * layer.h };
   const inR = (b) => midX(b) >= R.x0 - 1 && midX(b) <= R.x1 + 1 && midY(b) >= R.y0 - 1 && midY(b) <= R.y1 + 1;
   let boxes = [];
+  const conditionFences = new Set();
+  for (const label of layer.glyphs.filter((g) => /^[가나다라마]$/.test(g.c))) {
+    const near = (g) => Math.abs(g.base - label.base) < 0.3 * label.size;
+    const left = layer.glyphs.find((g) => g.c === '(' && near(g) && g.x0 < label.x0 && label.x0 - g.x1 >= -0.1 * label.size && label.x0 - g.x1 < 0.4 * label.size);
+    const right = layer.glyphs.find((g) => g.c === ')' && near(g) && g.x0 >= label.x1 - 0.1 * label.size && g.x0 - label.x1 < 0.4 * label.size);
+    if (left && right) { conditionFences.add(left); conditionFences.add(right); }
+  }
   for (const gl of layer.glyphs) {
     if (!inR(gl) || SKIP_FONTS.test(gl.fam)) continue;
     if (gl.rot) fail(`돌려 놓은 글자 ${gl.fam} "${gl.c}"`);
     let tok = decodeGlyph(gl.c, gl.fam, gl.style);
-    if (/^[()]$/.test(gl.c) && layer.glyphs.some((g) => isHancomMath(g.fam))) tok = { k: gl.c === '(' ? 'open' : 'close', v: gl.c };
+    if (/^[()]$/.test(gl.c) && layer.glyphs.some((g) => isHancomMath(g.fam)) && !conditionFences.has(gl)) tok = { k: gl.c === '(' ? 'open' : 'close', v: gl.c };
     if (!tok) fail(`모르는 기호 ${gl.fam}-${gl.style} "${gl.c}" (U+${gl.c.codePointAt(0).toString(16).toUpperCase()})`);
     if (tok.k === 'skip') continue;
     const ink = tok.hi != null ? { top: gl.base - tok.hi * gl.size, bottom: gl.base - tok.lo * gl.size } : { top: gl.top, bottom: gl.bottom };
@@ -1255,7 +1310,7 @@ function regionBlocks(layer, rect, place) {
 
   boxes = glyphFractions(boxes, free);
   boxes = limits(boxes);
-  boxes = structures(boxes, free, s);
+  boxes = structures(boxes, free, s, figs);
   boxes = hancomStructures(boxes, s);
   boxes = makeCases(boxes, s);
   const left = boxes.find((b) => ['fr', 'rad', 'radx', 'brace'].includes(b.tok.k));
@@ -1353,7 +1408,9 @@ function regionBlocks(layer, rect, place) {
     // 번호가 ①부터(이어지는 줄은 앞 줄 다음 번호부터) 차례로일 때만 보기. 정답표 "1 ③ 2 ① …" 는 글
     const from = prevChoices ? prev.items.length : 0;
     const inOrder = marks.length > 0 && marks.every((m, k) => m.tok.v === MARKS[from + k]);
-    if (inOrder && (marks.length >= 2 || (first === marks[0] && prevChoices))) {
+    const vertical = rows.slice(rows.indexOf(row), rows.indexOf(row) + 5);
+    const verticalChoices = !prevChoices && vertical.length === 5 && vertical.every((r, k) => r.items.find(real)?.tok.v === MARKS[k]);
+    if (inOrder && (marks.length >= 2 || (first === marks[0] && (prevChoices || verticalChoices)))) {
       if (first !== marks[0]) fail('보기 번호 앞에 글이 있음');
       const list = prevChoices ? prev.items : [];
       for (let k = 0; k < marks.length; k++) {
@@ -1456,13 +1513,65 @@ export function hancomEquationRegions(layer, rect = { x: 0, y: 0, w: 1, h: 1 }) 
   return groups.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
 }
 
+/** Remove explicit exam furniture only; preserve item boundaries and body numbers. */
+export function stripExamFurniture(layer) {
+  const rows = [];
+  for (const g of [...layer.glyphs].sort((a, b) => a.base - b.base || a.x0 - b.x0)) {
+    let row = rows.find((r) => Math.abs(r[0].base - g.base) < 0.25 * Math.min(r[0].size, g.size));
+    if (!row) rows.push(row = []);
+    row.push(g);
+  }
+  const text = (row) => row.sort(byX).map((g) => normalizeHancomText(g.c, g.fam)).join('').replace(/\s/g, '');
+  const headers = rows.filter((r) => r[0].base < 0.16 * layer.h && /^(?:\d+)?(?:수학영역(?:\((?:확률과통계|미적분|기하)\))?|영역\d+|\((?:확률과통계|미적분|기하)\)\d+)(?:\d+)?$/.test(text(r)));
+  if (!headers.length) return layer;
+  const mathFont = (g) => isHancomMath(g.fam) || g.fam.startsWith('EH');
+  const digit = (g) => /^\d+$/.test(normalizeHancomText(g.c, g.fam));
+  const drop = new Set(headers.flat().filter((g) => !mathFont(g) && !digit(g)));
+  const noticeFrames = [];
+  for (const row of rows) {
+    const t = text(row);
+    // Header folio may use a larger font and a slightly shifted baseline.
+    const digits = headers.includes(row) ? row.filter(digit) : row;
+    const folio = digits.length && /^\d{1,4}$/.test(text(digits)) && digits.every((g) => !mathFont(g));
+    if (folio && headers.some((h) => {
+      const letters = h.filter((g) => /[가-힣]/.test(g.c));
+      const size = median(letters.map((g) => g.size));
+      const top = Math.min(...letters.map((g) => g.top));
+      // A large folio can have a lower baseline while still occupying the same row.
+      // Small digits, lower rows, and digits touching math are never furniture.
+      return digits.every((g) => g.size >= 0.8 * size && g.top <= top && g.base <= h[0].base + 0.25 * size && !layer.glyphs.some((m) => mathFont(m) && Math.max(m.x0 - g.x1, g.x0 - m.x1) < 0.5 * g.size && Math.abs(m.base - g.base) < g.size));
+    })) digits.forEach((g) => drop.add(g));
+    const footerFolio = row.every((g) => !isHancomMath(g.fam) && g.x0 > 0.40 * layer.w && g.x1 < 0.60 * layer.w);
+    if (footerFolio && row[0].base > 0.90 * layer.h && /^\d{1,4}$/.test(t)) row.forEach((g) => drop.add(g));
+    if (row[0].base > 0.70 * layer.h && /^\u203b\uD655\uC778\uC0AC\uD56D$/.test(t)) {
+      const top = Math.min(...row.map((g) => g.top));
+      const frames = layer.shapes.filter((sh) => !sh.image && !sh.curve && sh.closed && sh.x0 <= row[0].x0 && sh.x1 >= row.at(-1).x1 && sh.y0 <= top && sh.y0 >= top - 2 * row[0].size && sh.y1 >= row[0].base);
+      // Also recognize writers that emit the four sides as separate strokes.
+      for (const l of layer.lines.filter((l) => l.y <= top && l.y >= top - 2 * row[0].size && l.x0 <= row[0].x0 && l.x1 >= row.at(-1).x1)) {
+        const sides = layer.shapes.filter((sh) => !sh.image && !sh.curve && sh.x1 - sh.x0 < 1 && Math.abs(sh.y0 - l.y) < 1);
+        const left = sides.find((sh) => Math.abs(sh.x0 - l.x0) < 1);
+        const right = sides.find((sh) => Math.abs(sh.x0 - l.x1) < 1);
+        if (left && right && Math.abs(left.y1 - right.y1) < 1 && layer.lines.some((b) => Math.abs(b.y - left.y1) < 1 && Math.abs(b.x0 - l.x0) < 1 && Math.abs(b.x1 - l.x1) < 1)) frames.push({ x0: l.x0, x1: l.x1, y0: l.y, y1: left.y1 });
+      }
+      noticeFrames.push(...frames);
+      for (const g of layer.glyphs) if (g.top >= Math.min(...row.map((a) => a.top)) - 1) drop.add(g);
+    }
+  }
+  const frameEdge = (sh, f) => !sh.image && !sh.curve && sh.x0 >= f.x0 - 1 && sh.x1 <= f.x1 + 1 && sh.y0 >= f.y0 - 1 && sh.y1 <= f.y1 + 1 && (sh.rect && sh.x1 - sh.x0 > 1 && sh.y1 - sh.y0 > 1 || sh.x1 - sh.x0 < 1 && (Math.abs(sh.x0 - f.x0) < 1 || Math.abs(sh.x0 - f.x1) < 1));
+  return { ...layer, glyphs: layer.glyphs.filter((g) => !drop.has(g)),
+    shapes: layer.shapes.filter((sh) => !noticeFrames.some((f) => frameEdge(sh, f))),
+    lines: layer.lines.filter((l) => !noticeFrames.some((f) => l.x0 >= f.x0 - 1 && l.x1 <= f.x1 + 1 && (Math.abs(l.y - f.y0) < 1 || Math.abs(l.y - f.y1) < 1))),
+  };
+}
+
 export function transcribeParts(parts, { explain = false, plain = false } = {}) {
   try {
     // 수식 글꼴(EH…)로 만든 PDF 만 (다른 출판사 PDF 의 수식 글꼴은 아직 모름)
     // 문제은행에서는 일반 글꼴의 디지털 PDF도 읽음. 기존 수식 내보내기의 기본 제한은 유지
     if (!parts.length || !plain && !parts.every((p) => p.layer.glyphs.some((g) => (g.fam.startsWith('EH') || isHancomMath(g.fam))))) fail('수식 글꼴(EH…)로 만든 PDF 가 아님');
     const blocks = [];
-    for (const p of parts) {
+    for (const part of parts) {
+      const p = { ...part, layer: stripExamFurniture(part.layer) };
       const hancom = p.layer.glyphs.some((g) => isHancomMath(g.fam));
       try {
         const result = regionBlocks(p.layer, p.rect, p.place);

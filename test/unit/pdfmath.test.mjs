@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { transcribeParts, decodeGlyph, fontFamily, hancomEquationRegions } from '../../src/renderer/js/pdfmath.js';
+import { transcribeParts, decodeGlyph, fontFamily, hancomEquationRegions, stripExamFurniture } from '../../src/renderer/js/pdfmath.js';
+import { importAnswerBlocks, runsText } from '../../src/renderer/js/answer-model.js';
 
 // 실제 교재 대신 글자 위치를 직접 만든 가짜 쪽으로 시험 (글꼴 이름·코드는 실제 교재 PDF 의 수식 글꼴 규칙)
 // 글자 조각: [글자, 글꼴, 모양, 폭(em)]
@@ -26,6 +27,148 @@ function layer(rows, { lines = [], shapes = [] } = {}) {
 
 const whole = (L) => [{ layer: L, rect: { x: 0, y: 0, w: 1, h: 1 }, place: { x: 0, y: 0, w: 1, h: 1 } }];
 const run = (L) => transcribeParts(whole(L), { explain: true });
+
+test('stacked glyph fractions assemble before row ordering', () => {
+  const fraction = (base, value) => row(base, 80, [G(';','EHboNB',0.2), G(value,'EHboNB',0.5), G('3','EHboNB',0.5), G(';','EHboNB',0.2)]);
+  const L = layer([row(100,50,[M('=')]), fraction(88.5,'#'), fraction(111.5,'$')], { lines: [{x0:79,x1:95,y:97,lw:0.3}] });
+  const blocks = run(L);
+  assert.ok(Array.isArray(blocks));
+  assert.ok(blocks.some(b => (b.latex || '').includes('\\frac{\\frac{')));
+  assert.equal(blocks.filter(b=>b.type==='math').length,1);
+});
+
+test('single-letter conjugate does not consume previous prose or superscripts', () => {
+  const L = layer([row(83,80,[T('방')]), row(100,60,[G('α','HyhwpEQ',0.6),G('+','HyhwpEQ',0.8)]),
+    row(97.4,80,[G('\ue06d','HyhwpEQ',0.664)]),row(100,80,[G('α','HyhwpEQ',0.636)]),
+    row(100,95,[G('=','HyhwpEQ',0.7),G('\ue0e5','HyhwpEQ',0.5)]),row(95.3,108,[G('2','HyhwpEQ',0.5)],6.8)]);
+  const text = JSON.stringify(run(L));
+  assert.ok(text.includes('방'));
+  assert.ok(text.includes('overline') || text.includes('bar {alpha}'));
+  assert.ok(text.includes('a^{2}'));
+  assert.ok(!text.includes('over {alpha}'));
+});
+
+test('uncertain stacked fraction preserves only the formula as a figure', () => {
+  const L = layer([row(60,50,[T('본문')]),
+    row(88.5,80,[G(';','EHboNB',0.2),G('#','EHboNB',0.5),G('3','EHboNB',0.5),G(';','EHboNB',0.2)]),
+    row(111.5,80,[M('=2')])], { lines: [{x0:79,x1:95,y:97,lw:0.3}] });
+  const blocks = run(L);
+  assert.ok(blocks.some(b=>b.type==='para' && b.text==='본문'));
+  const figs = blocks.filter(b=>b.type==='figure');
+  assert.equal(figs.length,1);
+  assert.ok(figs[0].box.h < 0.1);
+});
+
+test('known answer PUA precedes private glyph rejection', () => {
+  assert.deepEqual(decodeGlyph('\ue34c', 'YDVYMjOStd'), { k: 'text', v: '답' });
+  assert.equal(decodeGlyph('\uf888', 'YDVYMjOStd'), null);
+  assert.equal(run(layer([row(100,50,[T('\ue34c '),M('3')])]))[0].text, '답 $3$');
+});
+
+test('EHboNB U+008C denominator a with shifted numerator one', () => {
+  assert.deepEqual(decodeGlyph('\u008c','EHboNB'),{k:'fr',part:'den',v:'a'});
+  const r = run(layer([row(100,50,[M('x='),G(';','EHboNB',0.2),G('\u008c','EHboNB',0.54),G('!','EHboNB',0),G(';','EHboNB',0.2)])]));
+  assert.equal(r[0].latex,'x=\\frac{1}{a}');
+});
+
+test('Hancom factorial uses existing verified PUA mapping', () => {
+  for (const fam of ['HyhwpEQ','HancomEQN']) assert.equal(decodeGlyph('\ue03e',fam).v,'!');
+  assert.match(run(layer([row(100,50,[G('3','HyhwpEQ',0.5),G('\ue03e','HyhwpEQ',0.5)])]))[0].eq,/3!/);
+});
+
+test('known Hancom percent, gamma and ellipsis do not force prose fallback', () => {
+  assert.equal(decodeGlyph('\ue042','HyhwpEQ').v,'\\%');
+  assert.equal(decodeGlyph('\ue09f','HyhwpEQ').v,'\\gamma');
+  assert.equal(decodeGlyph('⋯','HyhwpEQ').v,'\\cdots');
+  const r = run(layer([row(100,50,[T('비율 '),G('3','HyhwpEQ',0.5),G('\ue042','HyhwpEQ',0.8),T('이다')])]));
+  assert.match(r[0].text,/비율.*3.*이다/);
+  assert.ok(!r.some(b=>b.type==='figure'));
+});
+
+test('exam furniture removal preserves body numbers and unmarked pages', () => {
+  const L = layer([row(39,30,[T('4')],14),row(40,50,[T('수학 영역')]),row(100,50,[T('4. 본문 20')]),row(740,290,[T('20')]),row(745,60,[M('42')])]);
+  const before = L.glyphs.length;
+  assert.equal(stripExamFurniture(L).glyphs.map(g=>g.c).join(''),'4. 본문 2042');
+  assert.equal(L.glyphs.length,before);
+  const plain = layer([row(40,50,[T('20')]),row(740,50,[T('20')])]);
+  assert.equal(stripExamFurniture(plain),plain);
+});
+
+test('header band preserves math superscripts, small text digits and lower body numbers', () => {
+  const header = row(100,200,[T('수학 영역')],20);
+  const math = [...row(111,50,[G('x','HyhwpEQ',0.5)],10),...row(99,56,[G('2','HyhwpEQ',0.5)],6)];
+  const small = row(98,100,[T('5')],6);
+  const lower = row(112,150,[T('10')],16);
+  const L = layer([header,math,small,lower]);
+  const clean = stripExamFurniture(L);
+  for (const g of [...math,...small,...lower]) assert.ok(clean.glyphs.some(a=>a.c===g.c&&a.x0===g.x0&&a.base===g.base),`${g.c}@${g.base}`);
+});
+
+test('small body digit co-clustered with the subject heading is not a folio', () => {
+  const L=layer([row(100,200,[T('수학 영역')],20),row(100,50,[T('5')],6)]);
+  assert.equal(stripExamFurniture(L).glyphs.map(g=>g.c).join(''),'5');
+});
+
+test('notice removal consumes only its enclosing frame, preserving question graphics', () => {
+  const frame = {x0:40,x1:550,y0:580,y1:690,segs:4,rect:true,closed:true,curve:false};
+  const graph = {x0:300,x1:390,y0:460,y1:540,segs:4,closed:true,curve:true};
+  const L = layer([row(40,50,[T('수학 영역')]),row(600,50,[T('※ 확인 사항')]),row(630,50,[T('안내')])],{
+    shapes:[frame,graph],lines:[{x0:40,x1:550,y:580,lw:.4},{x0:40,x1:550,y:690,lw:.4},{x0:300,x1:390,y:500,lw:.4}]
+  });
+  const clean=stripExamFurniture(L);
+  assert.deepEqual(clean.shapes,[graph]);
+  assert.deepEqual(clean.lines,[L.lines[2]]);
+  assert.equal(L.shapes.length,2);
+});
+
+test('notice frame emitted as duplicated sides is removed without nearby diagram lines', () => {
+  const sides=[40,550,550,40].map(x=>({x0:x,x1:x,y0:580,y1:690,segs:1,rect:true,closed:true,curve:false}));
+  const graph={x0:570,x1:590,y0:600,y1:680,curve:true,segs:4};
+  const L=layer([row(40,50,[T('수학 영역')]),row(600,50,[T('※ 확인 사항')]),row(630,50,[T('안내')])],{
+    shapes:[...sides,graph],lines:[{x0:40,x1:550,y:580,lw:.4},{x0:40,x1:550,y:690,lw:.4},{x0:570,x1:590,y:640,lw:.4}]
+  });
+  const clean=stripExamFurniture(L);
+  assert.deepEqual(clean.shapes,[graph]);
+  assert.deepEqual(clean.lines,[L.lines[2]]);
+});
+
+test('exam end notice excluded only in bottom band', () => {
+  const L = layer([row(40,50,[T('(확률과 통계) 3')]),row(100,50,[T('※ 확인 사항')]),row(600,50,[T('※ 확인 사항')]),row(630,50,[T('수험 안내')])]);
+  assert.equal(stripExamFurniture(L).glyphs.map(g=>g.c).join(''),'※ 확인 사항');
+});
+
+test('Hancom prose condition marker remains text', () => {
+  const r = run(layer([row(100,50,[T('(가) '),G('x','HyhwpEQ',0.5),T('는 양수')])]));
+  assert.match(r[0].text,/^\(가\)/);
+  assert.doesNotMatch(r[0].text,/left/);
+});
+
+test('closing equation parenthesis before particle ga is not a condition marker', () => {
+  const H = s => [...s].map(c=>[c,'HyhwpEQ','',.5]);
+  const r = run(layer([row(100,50,[T('범위 '),T('('),H('0≤x≤2π'),T(')가 주어진다')])]));
+  const text=importAnswerBlocks(r).map(p=>p.runs?runsText(p.runs):p.text||'').join('');
+  assert.ok(text.includes('0≤x≤2π'),text);
+  assert.ok(!text.includes(' pi')&&!text.includes('<='),text);
+});
+
+test('five vertically stacked choices start at a single first marker', () => {
+  const r = run(layer([...'①②③④⑤'].map((c,i)=>row(100+i*25,50,[T(c+' '),M(String(i+1))]))));
+  assert.equal(r.length,1);
+  assert.equal(r[0].type,'choices');
+  assert.equal(r[0].items.length,5);
+});
+
+test('separate frame sides do not turn condition prose into a figure', () => {
+  const L = layer([row(100,60,[T('(가) '),M('x=1')]),row(130,60,[T('(나) '),M('y=2')])],{
+    lines:[{x0:50,x1:250,y:80,lw:0.4},{x0:50,x1:250,y:150,lw:0.4}],
+    shapes:[50,250,250,50].map(x=>({x0:x,x1:x,y0:80,y1:150,segs:1,closed:true,rect:true,curve:false,image:false}))
+  });
+  const r = run(L);
+  assert.ok(Array.isArray(r));
+  assert.ok(!r.some(b=>b.type==='figure'));
+  assert.ok(r.some(b=>b.text?.includes('(가)')));
+  assert.ok(r.some(b=>b.text?.includes('(나)')));
+});
 
 test('한컴 늘인 분수 글리프는 ink 높이로 복원, 불명 조각은 별도 그림', () => {
   const H = (s) => M(s).map(([c, , style, w]) => [c, 'HyhwpEQ', style, w]);

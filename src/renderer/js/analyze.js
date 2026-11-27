@@ -1,3 +1,4 @@
+import { filterExamHeaderCandidates } from './exam-furniture.js';
 import { numberContextGrid, filterNumberContexts } from './number-context.js';
 import { numberModelTrust, mergeNumberModelAnchors, NUMBER_MODEL_PROBE_PAGES, NUMBER_MODEL_PROBE_BOXES } from './number-model.js';
 import { classifyPageRole, classifyAnswerTableShape } from './pagerole.js';
@@ -225,7 +226,7 @@ async function readPage(src, index, { forceOcr = false, ocrFallback = true, deep
   page.pageRole = classifyPageRole({ tokens, grid });
   const runText = () => {
     const ex = extractCandidates(tokens, layout, { passages, answer });
-    page.candidates = answer ? filterAnswerCandidates(ex.candidates, tokens) : ex.candidates;
+    page.candidates = filterExamHeaderCandidates(answer ? filterAnswerCandidates(ex.candidates, tokens) : ex.candidates, tokens);
     page.headings = ex.headings;
     page.ranges = ex.ranges;
     page.answerBoxes = ex.answerBoxes;
