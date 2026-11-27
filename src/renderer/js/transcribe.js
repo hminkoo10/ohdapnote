@@ -216,6 +216,21 @@ export async function transcribeAiBlocks(pending, {
   if (rejected) throw rejected.reason;
 }
 
+/** 일시적인 스캔 오류는 그림부터 새로 만들어 한 번만 다시 시도. */
+async function retryScan(run, signal) {
+  try { return await run(); }
+  catch (err) {
+    if (err?.name === 'AbortError' || signal.aborted) throw err;
+    await new Promise((resolve, reject) => {
+      const cancel = () => { clearTimeout(timer); reject(new DOMException('취소됨', 'AbortError')); };
+      const timer = setTimeout(() => { signal.removeEventListener('abort', cancel); resolve(); }, 1000);
+      signal.addEventListener('abort', cancel, { once: true });
+    });
+    if (signal.aborted) throw new DOMException('취소됨', 'AbortError');
+    return run();
+  }
+}
+
 /**
  * 0) 디지털 PDF 문항은 PDF 글자로 바로 옮김 (어느 방식이든)
  * 1) 스캔본 문항은 내보내기 설정 convert 에 따라
@@ -249,16 +264,13 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
   }
   const scanned = work.filter((b) => !fromPdf.has(b) && !edited(b)?.blocks?.length);
   const mode = CONVERT_MODES[opts.convert] ? opts.convert : 'mix';
-  let ocrReady = false;
-  if (scanned.length && mode !== 'ai') {
-    try {
-      ocrReady = !!(await api.mathocrStatus())?.installed;
-    } catch (err) {
-      console.warn('수식 인식 모델 상태를 알지 못함', err);
-    }
-  }
   const useAi = scanned.length > 0 && mode !== 'ocr' && geminiReady();
-  const useOcr = scanned.length > 0 && mode !== 'ai' && ocrReady;
+  let ocrCheck;
+  const checkOcr = () => (ocrCheck ||= (async () => {
+    try { return !!(await api.mathocrStatus())?.installed; }
+    catch (err) { console.warn('수식 인식 모델 상태를 알지 못함', err); return false; }
+  })());
+  let useOcr = scanned.length > 0 && (mode !== 'ai' || !useAi) && await checkOcr();
   const { batch: batchSize, ...ai } = aiOptions();
   const abort = new AbortController();
   const storeOf = (block) => transcripts.get(bookOf.get(block.src));
@@ -273,6 +285,9 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
   const needsAi = (b) => useAi && !has(aiResult(b)) && !(has(ocrResult(b)) && ocrResult(b).reliable);
   const missing = scanned.filter((b) => !resultOf(b)).length;
   if (missing && !useAi && !useOcr) noConvertToast(mode, missing);
+  if (missing && mode === 'ai' && !useAi && useOcr) {
+    toast('정밀 인식을 쓸 수 없어서 이 컴퓨터에서 옮겨요.', { timeout: 8000, actions: [{ label: '설정 열기', onClick: () => nav.settings() }] });
+  }
   let ui = null;
   const releases = [];
   const settled = new Set();
@@ -313,15 +328,17 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
     }
     if (ui) settle(b, reason === '읽은 내용이 없음' || reason === '한도 초과' ? 'empty' : 'err', `${reason} → 그림으로`, attempted.get(b) || '');
   };
-  /** AI 가 못 옮긴 문항: OCR 결과가 있으면 그것으로, 없으면 그림으로 */
+  /** AI 가 못 옮긴 문항: 저장된 OCR 결과 또는 이 컴퓨터 OCR로 복귀. */
+  const aiOcrFallback = new Map();
   const aiFailed = (b, why) => {
     attempted.set(b, 'AI');
     if (has(ocrResult(b))) settle(b, 'ok', `${why} → 스캔 인식`, 'OCR');
+    else if (mode === 'ai') aiOcrFallback.set(b, why);
     else failed(b, why === '읽은 내용이 없음' || why === '한도 초과' ? 'empty' : 'err', why, 'AI');
   };
 
   /** 이 컴퓨터에서 옮기기 (문항 둘을 겹쳐서: 하나가 수식을 인식하는 동안 다음 문항의 글자를 읽음) */
-  const runOcr = async (pending) => {
+  const runOcr = async (pending, allowAi = useAi) => {
     let next = 0;
     const worker = async () => {
       while (next < pending.length) {
@@ -331,11 +348,13 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
         const row = ui.row(b);
         row.set('run', '글자 읽는 중…', 'OCR');
         try {
-          const canvas = await renderStack(blockSegs(b), TRANSCRIBE_WIDTH);
-          const r = await scanTranscribe(canvas, { number: b.item.passage ? '' : b.item.number, signal: abort.signal, api, onStatus: (msg) => row.set('run', msg, 'OCR') });
+          const r = await retryScan(async () => {
+            const canvas = await renderStack(blockSegs(b), TRANSCRIBE_WIDTH);
+            return scanTranscribe(canvas, { number: b.item.passage ? '' : b.item.number, signal: abort.signal, api, onStatus: (msg) => row.set('run', msg, 'OCR') });
+          }, abort.signal);
           if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
           if (!r.blocks.length) {
-            if (useAi) row.set('wait', '읽은 내용이 없음 → 정밀 인식', 'OCR');
+            if (allowAi) row.set('wait', '읽은 내용이 없음 → 정밀 인식', 'OCR');
             else failed(b, 'empty', '읽은 내용이 없음', 'OCR');
             continue;
           }
@@ -344,12 +363,12 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
           store.dirty = true;
           const what = `글자·수식으로 옮김${r.formulas ? ` (수식 ${r.formulas}개)` : ''}`;
           if (r.reliable) settle(b, 'ok', what, 'OCR');
-          else if (useAi) row.set('wait', `미덥지 않음 (${r.reasons[0]}) → 정밀 인식`, 'OCR');
+          else if (allowAi) row.set('wait', `미덥지 않음 (${r.reasons[0]}) → 정밀 인식`, 'OCR');
           else settle(b, 'ok', `${what} · 확인 필요 (${r.reasons[0]})`, 'OCR');
         } catch (err) {
           if (err?.name === 'AbortError' || abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
           console.warn('OCR 로 옮기지 못함', err);
-          if (useAi) row.set('wait', `${err.message} → 정밀 인식`, 'OCR');
+          if (allowAi) row.set('wait', `${err.message} → 정밀 인식`, 'OCR');
           else failed(b, 'err', err, 'OCR');
         }
       }
@@ -415,6 +434,20 @@ export async function exportHwpx(blocks, entries, opts, info, job) {
         // OCR 결과가 미덥지 않은 문항(과 OCR 이 못 읽은 문항)만 AI 로
         const toAi = scanned.filter((b) => !settled.has(b) && needsAi(b));
         if (toAi.length) await runAi(toAi);
+        if (aiOcrFallback.size) {
+          useOcr = await checkOcr();
+          if (abort.signal.aborted) throw new DOMException('취소됨', 'AbortError');
+          if (useOcr) {
+            const pending = [];
+            for (const b of aiOcrFallback.keys()) {
+              const r = ocrResult(b);
+              if (has(r)) settle(b, 'ok', `저장해 둔 결과${r.reliable ? '' : ' · 확인 필요'}`, 'OCR');
+              else pending.push(b);
+            }
+            await runOcr(pending, false);
+          }
+          else for (const [b, why] of aiOcrFallback) failed(b, why === '읽은 내용이 없음' || why === '한도 초과' ? 'empty' : 'err', why, 'AI');
+        }
         for (const b of scanned) if (!settled.has(b)) settle(b, 'empty', '그림으로', '');
         ui.status('한글 문서를 만드는 중…');
       }

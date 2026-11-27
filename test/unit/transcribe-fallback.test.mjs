@@ -27,29 +27,31 @@ function element(tag, attrs, ...children) {
   };
 }
 
-function fixture({ scan = success, ai = false, ocr = true, respond, initial = {}, pdf = null, crop, background = false } = {}) {
+function fixture({ scan = success, ai = false, ocr = true, respond, initial = {}, pdf = null, crop, render, background = false } = {}) {
+  const toastOptions = [];
+  const renders = [], delays = [], statusCalls = [], aiCalls = [];
   const calls = [], saves = [], dialogs = [], toasts = [], pictures = [], warnings = [];
   const src = { pages: [{ w: 600, h: 800 }], files: ['synthetic.pdf'], getMathLayer: async () => pdf ? {} : null };
   const block = (number, kind = 'problem', extra = {}) => ({
     kind, role: kind, src, item: { id: `${kind}-${number}`, number: String(number), rects: [{ page: 0, x: 0, y: 0, w: 1, h: 0.2 }] }, ...extra,
   });
   const context = {
-    h: element, toast: (msg) => toasts.push(msg), itemName, CONVERT_MODES, blockSegs, transcriptKey, pickTranscript, trimTranscripts, countLow,
+    h: element, toast: (msg, opts) => { toasts.push(msg); toastOptions.push(opts); }, itemName, CONVERT_MODES, blockSegs, transcriptKey, pickTranscript, trimTranscripts, countLow,
     buildHwpx: (opts) => buildHwpx({ ...opts, renderSeg: async (seg) => {
       pictures.push(seg.block.item.id);
       return { ext: 'png', bytes: new Uint8Array([137, 80, 78, 71]), pxW: 600, pxH: 160 };
     } }),
-    renderStack: async (segs) => ({ block: segs[0].block, width: 600, height: 160 }),
+    renderStack: async (segs) => { renders.push(segs[0].block.item.id); return render ? render(segs) : { block: segs[0].block, width: 600, height: 160 }; },
     cropImage: crop || (async () => ({ ext: 'png', bytes: new Uint8Array([137, 80, 78, 71]), pxW: 20, pxH: 20 })),
     scanTranscribe: async (canvas, opts) => { calls.push(canvas.block.item.id); return scan(canvas, opts); },
-    geminiTranscribeBatch: async (images) => respond ? respond(images) : images.map(() => [para('AI 합성 문항')]),
+    geminiTranscribeBatch: async (images) => { aiCalls.push(...images); return respond ? respond(images) : images.map(() => [para('AI 합성 문항')]); },
     canvasToBase64Jpeg: (canvas) => canvas.block.item.id,
     groupMathReview: (list) => list, transcribeParts: (parts) => typeof pdf === 'function' ? pdf(parts) : pdf,
     subjectOf: () => 'math',
     api: {
       getTranscripts: async () => ({ items: initial }),
       saveTranscripts: async (_bookId, data) => { saves.push(plain(data)); return true; },
-      mathocrStatus: async () => ({ installed: ocr }),
+      mathocrStatus: async () => { statusCalls.push(true); return { installed: ocr }; },
     },
     state: {}, nav: {}, geminiReady: () => ai, aiOff: () => false,
     aiOptions: () => ({ batch: 2, concurrency: 1 }), aiLabel: () => 'AI', aiModelText: () => '합성 모델',
@@ -59,11 +61,12 @@ function fixture({ scan = success, ai = false, ocr = true, respond, initial = {}
         finish(r) { this.results.push(r); return background; }, close() { this.closes++; } };
       dialogs.push(dialog); return dialog;
     },
+    setTimeout: (fn, ms) => { delays.push(ms); return setTimeout(fn, 0); }, clearTimeout,
     AbortController, DOMException, Error, console: { warn: (...args) => warnings.push(args) },
   };
-  const exports = runInNewContext(`${source}\n;({ exportHwpx, fallbackSummary, fallbackHint: typeof fallbackHint === 'function' ? fallbackHint : undefined })`, context);
+  const exports = runInNewContext(`${source}\n;({ exportHwpx, retryScan, fallbackSummary, fallbackHint: typeof fallbackHint === 'function' ? fallbackHint : undefined })`, context);
   return {
-    ...exports, block, src, calls, saves, dialogs, toasts, pictures, warnings,
+    ...exports, block, src, renders, delays, statusCalls, aiCalls, toastOptions, calls, saves, dialogs, toasts, pictures, warnings,
     async run(blocks, options = {}) {
       return exports.exportHwpx(blocks, [{ bookId: 'synthetic-book', bookObj: {}, src: { problem: src, answer: src } }],
         { convert: 'ocr', ...options }, {}, { key: 'synthetic', sig: 'synthetic' });
@@ -166,7 +169,7 @@ test('인식 수단 없음·설정상 쓰지 않는 수단·원본 영역 없음
 
 test('AI 실패·빈 결과는 목록에 넣지만 OCR 결과가 남으면 실패 그림이 아님', async () => {
   for (const result of [new Error('합성 AI 실패'), []]) {
-    const f = fixture({ ai: true, respond: (images) => images.map(() => result) });
+    const f = fixture({ ai: true, ocr: false, respond: (images) => images.map(() => result) });
     const bytes = await f.run([f.block(3)], { convert: 'ai' });
     assert.equal(bytes.fallbacks.length, 1);
     assert.equal(bytes.stats.picture, 1);
@@ -197,7 +200,7 @@ test('다시 내보내기: 실패한 스캔만 재인식, 성공한 스캔은 �
   assert.deepEqual(Object.keys(f.saves.at(-1).items), [`${transcriptKey(blocks[0])}|local`]);
   fail = false;
   const second = await f.run(blocks);
-  assert.deepEqual(f.calls, ['problem-1', 'problem-2', 'problem-2']);
+  assert.deepEqual(f.calls, ['problem-1', 'problem-2', 'problem-2', 'problem-2']);
   assert.deepEqual(plain(second.fallbacks), []);
   assert.deepEqual(second.stats, { text: 2, picture: 0 });
 });
@@ -254,7 +257,7 @@ test('실제 스캔 경로: 수식 API 실패·예외와 글자 읽기 예외를
     const bytes = await f.run([f.block(1)]);
     assert.equal(bytes.stats.picture, 1);
     assert.equal(bytes.fallbacks.length, 1);
-    assert.equal(mathCalls, failure === 'text-throw' ? 0 : 1);
+    assert.equal(mathCalls, failure === 'text-throw' ? 0 : 2);
     assert.equal(bytes.fallbacks[0].reason, { 'math-result': '수식을 인식하지 못했어요.', 'math-throw': '합성 수식 인식 실패', 'text-throw': '합성 글자 읽기 실패' }[failure]);
     assert.equal(f.saves.length, 0);
   }
@@ -274,7 +277,7 @@ test('그림 자르기 예외는 까닭을 남기되 내용 있는 자동 결과
 });
 
 test('원격 AI의 메모리 오류에는 이 컴퓨터의 프로그램을 닫으라는 안내 없음', async () => {
-  const f = fixture({ ai: true, respond: (images) => images.map(() => new Error('out of memory')) });
+  const f = fixture({ ai: true, ocr: false, respond: (images) => images.map(() => new Error('out of memory')) });
   const bytes = await f.run([f.block(1)], { convert: 'ai' });
   assert.equal(bytes.fallbacks.length, 1);
   assert.equal(bytes.fallbacks[0].hint, undefined);
@@ -424,4 +427,107 @@ test('노트·문제은행 저장 알림: 합성한 로컬 메모리 부족 오�
     assert.equal((saved.match(/다른 프로그램/g) || []).length, 1);
     assert.equal(result.bytes.stats.picture, 1);
   }
+});
+
+test('retry scan or render once', async () => {
+  for (const stage of ['scan', 'render']) {
+    let attempts = 0;
+    const f = fixture(stage === 'scan' ? { scan: () => {
+      if (++attempts === 1) throw new Error('temporary scan');
+      return success();
+    } } : { render: (segs) => {
+      if (++attempts === 1) throw new Error('temporary render');
+      return { block: segs[0].block, width: 600, height: 160 };
+    } });
+    const bytes = await f.run([f.block(1)]);
+    assert.deepEqual(bytes.stats, { text: 1, picture: 0 });
+    assert.deepEqual(f.renders, ['problem-1', 'problem-1']);
+    assert.deepEqual(f.delays, [1000]);
+    assert.equal(attempts, 2);
+  }
+});
+
+test('persistent failure and cancellation', async () => {
+  const f = fixture({ scan: () => { throw new Error('persistent scan'); } });
+  const bytes = await f.run([f.block(1)]);
+  assert.deepEqual(f.calls, ['problem-1', 'problem-1']);
+  assert.equal(bytes.stats.picture, 1);
+  assert.equal(bytes.fallbacks[0].reason, 'persistent scan');
+  for (const stage of ['scan', 'render']) {
+    const fail = () => { throw new DOMException('cancel', 'AbortError'); };
+    const f = fixture(stage === 'scan' ? { scan: fail } : { render: fail });
+    await assert.rejects(f.run([f.block(1)]), { name: 'AbortError' });
+    assert.equal(f.renders.length, 1);
+    assert.deepEqual(f.delays, []);
+  }
+});
+
+test('AI unavailable uses local OCR', async () => {
+  const f = fixture();
+  const bytes = await f.run([f.block(1), f.block(2)], { convert: 'ai' });
+  assert.deepEqual(bytes.stats, { text: 2, picture: 0 });
+  assert.equal(f.statusCalls.length, 1);
+  assert.deepEqual(f.toasts, ['정밀 인식을 쓸 수 없어서 이 컴퓨터에서 옮겨요.']);
+  assert.equal(f.toastOptions[0].actions[0].label, '설정 열기');
+  assert.deepEqual(f.aiCalls, []);
+});
+
+test('AI failure uses OCR only for failed items', async () => {
+  for (const reliable of [true, false]) {
+    const f = fixture({ ai: true,
+      respond: (images) => images.map((id) => id === 'problem-1' ? [para('AI success')] : new Error('AI failure')),
+      scan: () => ({ ...success(), reliable, reasons: reliable ? [] : ['검토'] }),
+    });
+    const bytes = await f.run([f.block(1), f.block(2), f.block(3)], { convert: 'ai' });
+    assert.deepEqual(bytes.stats, { text: 3, picture: 0 });
+    assert.deepEqual(f.calls, ['problem-2', 'problem-3']);
+    assert.equal(f.statusCalls.length, 1);
+    assert.deepEqual(plain(bytes.fallbacks), []);
+    const rows = f.dialogs[0].body.querySelector('div.gem-list').children;
+    assert.equal(rows[1].dataset.state, 'ok');
+    assert.equal(rows[1].querySelector('.gem-path').dataset.path, 'OCR');
+    assert.equal(rows[1].querySelector('.gem-msg').textContent.includes('확인 필요'), !reliable);
+  }
+  const f = fixture({ ai: true });
+  await f.run([f.block(1)], { convert: 'ai' });
+  assert.equal(f.statusCalls.length, 0);
+});
+
+test('OCR only never sends externally', async () => {
+  const f = fixture({ ai: true, ocr: false });
+  const bytes = await f.run([f.block(1)], { convert: 'ocr' });
+  assert.equal(bytes.stats.picture, 1);
+  assert.deepEqual(f.aiCalls, []);
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.toasts.length, 1);
+  assert.match(f.toasts[0], /수식 인식 모델.*그림으로/);
+});
+
+
+test('cancellation during retry delay stops before second attempt', async () => {
+  const f = fixture(), controller = new AbortController();
+  let attempts = 0;
+  const run = f.retryScan(async () => { attempts++; throw new Error('temporary'); }, controller.signal);
+  for (let i = 0; i < 20 && !f.delays.length; i++) await Promise.resolve();
+  assert.deepEqual(f.delays, [1000]);
+  controller.abort();
+  await assert.rejects(run, { name: 'AbortError' });
+  assert.equal(attempts, 1);
+  assert.deepEqual(f.delays, [1000]);
+});
+
+test('AI failure reuses stored local result and does not retry empty OCR', async () => {
+  const initial = {};
+  const f = fixture({ ai: true, initial, respond: (images) => images.map(() => new Error('AI failed')) });
+  const b = f.block(1);
+  initial[`${transcriptKey(b)}|local`] = { ...success(), model: 'ocr' };
+  const bytes = await f.run([b], { convert: 'ai' });
+  assert.equal(bytes.stats.text, 1);
+  assert.deepEqual(f.calls, []);
+  const empty = fixture({ ai: true, respond: (images) => images.map(() => []), scan: () => ({ ...success(), blocks: [] }) });
+  const result = await empty.run([empty.block(1)], { convert: 'ai' });
+  assert.equal(result.stats.picture, 1);
+  assert.equal(result.fallbacks[0].reason, '읽은 내용이 없음');
+  assert.equal(empty.calls.length, 1);
+  assert.deepEqual(empty.delays, []);
 });
